@@ -796,22 +796,36 @@ namespace CSGOSkinAPI.Services
 
             var stickers = new List<Sticker>();
             using var reader = await command.ExecuteReaderAsync();
+            
+            var itemIdOrd = reader.GetOrdinal("itemid");
+            var slotOrd = reader.GetOrdinal("slot");
+            var stickerIdOrd = reader.GetOrdinal("sticker_id");
+            var wearOrd = reader.GetOrdinal("wear");
+            var scaleOrd = reader.GetOrdinal("scale");
+            var rotationOrd = reader.GetOrdinal("rotation");
+            var tintIdOrd = reader.GetOrdinal("tint_id");
+            var offsetXOrd = reader.GetOrdinal("offset_x");
+            var offsetYOrd = reader.GetOrdinal("offset_y");
+            var offsetZOrd = reader.GetOrdinal("offset_z");
+            var patternOrd = reader.GetOrdinal("pattern");
+            var highlightReelOrd = reader.GetOrdinal("highlight_reel");
+            
             while (await reader.ReadAsync())
             {
                 stickers.Add(new Sticker
                 {
-                    ItemId = (ulong)reader.GetInt64(reader.GetOrdinal("itemid")),
-                    Slot = (uint)reader.GetInt32(reader.GetOrdinal("slot")),
-                    StickerId = (uint)reader.GetInt32(reader.GetOrdinal("sticker_id")),
-                    Wear = reader.GetFloat(reader.GetOrdinal("wear")),
-                    Scale = reader.IsDBNull(reader.GetOrdinal("scale")) ? null : reader.GetFloat(reader.GetOrdinal("scale")),
-                    Rotation = reader.IsDBNull(reader.GetOrdinal("rotation")) ? null : reader.GetFloat(reader.GetOrdinal("rotation")),
-                    TintId = reader.IsDBNull(reader.GetOrdinal("tint_id")) ? null : (uint)reader.GetInt32(reader.GetOrdinal("tint_id")),
-                    OffsetX = reader.IsDBNull(reader.GetOrdinal("offset_x")) ? null : reader.GetFloat(reader.GetOrdinal("offset_x")),
-                    OffsetY = reader.IsDBNull(reader.GetOrdinal("offset_y")) ? null : reader.GetFloat(reader.GetOrdinal("offset_y")),
-                    OffsetZ = reader.IsDBNull(reader.GetOrdinal("offset_z")) ? null : reader.GetFloat(reader.GetOrdinal("offset_z")),
-                    Pattern = reader.IsDBNull(reader.GetOrdinal("pattern")) ? null : (uint)reader.GetInt32(reader.GetOrdinal("pattern")),
-                    HighlightReel = reader.IsDBNull(reader.GetOrdinal("highlight_reel")) ? null : (uint)reader.GetInt32(reader.GetOrdinal("highlight_reel"))
+                    ItemId = (ulong)reader.GetInt64(itemIdOrd),
+                    Slot = (uint)reader.GetInt32(slotOrd),
+                    StickerId = (uint)reader.GetInt32(stickerIdOrd),
+                    Wear = reader.GetFloat(wearOrd),
+                    Scale = reader.IsDBNull(scaleOrd) ? null : reader.GetFloat(scaleOrd),
+                    Rotation = reader.IsDBNull(rotationOrd) ? null : reader.GetFloat(rotationOrd),
+                    TintId = reader.IsDBNull(tintIdOrd) ? null : (uint)reader.GetInt32(tintIdOrd),
+                    OffsetX = reader.IsDBNull(offsetXOrd) ? null : reader.GetFloat(offsetXOrd),
+                    OffsetY = reader.IsDBNull(offsetYOrd) ? null : reader.GetFloat(offsetYOrd),
+                    OffsetZ = reader.IsDBNull(offsetZOrd) ? null : reader.GetFloat(offsetZOrd),
+                    Pattern = reader.IsDBNull(patternOrd) ? null : (uint)reader.GetInt32(patternOrd),
+                    HighlightReel = reader.IsDBNull(highlightReelOrd) ? null : (uint)reader.GetInt32(highlightReelOrd)
                 });
             }
 
@@ -830,18 +844,29 @@ namespace CSGOSkinAPI.Services
             using var reader = await command.ExecuteReaderAsync();
             if (await reader.ReadAsync())
             {
+                var itemIdOrd = reader.GetOrdinal("itemid");
+                var defIndexOrd = reader.GetOrdinal("defindex");
+                var paintIndexOrd = reader.GetOrdinal("paintindex");
+                var rarityOrd = reader.GetOrdinal("rarity");
+                var qualityOrd = reader.GetOrdinal("quality");
+                var paintWearOrd = reader.GetOrdinal("paintwear");
+                var paintSeedOrd = reader.GetOrdinal("paintseed");
+                var inventoryOrd = reader.GetOrdinal("inventory");
+                var originOrd = reader.GetOrdinal("origin");
+                var statTrakOrd = reader.GetOrdinal("stattrak");
+                
                 var item = new ItemInfo
                 {
-                    ItemId = (ulong)reader.GetInt64(reader.GetOrdinal("itemid")),
-                    DefIndex = reader.GetInt32(reader.GetOrdinal("defindex")),
-                    PaintIndex = reader.GetInt32(reader.GetOrdinal("paintindex")),
-                    Rarity = reader.GetInt32(reader.GetOrdinal("rarity")),
-                    Quality = reader.GetInt32(reader.GetOrdinal("quality")),
-                    PaintWear = reader.GetDouble(reader.GetOrdinal("paintwear")),
-                    PaintSeed = reader.GetInt32(reader.GetOrdinal("paintseed")),
-                    Inventory = reader.GetInt64(reader.GetOrdinal("inventory")),
-                    Origin = reader.GetInt32(reader.GetOrdinal("origin")),
-                    StatTrak = reader.GetInt32(reader.GetOrdinal("stattrak")) == 1,
+                    ItemId = (ulong)reader.GetInt64(itemIdOrd),
+                    DefIndex = reader.GetInt32(defIndexOrd),
+                    PaintIndex = reader.GetInt32(paintIndexOrd),
+                    Rarity = reader.GetInt32(rarityOrd),
+                    Quality = reader.GetInt32(qualityOrd),
+                    PaintWear = reader.GetDouble(paintWearOrd),
+                    PaintSeed = reader.GetInt32(paintSeedOrd),
+                    Inventory = reader.GetInt64(inventoryOrd),
+                    Origin = reader.GetInt32(originOrd),
+                    StatTrak = reader.GetInt32(statTrakOrd) == 1,
                     Stickers = await GetStickersAsync(itemId, true),
                     Keychains = await GetStickersAsync(itemId, false)
                 };
