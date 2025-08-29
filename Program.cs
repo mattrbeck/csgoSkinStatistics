@@ -89,16 +89,14 @@ namespace CSGOSkinAPI.Controllers
 
                     if (directItem != null)
                     {
-                        constDataService.FinalizeAttributes(directItem);
-                        return Ok(CreateResponse(directItem, s, a, d, m));
+                        return Ok(CreateResponse(directItem, constDataService, s, a, d, m));
                     }
                 }
 
                 var existingItem = await dbService.GetItemAsync(a);
                 if (existingItem != null)
                 {
-                    constDataService.FinalizeAttributes(existingItem);
-                    return Ok(CreateResponse(existingItem, s, a, d, m));
+                    return Ok(CreateResponse(existingItem, constDataService, s, a, d, m));
                 }
 
                 var itemInfo = await steamService.GetItemInfoAsync(s, a, d, m);
@@ -109,8 +107,7 @@ namespace CSGOSkinAPI.Controllers
                 }
 
                 await dbService.SaveItemWithExtrasAsync(itemInfo);
-                constDataService.FinalizeAttributes(itemInfo);
-                return Ok(CreateResponse(itemInfo, s, a, d, m));
+                return Ok(CreateResponse(itemInfo, constDataService, s, a, d, m));
             }
             catch (Exception ex)
             {
@@ -120,7 +117,7 @@ namespace CSGOSkinAPI.Controllers
             }
         }
 
-        private static (ulong s, ulong a, ulong d, ulong m, ItemInfo? directItem)? ParseInspectUrl(string url)
+        private static (ulong s, ulong a, ulong d, ulong m, CEconItemPreviewDataBlock? directItem)? ParseInspectUrl(string url)
         {
             var decodedUrl = HttpUtility.UrlDecode(url);
             var match = InspectUrlRegex().Match(decodedUrl);
@@ -135,8 +132,7 @@ namespace CSGOSkinAPI.Controllers
                 // Read the bytes, dropping the leading null byte and the trailing 4 checksum bytes
                 var hexBytes = Convert.FromHexString(hexMatch.Groups[1].Value)[1..^4];
                 var itemInfoProto = Serializer.Deserialize<CEconItemPreviewDataBlock>(new MemoryStream(hexBytes));
-                var itemInfo = SteamService.CreateItemInfoFromPreviewData(itemInfoProto);
-                return (0, itemInfo.ItemId, 0, 0, itemInfo);
+                return (0, itemInfoProto.itemid, 0, 0, itemInfoProto);
             }
 
             ulong s = 0, a, d, m = 0;
@@ -155,34 +151,36 @@ namespace CSGOSkinAPI.Controllers
             return (s, a, d, m, null);
         }
 
-        private static object CreateResponse(ItemInfo item, ulong s, ulong a, ulong d, ulong m)
+        private static object CreateResponse(CEconItemPreviewDataBlock item, ConstDataService constDataService, ulong s, ulong a, ulong d, ulong m)
         {
+            var itemInfo = constDataService.GetItemInformation(item);
+            
             return new
             {
-                itemid = item.ItemId,
-                defindex = item.DefIndex,
-                paintindex = item.PaintIndex,
-                rarity = item.Rarity,
-                quality = item.Quality,
-                paintwear = item.PaintWear,
-                paintseed = item.PaintSeed,
-                inventory = item.Inventory,
-                origin = item.Origin,
-                stattrak = item.StatTrak,
-                special = item.Special,
-                weapon = item.Weapon,
-                skin = item.Skin,
-                stickers = item.Stickers.Select(s => new
+                item.itemid,
+                item.defindex,
+                item.paintindex,
+                item.rarity,
+                item.quality,
+                paintwear = (double)BitConverter.ToSingle(BitConverter.GetBytes(item.paintwear)),
+                item.paintseed,
+                item.inventory,
+                item.origin,
+                stattrak = item.ShouldSerializekilleatervalue(),
+                special = itemInfo.Special,
+                weapon = itemInfo.Type,
+                skin = itemInfo.Name,
+                stickers = item.stickers.Select(s => new
                 {
-                    slot = s.Slot,
-                    sticker_id = s.StickerId,
-                    wear = s.Wear
+                    s.slot,
+                    s.sticker_id,
+                    s.wear
                 }).ToArray(),
-                keychains = item.Keychains.Select(k => new
+                keychains = item.keychains.Select(k => new
                 {
-                    slot = k.Slot,
-                    sticker_id = k.StickerId,
-                    wear = k.Wear
+                    k.slot,
+                    k.sticker_id,
+                    k.wear
                 }).ToArray(),
                 s,
                 a,
@@ -227,53 +225,9 @@ namespace CSGOSkinAPI.Services
     {
         private readonly List<SteamAccountManager> _accountManagers = [];
         private bool _isRunning = false;
-        private readonly ConcurrentDictionary<ulong, List<TaskCompletionSource<ItemInfo?>>> _pendingRequests = new();
+        private readonly ConcurrentDictionary<ulong, List<TaskCompletionSource<CEconItemPreviewDataBlock?>>> _pendingRequests = new();
         private int _currentAccountIndex = 0;
 
-        public static ItemInfo CreateItemInfoFromPreviewData(CEconItemPreviewDataBlock itemInfoProto)
-        {
-            var paintwear = BitConverter.ToSingle(BitConverter.GetBytes(itemInfoProto.paintwear), 0);
-            return new ItemInfo
-            {
-                ItemId = itemInfoProto.itemid,
-                DefIndex = (int)itemInfoProto.defindex,
-                PaintIndex = (int)itemInfoProto.paintindex,
-                Rarity = (int)itemInfoProto.rarity,
-                Quality = (int)itemInfoProto.quality,
-                PaintWear = paintwear,
-                PaintSeed = (int)itemInfoProto.paintseed,
-                Inventory = itemInfoProto.inventory,
-                Origin = (int)itemInfoProto.origin,
-                StatTrak = itemInfoProto.ShouldSerializekilleatervalue(),
-                Stickers = CreateStickersFromProto(itemInfoProto.itemid, itemInfoProto.stickers),
-                Keychains = CreateStickersFromProto(itemInfoProto.itemid, itemInfoProto.keychains)
-            };
-        }
-
-        public static List<Sticker> CreateStickersFromProto(ulong itemid, List<CEconItemPreviewDataBlock.Sticker> stickerProtos)
-        {
-            var stickers = new List<Sticker>();
-            foreach (var stickerProto in stickerProtos)
-            {
-                Console.WriteLine(stickerProto.ShouldSerializewear());
-                stickers.Add(new Sticker
-                {
-                    ItemId = itemid,
-                    Slot = stickerProto.slot,
-                    StickerId = stickerProto.sticker_id,
-                    Wear = stickerProto.wear,
-                    Scale = stickerProto.ShouldSerializescale() ? stickerProto.scale : null,
-                    Rotation = stickerProto.ShouldSerializerotation() ? stickerProto.rotation : null,
-                    TintId = stickerProto.ShouldSerializetint_id() ? stickerProto.tint_id : null,
-                    OffsetX = stickerProto.ShouldSerializeoffset_x() ? stickerProto.offset_x : null,
-                    OffsetY = stickerProto.ShouldSerializeoffset_y() ? stickerProto.offset_y : null,
-                    OffsetZ = stickerProto.ShouldSerializeoffset_z() ? stickerProto.offset_z : null,
-                    Pattern = stickerProto.ShouldSerializepattern() ? stickerProto.pattern : null,
-                    HighlightReel = stickerProto.ShouldSerializehighlight_reel() ? stickerProto.highlight_reel : null
-                });
-            }
-            return stickers;
-        }
 
         public SteamService()
         {
@@ -334,7 +288,7 @@ namespace CSGOSkinAPI.Services
             }
         }
 
-        public async Task<ItemInfo?> GetItemInfoAsync(ulong s, ulong a, ulong d, ulong m)
+        public async Task<CEconItemPreviewDataBlock?> GetItemInfoAsync(ulong s, ulong a, ulong d, ulong m)
         {
             if (_accountManagers.Count == 0)
             {
@@ -353,7 +307,7 @@ namespace CSGOSkinAPI.Services
             if (_pendingRequests.ContainsKey(jobId))
             {
                 Console.WriteLine($"Request for itemid {jobId} already pending, waiting for existing request...");
-                var tcs = new TaskCompletionSource<ItemInfo?>();
+                var tcs = new TaskCompletionSource<CEconItemPreviewDataBlock?>();
                 _pendingRequests.AddOrUpdate(jobId,
                     [tcs],
                     (key, existingList) =>
@@ -401,9 +355,9 @@ namespace CSGOSkinAPI.Services
             return null;
         }
 
-        private async Task<ItemInfo?> TryGCRequestWithAccount(SteamAccountManager accountManager, ulong s, ulong a, ulong d, ulong m, ulong jobId)
+        private async Task<CEconItemPreviewDataBlock?> TryGCRequestWithAccount(SteamAccountManager accountManager, ulong s, ulong a, ulong d, ulong m, ulong jobId)
         {
-            var tcs = new TaskCompletionSource<ItemInfo?>();
+            var tcs = new TaskCompletionSource<CEconItemPreviewDataBlock?>();
 
             _pendingRequests.AddOrUpdate(jobId,
                 [tcs],
@@ -664,10 +618,10 @@ namespace CSGOSkinAPI.Services
 
                 if (_pendingRequests.TryGetValue(responseItemId, out var pendingList))
                 {
-                    ItemInfo? item = null;
+                    CEconItemPreviewDataBlock? item = null;
                     if (response.Body.iteminfo != null)
                     {
-                        item = CreateItemInfoFromPreviewData(response.Body.iteminfo);
+                        item = response.Body.iteminfo;
                     }
                     else
                     {
@@ -783,7 +737,7 @@ namespace CSGOSkinAPI.Services
             }
         }
 
-        public async Task<List<Sticker>> GetStickersAsync(ulong itemId, bool stickersTable)
+        public async Task<List<CEconItemPreviewDataBlock.Sticker>> GetStickersAsync(ulong itemId, bool stickersTable)
         {
             using var connection = new SqliteConnection(ConnectionString);
             await connection.OpenAsync();
@@ -794,7 +748,7 @@ namespace CSGOSkinAPI.Services
             using var command = new SqliteCommand(query, connection);
             command.Parameters.AddWithValue("@itemid", (long)itemId);
 
-            var stickers = new List<Sticker>();
+            var stickers = new List<CEconItemPreviewDataBlock.Sticker>();
             using var reader = await command.ExecuteReaderAsync();
             
             var itemIdOrd = reader.GetOrdinal("itemid");
@@ -812,27 +766,27 @@ namespace CSGOSkinAPI.Services
             
             while (await reader.ReadAsync())
             {
-                stickers.Add(new Sticker
+                var sticker = new CEconItemPreviewDataBlock.Sticker
                 {
-                    ItemId = (ulong)reader.GetInt64(itemIdOrd),
-                    Slot = (uint)reader.GetInt32(slotOrd),
-                    StickerId = (uint)reader.GetInt32(stickerIdOrd),
-                    Wear = reader.GetFloat(wearOrd),
-                    Scale = reader.IsDBNull(scaleOrd) ? null : reader.GetFloat(scaleOrd),
-                    Rotation = reader.IsDBNull(rotationOrd) ? null : reader.GetFloat(rotationOrd),
-                    TintId = reader.IsDBNull(tintIdOrd) ? null : (uint)reader.GetInt32(tintIdOrd),
-                    OffsetX = reader.IsDBNull(offsetXOrd) ? null : reader.GetFloat(offsetXOrd),
-                    OffsetY = reader.IsDBNull(offsetYOrd) ? null : reader.GetFloat(offsetYOrd),
-                    OffsetZ = reader.IsDBNull(offsetZOrd) ? null : reader.GetFloat(offsetZOrd),
-                    Pattern = reader.IsDBNull(patternOrd) ? null : (uint)reader.GetInt32(patternOrd),
-                    HighlightReel = reader.IsDBNull(highlightReelOrd) ? null : (uint)reader.GetInt32(highlightReelOrd)
-                });
+                    slot = (uint)reader.GetInt32(slotOrd),
+                    sticker_id = (uint)reader.GetInt32(stickerIdOrd),
+                    wear = reader.GetFloat(wearOrd)
+                };
+                if (!reader.IsDBNull(scaleOrd)) sticker.scale = reader.GetFloat(scaleOrd);
+                if (!reader.IsDBNull(rotationOrd)) sticker.rotation = reader.GetFloat(rotationOrd);
+                if (!reader.IsDBNull(tintIdOrd)) sticker.tint_id = (uint)reader.GetInt32(tintIdOrd);
+                if (!reader.IsDBNull(offsetXOrd)) sticker.offset_x = reader.GetFloat(offsetXOrd);
+                if (!reader.IsDBNull(offsetYOrd)) sticker.offset_y = reader.GetFloat(offsetYOrd);
+                if (!reader.IsDBNull(offsetZOrd)) sticker.offset_z = reader.GetFloat(offsetZOrd);
+                if (!reader.IsDBNull(patternOrd)) sticker.pattern = (uint)reader.GetInt32(patternOrd);
+                if (!reader.IsDBNull(highlightReelOrd)) sticker.highlight_reel = (uint)reader.GetInt32(highlightReelOrd);
+                stickers.Add(sticker);
             }
 
             return stickers;
         }
 
-        public async Task<ItemInfo?> GetItemAsync(ulong itemId)
+        public async Task<CEconItemPreviewDataBlock?> GetItemAsync(ulong itemId)
         {
             using var connection = new SqliteConnection(ConnectionString);
             await connection.OpenAsync();
@@ -854,22 +808,23 @@ namespace CSGOSkinAPI.Services
                 var inventoryOrd = reader.GetOrdinal("inventory");
                 var originOrd = reader.GetOrdinal("origin");
                 var statTrakOrd = reader.GetOrdinal("stattrak");
-                
-                var item = new ItemInfo
+
+                var item = new CEconItemPreviewDataBlock
                 {
-                    ItemId = (ulong)reader.GetInt64(itemIdOrd),
-                    DefIndex = reader.GetInt32(defIndexOrd),
-                    PaintIndex = reader.GetInt32(paintIndexOrd),
-                    Rarity = reader.GetInt32(rarityOrd),
-                    Quality = reader.GetInt32(qualityOrd),
-                    PaintWear = reader.GetDouble(paintWearOrd),
-                    PaintSeed = reader.GetInt32(paintSeedOrd),
-                    Inventory = reader.GetInt64(inventoryOrd),
-                    Origin = reader.GetInt32(originOrd),
-                    StatTrak = reader.GetInt32(statTrakOrd) == 1,
-                    Stickers = await GetStickersAsync(itemId, true),
-                    Keychains = await GetStickersAsync(itemId, false)
+                    itemid = (ulong)reader.GetInt64(itemIdOrd),
+                    defindex = (uint)reader.GetInt32(defIndexOrd),
+                    paintindex = (uint)reader.GetInt32(paintIndexOrd),
+                    rarity = (uint)reader.GetInt32(rarityOrd),
+                    quality = (uint)reader.GetInt32(qualityOrd),
+                    paintwear = BitConverter.ToUInt32(BitConverter.GetBytes((float)reader.GetDouble(paintWearOrd))),
+                    paintseed = (uint)reader.GetInt32(paintSeedOrd),
+                    inventory = (uint)reader.GetInt64(inventoryOrd),
+                    origin = (uint)reader.GetInt32(originOrd)
                 };
+                // Setting killeatervalue to non-null makes it serializable, which is used as a flag for StatTrak items.
+                if (reader.GetInt32(statTrakOrd) == 1) item.killeatervalue = 0;
+                item.stickers.AddRange(await GetStickersAsync(itemId, true));
+                item.keychains.AddRange(await GetStickersAsync(itemId, false));
 
                 return item;
             }
@@ -877,7 +832,7 @@ namespace CSGOSkinAPI.Services
             return null;
         }
 
-        public async Task SaveItemAsync(ItemInfo item)
+        public async Task SaveItemAsync(CEconItemPreviewDataBlock item)
         {
             using var connection = new SqliteConnection(ConnectionString);
             await connection.OpenAsync();
@@ -888,36 +843,36 @@ namespace CSGOSkinAPI.Services
                 VALUES (@itemid, @defindex, @paintindex, @rarity, @quality, @paintwear, @paintseed, @inventory, @origin, @stattrak)";
 
             using var command = new SqliteCommand(insert, connection);
-            command.Parameters.AddWithValue("@itemid", (long)item.ItemId);
-            command.Parameters.AddWithValue("@defindex", item.DefIndex);
-            command.Parameters.AddWithValue("@paintindex", item.PaintIndex);
-            command.Parameters.AddWithValue("@rarity", item.Rarity);
-            command.Parameters.AddWithValue("@quality", item.Quality);
-            command.Parameters.AddWithValue("@paintwear", item.PaintWear);
-            command.Parameters.AddWithValue("@paintseed", item.PaintSeed);
-            command.Parameters.AddWithValue("@inventory", item.Inventory);
-            command.Parameters.AddWithValue("@origin", item.Origin);
-            command.Parameters.AddWithValue("@stattrak", item.StatTrak ? 1 : 0);
+            command.Parameters.AddWithValue("@itemid", (long)item.itemid);
+            command.Parameters.AddWithValue("@defindex", item.defindex);
+            command.Parameters.AddWithValue("@paintindex", item.paintindex);
+            command.Parameters.AddWithValue("@rarity", item.rarity);
+            command.Parameters.AddWithValue("@quality", item.quality);
+            command.Parameters.AddWithValue("@paintwear", BitConverter.ToSingle(BitConverter.GetBytes(item.paintwear)));
+            command.Parameters.AddWithValue("@paintseed", item.paintseed);
+            command.Parameters.AddWithValue("@inventory", item.inventory);
+            command.Parameters.AddWithValue("@origin", item.origin);
+            command.Parameters.AddWithValue("@stattrak", item.ShouldSerializekilleatervalue() ? 1 : 0);
 
             await command.ExecuteNonQueryAsync();
         }
 
-        public async Task SaveItemWithExtrasAsync(ItemInfo itemInfo)
+        public async Task SaveItemWithExtrasAsync(CEconItemPreviewDataBlock itemInfo)
         {
             await SaveItemAsync(itemInfo);
 
-            if (itemInfo.Stickers?.Count > 0)
+            if (itemInfo.stickers?.Count > 0)
             {
-                await SaveStickersAsync(itemInfo.ItemId, itemInfo.Stickers, true);
+                await SaveStickersAsync(itemInfo.itemid, itemInfo.stickers, true);
             }
 
-            if (itemInfo.Keychains?.Count > 0)
+            if (itemInfo.keychains?.Count > 0)
             {
-                await SaveStickersAsync(itemInfo.ItemId, itemInfo.Keychains, false);
+                await SaveStickersAsync(itemInfo.itemid, itemInfo.keychains, false);
             }
         }
 
-        private async Task SaveStickersAsync(ulong itemId, List<Sticker> items, bool stickerTable)
+        private async Task SaveStickersAsync(ulong itemId, List<CEconItemPreviewDataBlock.Sticker> items, bool stickerTable)
         {
             using var connection = new SqliteConnection(ConnectionString);
             await connection.OpenAsync();
@@ -934,17 +889,17 @@ namespace CSGOSkinAPI.Services
             {
                 using var insertCommand = new SqliteCommand(insertQuery, connection);
                 insertCommand.Parameters.AddWithValue("@itemid", (long)itemId);
-                insertCommand.Parameters.AddWithValue("@slot", item.Slot);
-                insertCommand.Parameters.AddWithValue("@sticker_id", item.StickerId);
-                insertCommand.Parameters.AddWithValue("@wear", item.Wear);
-                insertCommand.Parameters.AddWithValue("@scale", item.Scale != null ? item.Scale : DBNull.Value);
-                insertCommand.Parameters.AddWithValue("@rotation", item.Rotation != null ? item.Rotation : DBNull.Value);
-                insertCommand.Parameters.AddWithValue("@tint_id", item.TintId != null ? item.TintId : DBNull.Value);
-                insertCommand.Parameters.AddWithValue("@offset_x", item.OffsetX != null ? item.OffsetX : DBNull.Value);
-                insertCommand.Parameters.AddWithValue("@offset_y", item.OffsetY != null ? item.OffsetY : DBNull.Value);
-                insertCommand.Parameters.AddWithValue("@offset_z", item.OffsetZ != null ? item.OffsetZ : DBNull.Value);
-                insertCommand.Parameters.AddWithValue("@pattern", item.Pattern != null ? item.Pattern : DBNull.Value);
-                insertCommand.Parameters.AddWithValue("@highlight_reel", item.HighlightReel != null ? item.HighlightReel : DBNull.Value);
+                insertCommand.Parameters.AddWithValue("@slot", item.slot);
+                insertCommand.Parameters.AddWithValue("@sticker_id", item.sticker_id);
+                insertCommand.Parameters.AddWithValue("@wear", item.wear);
+                insertCommand.Parameters.AddWithValue("@scale", item.ShouldSerializescale() ? item.scale : DBNull.Value);
+                insertCommand.Parameters.AddWithValue("@rotation", item.ShouldSerializerotation() ? item.rotation : DBNull.Value);
+                insertCommand.Parameters.AddWithValue("@tint_id", item.ShouldSerializetint_id() ? item.tint_id : DBNull.Value);
+                insertCommand.Parameters.AddWithValue("@offset_x", item.ShouldSerializeoffset_x() ? item.offset_x : DBNull.Value);
+                insertCommand.Parameters.AddWithValue("@offset_y", item.ShouldSerializeoffset_y() ? item.offset_y : DBNull.Value);
+                insertCommand.Parameters.AddWithValue("@offset_z", item.ShouldSerializeoffset_z() ? item.offset_z : DBNull.Value);
+                insertCommand.Parameters.AddWithValue("@pattern", item.ShouldSerializepattern() ? item.pattern : DBNull.Value);
+                insertCommand.Parameters.AddWithValue("@highlight_reel", item.ShouldSerializehighlight_reel() ? item.highlight_reel : DBNull.Value);
                 await insertCommand.ExecuteNonQueryAsync();
             }
         }
@@ -965,15 +920,12 @@ namespace CSGOSkinAPI.Services
             _constData = JsonSerializer.Deserialize<ConstData>(jsonString, JsonOptions) ?? new ConstData();
         }
 
-        public void FinalizeAttributes(ItemInfo item)
+        public ItemInformation GetItemInformation(CEconItemPreviewDataBlock item)
         {
-            var weaponType = GetWeaponName(item.DefIndex);
-            var pattern = GetPatternName(item.PaintIndex);
-            var paintseed = item.PaintSeed;
-            var paintindex = item.PaintIndex;
-
-            item.Weapon = weaponType;
-            item.Skin = pattern;
+            var weaponType = GetWeaponName(item.defindex);
+            var pattern = GetPatternName(item.paintindex);
+            var paintseed = (int)item.paintseed;
+            var paintindex = (int)item.paintindex;
 
             var special = "";
 
@@ -998,7 +950,12 @@ namespace CSGOSkinAPI.Services
                 special = _constData.Kimonos[paintseed.ToString()];
             }
 
-            item.Special = special;
+            return new ItemInformation
+            {
+                Name = pattern,
+                Type = weaponType,
+                Special = special
+            };
         }
 
         private double GetFadePercent(int paintseed, bool reversed)
@@ -1014,7 +971,7 @@ namespace CSGOSkinAPI.Services
             return scaledFadePercent;
         }
 
-        private string GetWeaponName(int defIndex)
+        private string GetWeaponName(uint defIndex)
         {
             if (_constData.Items?.TryGetValue(defIndex.ToString(), out var weapon) == true)
             {
@@ -1025,7 +982,7 @@ namespace CSGOSkinAPI.Services
             return "";
         }
 
-        private string GetPatternName(int paintIndex)
+        private string GetPatternName(uint paintIndex)
         {
             if (_constData.Skins?.TryGetValue(paintIndex.ToString(), out var pattern) == true)
             {
@@ -1049,6 +1006,13 @@ namespace CSGOSkinAPI.Models
         public string Password { get; set; } = string.Empty;
     }
 
+    public class ItemInformation
+    {
+        public string Name { get; set; } = string.Empty;
+        public string Type { get; set; } = string.Empty;
+        public string Special { get; set; } = string.Empty;
+    }
+
     public class ConstData
     {
         public Dictionary<string, string>? Items { get; set; }
@@ -1064,41 +1028,5 @@ namespace CSGOSkinAPI.Models
         public Dictionary<string, string>? Kimonos { get; set; }
 
         public static readonly string[] FireIceNames = ["", "1st Max", "2nd Max", "3rd Max", "4th Max", "5th Max", "6th Max", "7th Max", "8th Max", "9th Max", "10th Max", "FFI"];
-
-    }
-
-    public class Sticker
-    {
-        public ulong ItemId { get; set; } // Foreign key to ItemInfo
-        public uint Slot { get; set; }
-        public uint StickerId { get; set; }
-        public float Wear { get; set; }
-        public float? Scale { get; set; }
-        public float? Rotation { get; set; }
-        public uint? TintId { get; set; }
-        public float? OffsetX { get; set; }
-        public float? OffsetY { get; set; }
-        public float? OffsetZ { get; set; }
-        public uint? Pattern { get; set; }
-        public uint? HighlightReel { get; set; }
-    }
-
-    public class ItemInfo
-    {
-        public ulong ItemId { get; set; }
-        public int DefIndex { get; set; }
-        public int PaintIndex { get; set; }
-        public int Rarity { get; set; }
-        public int Quality { get; set; }
-        public double PaintWear { get; set; }
-        public int PaintSeed { get; set; }
-        public long Inventory { get; set; }
-        public int Origin { get; set; }
-        public bool StatTrak { get; set; }
-        public string? Special { get; set; }
-        public string? Weapon { get; set; }
-        public string? Skin { get; set; }
-        public List<Sticker> Stickers { get; set; } = [];
-        public List<Sticker> Keychains { get; set; } = [];
     }
 }
