@@ -699,8 +699,7 @@ namespace CSGOSkinAPI.Services
                     paintindex INTEGER NOT NULL,
                     rarity INTEGER NOT NULL,
                     quality INTEGER NOT NULL,
-                    paintwear REAL NOT NULL,
-                    paintwear_uint INTEGER,
+                    paintwear INTEGER NOT NULL,
                     paintseed INTEGER NOT NULL,
                     inventory INTEGER NOT NULL,
                     origin INTEGER NOT NULL,
@@ -710,20 +709,6 @@ namespace CSGOSkinAPI.Services
             using var command = new SqliteCommand(createTableCommand, connection);
             await command.ExecuteNonQueryAsync();
 
-            // Add the paintwear_uint column if it doesn't exist
-            var addColumnCommand = @"
-                ALTER TABLE searches 
-                ADD COLUMN paintwear_uint INTEGER";
-            
-            try
-            {
-                using var alterCommand = new SqliteCommand(addColumnCommand, connection);
-                await alterCommand.ExecuteNonQueryAsync();
-            }
-            catch (SqliteException)
-            {
-                // Column already exists, ignore the error
-            }
 
             foreach (var tableName in new[] { "stickers", "keychains" })
             {
@@ -819,7 +804,7 @@ namespace CSGOSkinAPI.Services
                 var paintIndexOrd = reader.GetOrdinal("paintindex");
                 var rarityOrd = reader.GetOrdinal("rarity");
                 var qualityOrd = reader.GetOrdinal("quality");
-                var paintWearOrd = reader.GetOrdinal("paintwear_uint");
+                var paintWearOrd = reader.GetOrdinal("paintwear");
                 var paintSeedOrd = reader.GetOrdinal("paintseed");
                 var inventoryOrd = reader.GetOrdinal("inventory");
                 var originOrd = reader.GetOrdinal("origin");
@@ -855,8 +840,8 @@ namespace CSGOSkinAPI.Services
 
             var insert = @"
                 INSERT OR REPLACE INTO searches 
-                (itemid, defindex, paintindex, rarity, quality, paintwear, paintwear_uint, paintseed, inventory, origin, stattrak)
-                VALUES (@itemid, @defindex, @paintindex, @rarity, @quality, @paintwear, @paintwear_uint, @paintseed, @inventory, @origin, @stattrak)";
+                (itemid, defindex, paintindex, rarity, quality, paintwear, paintseed, inventory, origin, stattrak)
+                VALUES (@itemid, @defindex, @paintindex, @rarity, @quality, @paintwear, @paintseed, @inventory, @origin, @stattrak)";
 
             using var command = new SqliteCommand(insert, connection);
             command.Parameters.AddWithValue("@itemid", (long)item.itemid);
@@ -865,7 +850,6 @@ namespace CSGOSkinAPI.Services
             command.Parameters.AddWithValue("@rarity", item.rarity);
             command.Parameters.AddWithValue("@quality", item.quality);
             command.Parameters.AddWithValue("@paintwear", item.paintwear);
-            command.Parameters.AddWithValue("@paintwear_uint", item.paintwear);
             command.Parameters.AddWithValue("@paintseed", item.paintseed);
             command.Parameters.AddWithValue("@inventory", item.inventory);
             command.Parameters.AddWithValue("@origin", item.origin);
