@@ -2,8 +2,14 @@ let elements;
 const inspectPrefix =
   "steam://rungame/730/76561202255233023/+csgo_econ_action_preview%20";
 
-function getWearFromFloat(floatValue) {
-  const float = parseFloat(floatValue);
+function uint32ToFloat32(uint32Value) {
+  const buffer = new ArrayBuffer(4);
+  const view = new DataView(buffer);
+  view.setUint32(0, uint32Value);
+  return view.getFloat32(0);
+}
+
+function getWearFromFloat(float) {
   if (float < 0.07) return "Factory New";
   if (float < 0.15) return "Minimal Wear";
   if (float < 0.38) return "Field-Tested";
@@ -42,8 +48,10 @@ function display(iteminfo, url, loadTime) {
     if (iteminfo.quality === 12) {
       elements.itemName.classList.add("souvenir");
     }
-    elements.itemPaintwear.innerHTML = iteminfo.paintwear;
-    elements.itemWear.innerHTML = getWearFromFloat(iteminfo.paintwear);
+    const paintwearFloat = typeof iteminfo.paintwear === 'number' && iteminfo.paintwear > 1 ? 
+      uint32ToFloat32(iteminfo.paintwear) : parseFloat(iteminfo.paintwear);
+    elements.itemPaintwear.innerHTML = paintwearFloat;
+    elements.itemWear.innerHTML = getWearFromFloat(paintwearFloat);
     elements.itemRarity.innerHTML = getRarityFromNumber(iteminfo.rarity);
     if (iteminfo.itemid == 0) {
       elements.itemItemid.innerHTML = "Unknown";
