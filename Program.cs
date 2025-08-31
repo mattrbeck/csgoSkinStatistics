@@ -182,6 +182,27 @@ namespace CSGOSkinAPI.Controllers
                             var rarityTag = description.tags?.FirstOrDefault(t => t.category == "Rarity");
                             var qualityTag = description.tags?.FirstOrDefault(t => t.category == "Quality");
                             
+                            // Try to extract itemid from inspect link and check if we have this item in database
+                            var parsed = ParseInspectUrl(inspectLink);
+                            object? existingItemData = null;
+                            
+                            if (parsed.HasValue)
+                            {
+                                var (s, a, d, m, directItem) = parsed.Value;
+                                if (directItem != null)
+                                {
+                                    existingItemData = CreateResponse(directItem, constDataService, s, a, d, m);
+                                }
+                                else
+                                {
+                                    var existingItem = await dbService.GetItemAsync(a);
+                                    if (existingItem != null)
+                                    {
+                                        existingItemData = CreateResponse(existingItem, constDataService, s, a, d, m);
+                                    }
+                                }
+                            }
+                            
                             csgoItems.Add(new
                             {
                                 name = description.name ?? description.market_name ?? "Unknown Item",
@@ -194,7 +215,8 @@ namespace CSGOSkinAPI.Controllers
                                 name_color = description.name_color,
                                 assetid = asset.assetid,
                                 classid = asset.classid,
-                                instanceid = asset.instanceid
+                                instanceid = asset.instanceid,
+                                existing_data = existingItemData
                             });
                         }
                     }
