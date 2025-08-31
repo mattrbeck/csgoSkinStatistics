@@ -117,6 +117,126 @@ namespace CSGOSkinAPI.Controllers
             }
         }
 
+        [HttpGet("inventory")]
+        public async Task<IActionResult> GetInventoryData([FromQuery] string steamid)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(steamid))
+                {
+                    return BadRequest(new { error = "Steam ID is required" });
+                }
+
+                if (!ulong.TryParse(steamid, out var steamId) || !IsValidSteamId64(steamId))
+                {
+                    return BadRequest(new { error = "Invalid Steam ID format" });
+                }
+
+                using var httpClient = new HttpClient();
+                httpClient.Timeout = TimeSpan.FromSeconds(10);
+                
+                var inventoryUrl = $"https://steamcommunity.com/inventory/{steamid}/730/2?l=english&count=2000";
+                Console.WriteLine($"Fetching inventory from: {inventoryUrl}");
+                
+                var response = await httpClient.GetAsync(inventoryUrl);
+                if (!response.IsSuccessStatusCode)
+                {
+                    if (response.StatusCode == System.Net.HttpStatusCode.Forbidden)
+                    {
+                        return BadRequest(new { error = "Inventory is private or user does not exist" });
+                    }
+                    return BadRequest(new { error = $"Failed to fetch inventory: {response.StatusCode}" });
+                }
+
+                var jsonContent = await response.Content.ReadAsStringAsync();
+                if (string.IsNullOrEmpty(jsonContent))
+                {
+                    return BadRequest(new { error = "Empty response from Steam API" });
+                }
+
+                var inventoryData = JsonSerializer.Deserialize<SteamInventoryResponse>(jsonContent);
+                if (inventoryData?.assets == null || inventoryData.descriptions == null)
+                {
+                    return BadRequest(new { error = "Invalid inventory data or inventory is empty" });
+                }
+
+                var csgoItems = new List<object>();
+                foreach (var asset in inventoryData.assets)
+                {
+                    var description = inventoryData.descriptions.FirstOrDefault(d => 
+                        d.classid == asset.classid && d.instanceid == asset.instanceid);
+                    
+                    if (description?.actions != null)
+                    {
+                        var inspectAction = description.actions.FirstOrDefault(a => 
+                            a.link?.Contains("csgo_econ_action_preview") == true);
+                            
+                        if (inspectAction?.link != null)
+                        {
+                            var inspectLink = inspectAction.link
+                                .Replace("%owner_steamid%", steamid)
+                                .Replace("%assetid%", asset.assetid);
+                                
+                            // Extract wear and rarity from tags
+                            var wearTag = description.tags?.FirstOrDefault(t => t.category == "Exterior");
+                            var rarityTag = description.tags?.FirstOrDefault(t => t.category == "Rarity");
+                            var qualityTag = description.tags?.FirstOrDefault(t => t.category == "Quality");
+                            
+                            csgoItems.Add(new
+                            {
+                                name = description.name ?? description.market_name ?? "Unknown Item",
+                                market_name = description.market_name,
+                                type = description.type,
+                                inspect_link = inspectLink,
+                                wear = wearTag?.localized_tag_name,
+                                rarity = rarityTag?.localized_tag_name,
+                                quality = qualityTag?.localized_tag_name,
+                                name_color = description.name_color,
+                                assetid = asset.assetid,
+                                classid = asset.classid,
+                                instanceid = asset.instanceid
+                            });
+                        }
+                    }
+                }
+
+                var result = new
+                {
+                    total = inventoryData.total,
+                    success = 1,
+                    csgo_items = csgoItems
+                };
+
+                Console.WriteLine($"Successfully parsed {csgoItems.Count} CS2 items from {inventoryData.total} total items");
+                return Ok(result);
+            }
+            catch (TaskCanceledException)
+            {
+                return BadRequest(new { error = "Request timed out while fetching inventory" });
+            }
+            catch (HttpRequestException ex)
+            {
+                Console.WriteLine($"HTTP error fetching inventory: {ex.Message}");
+                return BadRequest(new { error = "Failed to connect to Steam API" });
+            }
+            catch (JsonException ex)
+            {
+                Console.WriteLine($"JSON parsing error: {ex.Message}");
+                return BadRequest(new { error = "Invalid response from Steam API" });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error in GetInventoryData: {ex.Message}");
+                Console.WriteLine(ex.StackTrace);
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
+
+        private static bool IsValidSteamId64(ulong steamId)
+        {
+            return steamId.ToString().StartsWith("76561") && steamId.ToString().Length == 17;
+        }
+
         private static (ulong s, ulong a, ulong d, ulong m, CEconItemPreviewDataBlock? directItem)? ParseInspectUrl(string url)
         {
             var decodedUrl = HttpUtility.UrlDecode(url);
@@ -1029,5 +1149,125 @@ namespace CSGOSkinAPI.Models
         public Dictionary<string, string>? Kimonos { get; set; }
 
         public static readonly string[] FireIceNames = ["", "1st Max", "2nd Max", "3rd Max", "4th Max", "5th Max", "6th Max", "7th Max", "8th Max", "9th Max", "10th Max", "FFI"];
+    }
+
+    public class SteamInventoryResponse
+    {
+        [JsonPropertyName("assets")]
+        public List<SteamAsset>? assets { get; set; }
+        
+        [JsonPropertyName("descriptions")]
+        public List<SteamDescription>? descriptions { get; set; }
+        
+        [JsonPropertyName("total_inventory_count")]
+        public int total { get; set; }
+        
+        [JsonPropertyName("success")]
+        public int success { get; set; }
+    }
+
+    public class SteamAsset
+    {
+        [JsonPropertyName("appid")]
+        public int appid { get; set; }
+        
+        [JsonPropertyName("contextid")]
+        public string? contextid { get; set; }
+        
+        [JsonPropertyName("assetid")]
+        public string assetid { get; set; } = string.Empty;
+        
+        [JsonPropertyName("classid")]
+        public string classid { get; set; } = string.Empty;
+        
+        [JsonPropertyName("instanceid")]
+        public string instanceid { get; set; } = string.Empty;
+        
+        [JsonPropertyName("amount")]
+        public string? amount { get; set; }
+    }
+
+    public class SteamDescription
+    {
+        [JsonPropertyName("appid")]
+        public int appid { get; set; }
+        
+        [JsonPropertyName("classid")]
+        public string classid { get; set; } = string.Empty;
+        
+        [JsonPropertyName("instanceid")]
+        public string instanceid { get; set; } = string.Empty;
+        
+        [JsonPropertyName("name")]
+        public string? name { get; set; }
+        
+        [JsonPropertyName("market_name")]
+        public string? market_name { get; set; }
+        
+        [JsonPropertyName("market_hash_name")]
+        public string? market_hash_name { get; set; }
+        
+        [JsonPropertyName("name_color")]
+        public string? name_color { get; set; }
+        
+        [JsonPropertyName("background_color")]
+        public string? background_color { get; set; }
+        
+        [JsonPropertyName("type")]
+        public string? type { get; set; }
+        
+        [JsonPropertyName("tradable")]
+        public int tradable { get; set; }
+        
+        [JsonPropertyName("marketable")]
+        public int marketable { get; set; }
+        
+        [JsonPropertyName("commodity")]
+        public int commodity { get; set; }
+        
+        [JsonPropertyName("market_tradable_restriction")]
+        public int market_tradable_restriction { get; set; }
+        
+        [JsonPropertyName("actions")]
+        public List<SteamAction>? actions { get; set; }
+        
+        [JsonPropertyName("descriptions")]
+        public List<SteamItemDescription>? descriptions { get; set; }
+        
+        [JsonPropertyName("tags")]
+        public List<SteamTag>? tags { get; set; }
+    }
+
+    public class SteamAction
+    {
+        [JsonPropertyName("link")]
+        public string? link { get; set; }
+        
+        [JsonPropertyName("name")]
+        public string? name { get; set; }
+    }
+
+    public class SteamItemDescription
+    {
+        [JsonPropertyName("type")]
+        public string? type { get; set; }
+        
+        [JsonPropertyName("value")]
+        public string? value { get; set; }
+    }
+
+    public class SteamTag
+    {
+        [JsonPropertyName("category")]
+        public string? category { get; set; }
+        
+        [JsonPropertyName("internal_name")]
+        public string? internal_name { get; set; }
+        
+        [JsonPropertyName("localized_category_name")]
+        public string? localized_category_name { get; set; }
+        
+        [JsonPropertyName("localized_tag_name")]
+        public string? localized_tag_name { get; set; }
     }
 }
