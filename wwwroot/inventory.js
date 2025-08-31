@@ -51,7 +51,7 @@ class InventoryItem extends HTMLElement {
         animation: shimmer 2s infinite;
         top: 0;
       }
-      :host(.loaded) {
+      :host(.loaded:not([style*="border-left-color"])) {
         border-left-color: var(--pop, #2ecc71);
       }
       :host(.error) {
@@ -201,7 +201,45 @@ class InventoryItem extends HTMLElement {
       inspectElement.href = this.itemData.inspect_link || '#';
     }
 
+    // Set border color based on item rarity
+    const rarityColor = this.getRarityColor(this.itemData.rarity);
+    if (rarityColor) {
+      this.style.setProperty('border-left-color', rarityColor);
+    }
+
     this.classList.add('loading');
+  }
+
+  getRarityColor(rarity) {
+    const rarityColors = {
+      // Standard weapon skin rarities (CS2/CS:GO)
+      'Consumer Grade': '#B0C3D9',       // Light Gray/White
+      'Industrial Grade': '#5E98D9',     // Light Blue  
+      'Mil-Spec Grade': '#4B69FF',       // Blue
+      'Mil-Spec': '#4B69FF',             // Blue (alternative naming)
+      'Restricted': '#8847FF',           // Purple
+      'Classified': '#D32CE6',           // Pink/Magenta
+      'Covert': '#EB4B4B',              // Red
+      'Contraband': '#E4AE39',           // Orange
+      'Extraordinary': '#FFD700',        // Gold (knives/gloves)
+      
+      // Agent rarities (based on Operation rewards)
+      'Base Grade': '#B0C3D9',          // Light Gray/White
+      'Distinguished': '#4B69FF',       // Blue (28 stars)
+      'Exceptional': '#8847FF',         // Purple (52 stars)
+      'Superior': '#D32CE6',            // Pink (76 stars)
+      'Master': '#EB4B4B',              // Red (89 stars)
+      
+      // Stickers and Patches (High Grade to Extraordinary)
+      'High Grade': '#5E98D9',          // Light Blue
+      'Remarkable': '#4B69FF',          // Blue
+      'Exotic': '#8847FF',              // Purple
+      
+      // Default for unrecognized types
+      'Stock': '#B0C3D9'                // Light Gray/White
+    };
+    
+    return rarityColors[rarity] || '#B0C3D9'; // Default to light gray if not found
   }
 
   updateWithDetails(itemData, inspectLink) {
