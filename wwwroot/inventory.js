@@ -419,29 +419,51 @@ async function analyzeInventory(steamId) {
     // Create and render all items immediately with basic Steam inventory data
     elements.loadingMessage.textContent = `Found ${csgoItems.length} CS2 items - rendering now...`;
     const processedItems = [];
+    let preloadedCount = 0;
+    const itemsNeedingAnalysis = [];
     
     for (let i = 0; i < csgoItems.length; i++) {
       const item = csgoItems[i];
       const itemElement = createItemElement(item, i);
       inventoryGrid.appendChild(itemElement);
-      processedItems[i] = null; // Will be filled as analysis completes
+      
+      // Check if we have existing data for this item
+      if (item.existing_data) {
+        // Item already exists in database - update it immediately
+        processedItems[i] = item.existing_data;
+        updateItemWithDetails(item.existing_data, i, item.inspect_link);
+        preloadedCount++;
+      } else {
+        // Item needs analysis - add to queue
+        processedItems[i] = null;
+        itemsNeedingAnalysis.push({ item, index: i });
+      }
     }
     
-    // Update summary with initial data
-    updateSummary(inventoryData, []);
+    console.log(`Pre-loaded ${preloadedCount} items from database, ${itemsNeedingAnalysis.length} items need analysis`);
     
-    // Now start the detailed analysis phase
-    elements.loadingMessage.textContent = 'Getting precise float values and pattern details...';
-    updateProgress(0, csgoItems.length);
+    // Update summary with initial data including pre-loaded items
+    updateSummary(inventoryData, processedItems);
     
-    // Process items asynchronously for detailed analysis
-    for (let i = 0; i < csgoItems.length; i++) {
+    if (itemsNeedingAnalysis.length === 0) {
+      // All items were pre-loaded!
+      elements.inventoryStatus.style.display = 'none';
+      elements.status.textContent = `Successfully loaded ${csgoItems.length} items (all from database)`;
+      return;
+    }
+    
+    // Now start the detailed analysis phase for remaining items
+    elements.loadingMessage.textContent = `Getting precise float values for ${itemsNeedingAnalysis.length} new items...`;
+    updateProgress(preloadedCount, csgoItems.length);
+    
+    // Process remaining items asynchronously for detailed analysis
+    for (let i = 0; i < itemsNeedingAnalysis.length; i++) {
       // Check for cancellation before processing each item
       if (isCancelled) {
         throw new Error('Analysis was cancelled');
       }
 
-      const item = csgoItems[i];
+      const { item, index } = itemsNeedingAnalysis[i];
       
       try {
         const itemResponse = await fetch(`/api?${new URLSearchParams({url: item.inspect_link})}`, {
@@ -449,16 +471,16 @@ async function analyzeInventory(steamId) {
         });
         const itemData = await itemResponse.json();
         
-        processedItems[i] = itemData.error ? null : itemData;
-        updateItemWithDetails(itemData, i, item.inspect_link);
+        processedItems[index] = itemData.error ? null : itemData;
+        updateItemWithDetails(itemData, index, item.inspect_link);
         
       } catch (error) {
-        console.error(`Error loading item ${i}:`, error);
-        processedItems[i] = null;
-        updateItemWithDetails({ error: 'Failed to load item details' }, i, item.inspect_link);
+        console.error(`Error loading item ${index}:`, error);
+        processedItems[index] = null;
+        updateItemWithDetails({ error: 'Failed to load item details' }, index, item.inspect_link);
       }
       
-      updateProgress(i + 1, csgoItems.length);
+      updateProgress(preloadedCount + i + 1, csgoItems.length);
       updateSummary(inventoryData, processedItems);
       
       // Small delay to prevent overwhelming the API
@@ -466,7 +488,9 @@ async function analyzeInventory(steamId) {
     }
     
     elements.inventoryStatus.style.display = 'none';
-    elements.status.textContent = `Successfully analyzed ${csgoItems.length} items`;
+    const totalItems = csgoItems.length;
+    const analyzedItems = itemsNeedingAnalysis.length;
+    elements.status.textContent = `Successfully loaded ${totalItems} items (${preloadedCount} from database, ${analyzedItems} analyzed)`;
     
   } catch (error) {
     console.error('Error analyzing inventory:', error);
