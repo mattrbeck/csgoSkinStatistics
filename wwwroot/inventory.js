@@ -5,10 +5,16 @@ class InventoryItem extends HTMLElement {
     this.attachShadow({ mode: 'open' });
     this.itemData = {};
     this.itemIndex = 0;
+    this.needsUpdate = false;
   }
 
   connectedCallback() {
     this.render();
+    // If data was set before connection, update display now
+    if (this.needsUpdate) {
+      this.updateDisplay();
+      this.needsUpdate = false;
+    }
   }
 
   render() {
@@ -145,14 +151,26 @@ class InventoryItem extends HTMLElement {
   setItemData(item, index) {
     this.itemData = item;
     this.itemIndex = index;
-    this.updateDisplay();
+    
+    // If component is connected and rendered, update immediately
+    if (this.isConnected && this.shadowRoot && this.shadowRoot.children.length > 0) {
+      this.updateDisplay();
+    } else {
+      // Mark that we need to update when connected
+      this.needsUpdate = true;
+    }
   }
 
   updateDisplay() {
+    if (!this.shadowRoot) {
+      return;
+    }
+
     const nameElement = this.shadowRoot.querySelector('[data-field="name"]');
     const wearElement = this.shadowRoot.querySelector('[data-field="wear"]');
     const rarityElement = this.shadowRoot.querySelector('[data-field="rarity"]');
     const inspectElement = this.shadowRoot.querySelector('[data-field="inspect-link"]');
+
 
     if (nameElement) {
       // Determine if this is a knife or souvenir from the item info
@@ -163,15 +181,20 @@ class InventoryItem extends HTMLElement {
       if (this.itemData.type && this.itemData.type.includes('★')) {
         nameElement.classList.add('knife');
       }
-      nameElement.textContent = this.itemData.name || this.itemData.market_name || 'Unknown Item';
+      let itemName = this.itemData.name || this.itemData.market_name || 'Unknown Item';
+      // Remove leading ★ characters since CSS will add them back for knives/gloves
+      itemName = itemName.replace(/^★\s*/, '');
+      nameElement.textContent = itemName;
     }
 
     if (wearElement) {
-      wearElement.textContent = this.itemData.wear || 'Unknown';
+      const wear = this.itemData.wear || 'Unknown';
+      wearElement.textContent = wear;
     }
 
     if (rarityElement) {
-      rarityElement.textContent = this.itemData.rarity || 'Unknown';
+      const rarity = this.itemData.rarity || 'Unknown';
+      rarityElement.textContent = rarity;
     }
 
     if (inspectElement) {
@@ -333,7 +356,7 @@ function updateProgress(completed, total) {
   
   const percentage = total > 0 ? (completed / total) * 100 : 0;
   progressFill.style.width = `${percentage}%`;
-  progressText.textContent = `${completed} / ${total} items analyzed`;
+  progressText.textContent = `${completed} / ${total} detailed analyses complete`;
 }
 
 function updateSummary(inventoryData, processedItems) {
@@ -386,16 +409,32 @@ async function analyzeInventory(steamId) {
       throw new Error('No CS2 items found in inventory or inventory is private');
     }
 
-    elements.loadingMessage.textContent = 'Analyzing items...';
+    // Show the inventory container and render all items immediately
     elements.inventoryContainer.style.display = 'block';
+    elements.inventorySummary.style.display = 'block';
     
     const inventoryGrid = elements.inventoryGrid;
     inventoryGrid.innerHTML = '';
     
-    updateSummary(inventoryData, []);
-    
+    // Create and render all items immediately with basic Steam inventory data
+    elements.loadingMessage.textContent = `Found ${csgoItems.length} CS2 items - rendering now...`;
     const processedItems = [];
     
+    for (let i = 0; i < csgoItems.length; i++) {
+      const item = csgoItems[i];
+      const itemElement = createItemElement(item, i);
+      inventoryGrid.appendChild(itemElement);
+      processedItems[i] = null; // Will be filled as analysis completes
+    }
+    
+    // Update summary with initial data
+    updateSummary(inventoryData, []);
+    
+    // Now start the detailed analysis phase
+    elements.loadingMessage.textContent = 'Getting precise float values and pattern details...';
+    updateProgress(0, csgoItems.length);
+    
+    // Process items asynchronously for detailed analysis
     for (let i = 0; i < csgoItems.length; i++) {
       // Check for cancellation before processing each item
       if (isCancelled) {
@@ -403,8 +442,6 @@ async function analyzeInventory(steamId) {
       }
 
       const item = csgoItems[i];
-      const itemElement = createItemElement(item, i);
-      inventoryGrid.appendChild(itemElement);
       
       try {
         const itemResponse = await fetch(`/api?${new URLSearchParams({url: item.inspect_link})}`, {
@@ -424,6 +461,7 @@ async function analyzeInventory(steamId) {
       updateProgress(i + 1, csgoItems.length);
       updateSummary(inventoryData, processedItems);
       
+      // Small delay to prevent overwhelming the API
       await new Promise(resolve => setTimeout(resolve, 100));
     }
     
