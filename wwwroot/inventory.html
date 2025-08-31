@@ -132,6 +132,75 @@
       </div>
     </div>
 
+    <div id="inventory-controls" style="display: none;">
+      <div class="controls-section">
+        <div class="controls-row">
+          <div class="control-group">
+            <label for="sort-select">Sort by:</label>
+            <select id="sort-select">
+              <option value="date">Date (Default)</option>
+              <option value="name">Name</option>
+              <option value="rarity">Rarity</option>
+              <option value="quality">Quality</option>
+              <option value="float">Float</option>
+            </select>
+          </div>
+          
+          <div class="control-group">
+            <label for="sort-order">Order:</label>
+            <select id="sort-order">
+              <option value="asc">Ascending</option>
+              <option value="desc">Descending</option>
+            </select>
+          </div>
+        </div>
+        
+        <div class="controls-row">
+          <div class="control-group">
+            <label for="filter-rarity">Filter by Rarity:</label>
+            <select id="filter-rarity">
+              <option value="">All Rarities</option>
+              <option value="Consumer Grade">Consumer Grade</option>
+              <option value="Industrial Grade">Industrial Grade</option>
+              <option value="Mil-Spec Grade">Mil-Spec Grade</option>
+              <option value="Restricted">Restricted</option>
+              <option value="Classified">Classified</option>
+              <option value="Covert">Covert</option>
+              <option value="Extraordinary">Extraordinary</option>
+              <option value="Contraband">Contraband</option>
+            </select>
+          </div>
+          
+          <div class="control-group">
+            <label for="filter-quality">Filter by Quality:</label>
+            <select id="filter-quality">
+              <option value="">All Qualities</option>
+              <option value="Factory New">Factory New</option>
+              <option value="Minimal Wear">Minimal Wear</option>
+              <option value="Field-Tested">Field-Tested</option>
+              <option value="Well-Worn">Well-Worn</option>
+              <option value="Battle-Scarred">Battle-Scarred</option>
+            </select>
+          </div>
+          
+          <div class="control-group">
+            <label for="filter-float-min">Float Range:</label>
+            <div class="float-range">
+              <input type="number" id="filter-float-min" step="0.001" min="0" max="1" placeholder="Min">
+              <span>to</span>
+              <input type="number" id="filter-float-max" step="0.001" min="0" max="1" placeholder="Max">
+            </div>
+          </div>
+        </div>
+        
+        <div class="controls-row">
+          <button id="apply-filters" type="button">Apply Filters</button>
+          <button id="clear-filters" type="button">Clear All</button>
+          <span id="filter-count" class="filter-count"></span>
+        </div>
+      </div>
+    </div>
+
     <div id="inventory-container">
       <div id="inventory-grid"></div>
     </div>

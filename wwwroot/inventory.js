@@ -347,6 +347,12 @@ let isCancelled = false;
 const conversionBuffer = new ArrayBuffer(4);
 const conversionView = new DataView(conversionBuffer);
 
+// Inventory data and controls
+let inventoryItems = []; // Store all items with their data
+let filteredItems = []; // Store currently filtered/sorted items
+let currentSort = { field: 'date', order: 'asc' };
+let currentFilters = { rarity: '', quality: '', floatMin: null, floatMax: null };
+
 function uint32ToFloat32(uint32Value) {
   conversionView.setUint32(0, uint32Value);
   return conversionView.getFloat32(0);
@@ -409,6 +415,127 @@ function updateSummary(inventoryData, processedItems) {
   elements.stattrakItems.textContent = stattrakItems;
 }
 
+function sortItems(items, field, order) {
+  return [...items].sort((a, b) => {
+    let valueA, valueB;
+    
+    switch (field) {
+      case 'name':
+        valueA = (a.steamData.name || '').toLowerCase();
+        valueB = (b.steamData.name || '').toLowerCase();
+        break;
+      case 'rarity':
+        valueA = getRarityValue(a.steamData.rarity || '');
+        valueB = getRarityValue(b.steamData.rarity || '');
+        break;
+      case 'quality':
+        valueA = getQualityValue(a.steamData.wear || '');
+        valueB = getQualityValue(b.steamData.wear || '');
+        break;
+      case 'float':
+        valueA = a.detailedData && a.detailedData.paintwear ? uint32ToFloat32(a.detailedData.paintwear) : 999;
+        valueB = b.detailedData && b.detailedData.paintwear ? uint32ToFloat32(b.detailedData.paintwear) : 999;
+        break;
+      case 'date':
+      default:
+        valueA = a.originalIndex;
+        valueB = b.originalIndex;
+        break;
+    }
+    
+    if (valueA < valueB) return order === 'asc' ? -1 : 1;
+    if (valueA > valueB) return order === 'asc' ? 1 : -1;
+    return 0;
+  });
+}
+
+function getRarityValue(rarity) {
+  const rarityOrder = {
+    'Consumer Grade': 1,
+    'Base Grade': 1,
+    'Industrial Grade': 2,
+    'High Grade': 2,
+    'Mil-Spec Grade': 3,
+    'Mil-Spec': 3,
+    'Remarkable': 3,
+    'Distinguished': 4,
+    'Restricted': 4,
+    'Exceptional': 5,
+    'Classified': 5,
+    'Superior': 6,
+    'Covert': 6,
+    'Master': 7,
+    'Contraband': 8,
+    'Extraordinary': 9
+  };
+  return rarityOrder[rarity] || 0;
+}
+
+function getQualityValue(quality) {
+  const qualityOrder = {
+    'Factory New': 1,
+    'Minimal Wear': 2,
+    'Field-Tested': 3,
+    'Well-Worn': 4,
+    'Battle-Scarred': 5
+  };
+  return qualityOrder[quality] || 0;
+}
+
+function filterItems(items) {
+  return items.filter(item => {
+    // Rarity filter
+    if (currentFilters.rarity && item.steamData.rarity !== currentFilters.rarity) {
+      return false;
+    }
+    
+    // Quality filter
+    if (currentFilters.quality && item.steamData.wear !== currentFilters.quality) {
+      return false;
+    }
+    
+    // Float range filter
+    if ((currentFilters.floatMin !== null || currentFilters.floatMax !== null) && 
+        item.detailedData && item.detailedData.paintwear) {
+      const itemFloat = uint32ToFloat32(item.detailedData.paintwear);
+      if (currentFilters.floatMin !== null && itemFloat < currentFilters.floatMin) {
+        return false;
+      }
+      if (currentFilters.floatMax !== null && itemFloat > currentFilters.floatMax) {
+        return false;
+      }
+    }
+    
+    return true;
+  });
+}
+
+function displayItems(items) {
+  const inventoryGrid = elements.inventoryGrid;
+  inventoryGrid.innerHTML = '';
+  
+  items.forEach((itemData, displayIndex) => {
+    const itemElement = createItemElement(itemData.steamData, itemData.originalIndex);
+    inventoryGrid.appendChild(itemElement);
+    
+    // If we have detailed data, update the element immediately
+    if (itemData.detailedData) {
+      updateItemWithDetails(itemData.detailedData, itemData.originalIndex, itemData.steamData.inspect_link);
+    }
+  });
+  
+  // Update filter count
+  if (elements.filterCount) {
+    elements.filterCount.textContent = `Showing ${items.length} of ${inventoryItems.length} items`;
+  }
+}
+
+function applySortAndFilter() {
+  filteredItems = filterItems(inventoryItems);
+  filteredItems = sortItems(filteredItems, currentSort.field, currentSort.order);
+  displayItems(filteredItems);
+}
+
 async function analyzeInventory(steamId) {
   try {
     // Reset cancellation state and create new AbortController
@@ -460,14 +587,25 @@ async function analyzeInventory(steamId) {
     let preloadedCount = 0;
     const itemsNeedingAnalysis = [];
     
+    // Initialize inventory data structure
+    inventoryItems = [];
+    
     for (let i = 0; i < csgoItems.length; i++) {
       const item = csgoItems[i];
       const itemElement = createItemElement(item, i);
       inventoryGrid.appendChild(itemElement);
       
+      // Store item data in our structure
+      const itemData = {
+        originalIndex: i,
+        steamData: item,
+        detailedData: null
+      };
+      
       // Check if we have existing data for this item
       if (item.existing_data) {
         // Item already exists in database - update it immediately
+        itemData.detailedData = item.existing_data;
         processedItems[i] = item.existing_data;
         updateItemWithDetails(item.existing_data, i, item.inspect_link);
         preloadedCount++;
@@ -476,6 +614,8 @@ async function analyzeInventory(steamId) {
         processedItems[i] = null;
         itemsNeedingAnalysis.push({ item, index: i });
       }
+      
+      inventoryItems.push(itemData);
     }
     
     console.log(`Pre-loaded ${preloadedCount} items from database, ${itemsNeedingAnalysis.length} items need analysis`);
@@ -487,6 +627,14 @@ async function analyzeInventory(steamId) {
       // All items were pre-loaded!
       elements.inventoryStatus.style.display = 'none';
       elements.status.textContent = `Successfully loaded ${csgoItems.length} items (all from database)`;
+      
+      // Show inventory controls
+      elements.inventoryControls.style.display = 'block';
+      
+      // Initialize filtered items with all items (default sort by date)
+      filteredItems = [...inventoryItems];
+      applySortAndFilter();
+      
       return;
     }
     
@@ -512,6 +660,11 @@ async function analyzeInventory(steamId) {
         processedItems[index] = itemData.error ? null : itemData;
         updateItemWithDetails(itemData, index, item.inspect_link);
         
+        // Update our item data structure
+        if (inventoryItems[index] && !itemData.error) {
+          inventoryItems[index].detailedData = itemData;
+        }
+        
       } catch (error) {
         console.error(`Error loading item ${index}:`, error);
         processedItems[index] = null;
@@ -529,6 +682,13 @@ async function analyzeInventory(steamId) {
     const totalItems = csgoItems.length;
     const analyzedItems = itemsNeedingAnalysis.length;
     elements.status.textContent = `Successfully loaded ${totalItems} items (${preloadedCount} from database, ${analyzedItems} analyzed)`;
+    
+    // Show inventory controls
+    elements.inventoryControls.style.display = 'block';
+    
+    // Initialize filtered items with all items (default sort by date)
+    filteredItems = [...inventoryItems];
+    applySortAndFilter();
     
   } catch (error) {
     console.error('Error analyzing inventory:', error);
@@ -563,12 +723,19 @@ function resetInterface() {
   elements.inventoryStatus.style.display = 'none';
   elements.inventoryContainer.style.display = 'none';
   elements.inventorySummary.style.display = 'none';
+  elements.inventoryControls.style.display = 'none';
   elements.inventoryGrid.innerHTML = '';
   elements.status.textContent = '';
   
   // Reset button states
   elements.button.style.display = 'inline-block';
   elements.cancelButton.style.display = 'none';
+  
+  // Reset data
+  inventoryItems = [];
+  filteredItems = [];
+  currentSort = { field: 'date', order: 'asc' };
+  currentFilters = { rarity: '', quality: '', floatMin: null, floatMax: null };
   
   // Cancel any ongoing analysis
   if (analysisController) {
@@ -596,8 +763,20 @@ window.addEventListener("load", function () {
     csgoItems: document.getElementById("csgo-items"),
     stattrakItems: document.getElementById("stattrak-items"),
     inventoryContainer: document.getElementById("inventory-container"),
+    inventoryControls: document.getElementById("inventory-controls"),
     inventoryGrid: document.getElementById("inventory-grid"),
     status: document.getElementById("status"),
+    filterCount: document.getElementById("filter-count"),
+    
+    // Control elements
+    sortSelect: document.getElementById("sort-select"),
+    sortOrder: document.getElementById("sort-order"),
+    filterRarity: document.getElementById("filter-rarity"),
+    filterQuality: document.getElementById("filter-quality"),
+    filterFloatMin: document.getElementById("filter-float-min"),
+    filterFloatMax: document.getElementById("filter-float-max"),
+    applyFilters: document.getElementById("apply-filters"),
+    clearFilters: document.getElementById("clear-filters")
   };
 
   elements.textbox.addEventListener("keydown", function (event) {
@@ -631,6 +810,52 @@ window.addEventListener("load", function () {
   elements.cancelButton.addEventListener("click", function (element) {
     element.target.blur();
     cancelAnalysis();
+  });
+
+  // Sorting and filtering controls
+  elements.sortSelect.addEventListener("change", function() {
+    currentSort.field = this.value;
+    applySortAndFilter();
+  });
+
+  elements.sortOrder.addEventListener("change", function() {
+    currentSort.order = this.value;
+    applySortAndFilter();
+  });
+
+  elements.applyFilters.addEventListener("click", function() {
+    currentFilters.rarity = elements.filterRarity.value;
+    currentFilters.quality = elements.filterQuality.value;
+    currentFilters.floatMin = elements.filterFloatMin.value ? parseFloat(elements.filterFloatMin.value) : null;
+    currentFilters.floatMax = elements.filterFloatMax.value ? parseFloat(elements.filterFloatMax.value) : null;
+    applySortAndFilter();
+  });
+
+  elements.clearFilters.addEventListener("click", function() {
+    // Reset filter controls
+    elements.filterRarity.value = '';
+    elements.filterQuality.value = '';
+    elements.filterFloatMin.value = '';
+    elements.filterFloatMax.value = '';
+    
+    // Reset filter data
+    currentFilters.rarity = '';
+    currentFilters.quality = '';
+    currentFilters.floatMin = null;
+    currentFilters.floatMax = null;
+    
+    applySortAndFilter();
+  });
+
+  // Auto-apply filters when typing in float inputs
+  elements.filterFloatMin.addEventListener("input", function() {
+    currentFilters.floatMin = this.value ? parseFloat(this.value) : null;
+    applySortAndFilter();
+  });
+
+  elements.filterFloatMax.addEventListener("input", function() {
+    currentFilters.floatMax = this.value ? parseFloat(this.value) : null;
+    applySortAndFilter();
   });
 
   if (window.location.hash) {
