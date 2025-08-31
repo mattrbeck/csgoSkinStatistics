@@ -1,3 +1,285 @@
+// Web Component for Inventory Items
+class InventoryItem extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: 'open' });
+    this.itemData = {};
+    this.itemIndex = 0;
+  }
+
+  connectedCallback() {
+    this.render();
+  }
+
+  render() {
+    const template = document.getElementById('inventory-item-template');
+    const clone = template.content.cloneNode(true);
+    
+    // Apply existing styles by importing the main stylesheet
+    const style = document.createElement('style');
+    style.textContent = `
+      :host {
+        display: block;
+        background-color: var(--dark, #0f1d2a);
+        border-radius: 8px;
+        padding: 15px;
+        transition: all 0.3s ease;
+        border-left: 4px solid var(--gray, #1f2d3a);
+        position: relative;
+      }
+      :host(:hover) {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+      }
+      :host(.loading) {
+        opacity: 0.6;
+        overflow: hidden;
+      }
+      :host(.loading)::before {
+        content: "";
+        position: absolute;
+        left: -100%;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(90deg, transparent, var(--light, #2f3d4a), transparent);
+        animation: shimmer 2s infinite;
+        top: 0;
+      }
+      :host(.loaded) {
+        border-left-color: var(--pop, #2ecc71);
+      }
+      :host(.error) {
+        border-left-color: var(--error, #cc492f);
+      }
+      
+      .item-header {
+        margin-bottom: 10px;
+      }
+      
+      .item-name {
+        font-weight: bold;
+        font-size: 16px;
+        color: var(--text, #ecf0f1);
+        margin: 0 0 5px 0;
+        word-wrap: break-word;
+      }
+      
+      .item-name.knife::before {
+        content: "\\2605  ";
+        color: var(--pop, #2ecc71);
+        line-height: 0;
+      }
+      
+      .item-name.souvenir::before {
+        content: "Souvenir  ";
+        color: var(--souvenir, #ccb22f);
+      }
+      
+      .item-details {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        font-size: 14px;
+      }
+      
+      .detail-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      
+      .detail-label {
+        color: var(--text, #ecf0f1);
+        opacity: 0.8;
+      }
+      
+      .detail-value {
+        color: var(--text, #ecf0f1);
+        font-weight: 500;
+      }
+      
+      .loading-placeholder {
+        color: var(--text, #ecf0f1);
+        opacity: 0.5;
+        font-style: italic;
+      }
+      
+      .error-message {
+        color: var(--error, #cc492f) !important;
+      }
+      
+      .item-actions {
+        margin-top: 15px;
+        display: flex;
+        justify-content: center;
+      }
+      
+      .inspect-link {
+        display: inline-block;
+        padding: 8px 16px;
+        background-color: var(--pop, #2ecc71);
+        color: var(--gray, #1f2d3a);
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: bold;
+        text-decoration: none;
+        transition: all 0.3s ease;
+      }
+      
+      .inspect-link:hover {
+        background-color: #27ae60;
+        transform: translateY(-1px);
+      }
+      
+      @keyframes shimmer {
+        0% { left: -100%; }
+        25% { left: -100%; }
+        100% { left: 100%; }
+      }
+    `;
+    
+    this.shadowRoot.appendChild(style);
+    this.shadowRoot.appendChild(clone);
+  }
+
+  setItemData(item, index) {
+    this.itemData = item;
+    this.itemIndex = index;
+    this.updateDisplay();
+  }
+
+  updateDisplay() {
+    const nameElement = this.shadowRoot.querySelector('[data-field="name"]');
+    const wearElement = this.shadowRoot.querySelector('[data-field="wear"]');
+    const rarityElement = this.shadowRoot.querySelector('[data-field="rarity"]');
+    const inspectElement = this.shadowRoot.querySelector('[data-field="inspect-link"]');
+
+    if (nameElement) {
+      // Determine if this is a knife or souvenir from the item info
+      nameElement.className = 'item-name';
+      if (this.itemData.quality === 'Souvenir') {
+        nameElement.classList.add('souvenir');
+      }
+      if (this.itemData.type && this.itemData.type.includes('★')) {
+        nameElement.classList.add('knife');
+      }
+      nameElement.textContent = this.itemData.name || this.itemData.market_name || 'Unknown Item';
+    }
+
+    if (wearElement) {
+      wearElement.textContent = this.itemData.wear || 'Unknown';
+    }
+
+    if (rarityElement) {
+      rarityElement.textContent = this.itemData.rarity || 'Unknown';
+    }
+
+    if (inspectElement) {
+      inspectElement.href = this.itemData.inspect_link || '#';
+    }
+
+    this.classList.add('loading');
+  }
+
+  updateWithDetails(itemData, inspectLink) {
+    const floatElement = this.shadowRoot.querySelector('[data-field="float"]');
+    const wearElement = this.shadowRoot.querySelector('[data-field="wear"]');
+    const rarityElement = this.shadowRoot.querySelector('[data-field="rarity"]');
+    const patternElement = this.shadowRoot.querySelector('[data-field="pattern"]');
+    const nameElement = this.shadowRoot.querySelector('[data-field="name"]');
+    const inspectElement = this.shadowRoot.querySelector('[data-field="inspect-link"]');
+
+    if (itemData.error) {
+      // Keep existing basic info, just mark as error and update loading fields
+      this.classList.remove('loading');
+      this.classList.add('error');
+      
+      // Only update the fields that were showing "Analyzing..."
+      if (floatElement) {
+        floatElement.innerHTML = 'Analysis Failed';
+        floatElement.classList.remove('loading-placeholder');
+        floatElement.classList.add('error-message');
+      }
+      
+      if (patternElement) {
+        patternElement.innerHTML = 'Analysis Failed';
+        patternElement.classList.remove('loading-placeholder');
+        patternElement.classList.add('error-message');
+      }
+      
+      // Add small error indicator but don't replace the whole item
+      let existingError = this.shadowRoot.querySelector('.error-message-small');
+      if (!existingError) {
+        const errorDiv = document.createElement('div');
+        errorDiv.className = 'error-message-small';
+        errorDiv.textContent = 'Detailed analysis failed';
+        errorDiv.style.cssText = 'color: var(--error, #cc492f); font-size: 10px; font-style: italic; margin-top: 8px; text-align: center; opacity: 0.8;';
+        this.shadowRoot.appendChild(errorDiv);
+      }
+      return;
+    }
+
+    this.classList.remove('loading');
+    this.classList.add('loaded');
+    
+    // Enhance the name with detailed info if we got weapon/skin data
+    if (itemData.weapon && itemData.skin && nameElement) {
+      nameElement.className = 'item-name';
+      let nameText = `${itemData.weapon} | ${itemData.skin}`;
+      if (itemData.special) {
+        nameText += ` <span class="item-special" style="color: var(--pop, #2ecc71); font-weight: bold; margin-left: 5px;">${itemData.special}</span>`;
+      }
+      if (itemData.stattrak) {
+        nameText += '<span class="stattrak-badge" style="display: inline-block; background-color: var(--pop, #2ecc71); color: var(--gray, #1f2d3a); font-size: 10px; font-weight: bold; padding: 2px 6px; border-radius: 3px; margin-left: 8px; vertical-align: middle;">ST</span>';
+      }
+      if (itemData.quality === 3) {
+        nameElement.classList.add('knife');
+      }
+      if (itemData.quality === 12) {
+        nameElement.classList.add('souvenir');
+      }
+      nameElement.innerHTML = nameText;
+    }
+
+    // Update float value
+    if (floatElement) {
+      const paintwearFloat = uint32ToFloat32(itemData.paintwear);
+      floatElement.textContent = paintwearFloat.toFixed(6);
+      floatElement.classList.remove('loading-placeholder');
+    }
+    
+    // Update wear if we got better data, otherwise keep existing
+    if (wearElement) {
+      const detailedWear = getWearFromFloat(uint32ToFloat32(itemData.paintwear));
+      if (detailedWear !== 'Unknown' && detailedWear !== wearElement.textContent) {
+        wearElement.textContent = detailedWear;
+      }
+    }
+    
+    // Update rarity if we got better data, otherwise keep existing  
+    if (rarityElement) {
+      const detailedRarity = getRarityFromNumber(itemData.rarity);
+      if (detailedRarity !== 'Unknown' && detailedRarity !== rarityElement.textContent) {
+        rarityElement.textContent = detailedRarity;
+      }
+    }
+    
+    // Update pattern seed
+    if (patternElement) {
+      patternElement.textContent = itemData.paintseed;
+      patternElement.classList.remove('loading-placeholder');
+    }
+
+    // Ensure inspect link is set
+    if (inspectElement) {
+      inspectElement.href = inspectLink || '#';
+    }
+  }
+}
+
+// Register the custom element
+customElements.define('inventory-item', InventoryItem);
+
 let elements;
 let analysisController = null; // AbortController for canceling requests
 let isCancelled = false;
@@ -32,130 +314,17 @@ function getRarityFromNumber(rarityNumber) {
 }
 
 function createItemElement(item, index) {
-  const itemDiv = document.createElement('div');
-  itemDiv.className = 'inventory-item loading';
-  itemDiv.id = `item-${index}`;
-  
-  // Determine if this is a knife or souvenir from the item info
-  let nameClasses = '';
-  if (item.quality === 'Souvenir') {
-    nameClasses += ' souvenir';
-  }
-  if (item.type && item.type.includes('★')) {
-    nameClasses += ' knife';
-  }
-  
-  itemDiv.innerHTML = `
-    <div class="item-header">
-      <div class="item-name${nameClasses}" id="name-${index}">
-        ${item.name || item.market_name || 'Unknown Item'}
-      </div>
-    </div>
-    <div class="item-details">
-      <div class="detail-row">
-        <span class="detail-label">Float:</span>
-        <span class="detail-value loading-placeholder" id="float-${index}">Analyzing...</span>
-      </div>
-      <div class="detail-row">
-        <span class="detail-label">Wear:</span>
-        <span class="detail-value" id="wear-${index}">${item.wear || 'Unknown'}</span>
-      </div>
-      <div class="detail-row">
-        <span class="detail-label">Rarity:</span>
-        <span class="detail-value" id="rarity-${index}">${item.rarity || 'Unknown'}</span>
-      </div>
-      <div class="detail-row">
-        <span class="detail-label">Pattern:</span>
-        <span class="detail-value loading-placeholder" id="pattern-${index}">Analyzing...</span>
-      </div>
-    </div>
-    <div class="item-actions">
-      <a href="${item.inspect_link}" class="inspect-link" id="inspect-${index}">Inspect In Game</a>
-    </div>
-  `;
-  
-  return itemDiv;
+  const itemElement = document.createElement('inventory-item');
+  itemElement.id = `item-${index}`;
+  itemElement.setItemData(item, index);
+  return itemElement;
 }
 
 function updateItemWithDetails(itemData, index, inspectLink) {
-  const itemDiv = document.getElementById(`item-${index}`);
-  const nameElement = document.getElementById(`name-${index}`);
-  const floatElement = document.getElementById(`float-${index}`);
-  const wearElement = document.getElementById(`wear-${index}`);
-  const rarityElement = document.getElementById(`rarity-${index}`);
-  const patternElement = document.getElementById(`pattern-${index}`);
-  const inspectElement = document.getElementById(`inspect-${index}`);
-
-  if (itemData.error) {
-    // Keep existing basic info, just mark as error and update loading fields
-    itemDiv.classList.remove('loading');
-    itemDiv.classList.add('error');
-    
-    // Only update the fields that were showing "Analyzing..."
-    floatElement.innerHTML = 'Analysis Failed';
-    floatElement.classList.remove('loading-placeholder');
-    floatElement.classList.add('error-message');
-    
-    patternElement.innerHTML = 'Analysis Failed';
-    patternElement.classList.remove('loading-placeholder');
-    patternElement.classList.add('error-message');
-    
-    // Add small error indicator but don't replace the whole item
-    let existingError = itemDiv.querySelector('.error-message-small');
-    if (!existingError) {
-      const errorDiv = document.createElement('div');
-      errorDiv.className = 'error-message-small';
-      errorDiv.textContent = 'Detailed analysis failed';
-      itemDiv.appendChild(errorDiv);
-    }
-    return;
+  const itemElement = document.getElementById(`item-${index}`);
+  if (itemElement && itemElement.updateWithDetails) {
+    itemElement.updateWithDetails(itemData, inspectLink);
   }
-
-  itemDiv.classList.remove('loading');
-  itemDiv.classList.add('loaded');
-  
-  // Enhance the name with detailed info if we got weapon/skin data
-  if (itemData.weapon && itemData.skin) {
-    nameElement.classList.remove('knife', 'souvenir');
-    let nameText = `${itemData.weapon} | ${itemData.skin}`;
-    if (itemData.special) {
-      nameText += ` <span class="item-special">${itemData.special}</span>`;
-    }
-    if (itemData.stattrak) {
-      nameText += '<span class="stattrak-badge">ST</span>';
-    }
-    if (itemData.quality === 3) {
-      nameElement.classList.add('knife');
-    }
-    if (itemData.quality === 12) {
-      nameElement.classList.add('souvenir');
-    }
-    nameElement.innerHTML = nameText;
-  }
-
-  // Update float value
-  const paintwearFloat = uint32ToFloat32(itemData.paintwear);
-  floatElement.textContent = paintwearFloat.toFixed(6);
-  floatElement.classList.remove('loading-placeholder');
-  
-  // Update wear if we got better data, otherwise keep existing
-  const detailedWear = getWearFromFloat(paintwearFloat);
-  if (detailedWear !== 'Unknown' && detailedWear !== wearElement.textContent) {
-    wearElement.textContent = detailedWear;
-  }
-  
-  // Update rarity if we got better data, otherwise keep existing  
-  const detailedRarity = getRarityFromNumber(itemData.rarity);
-  if (detailedRarity !== 'Unknown' && detailedRarity !== rarityElement.textContent) {
-    rarityElement.textContent = detailedRarity;
-  }
-  
-  // Update pattern seed
-  patternElement.textContent = itemData.paintseed;
-  patternElement.classList.remove('loading-placeholder');
-
-  // Ensure inspect link is set
-  inspectElement.href = inspectLink || '#';
 }
 
 function updateProgress(completed, total) {
