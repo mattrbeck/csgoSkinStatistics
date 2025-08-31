@@ -300,6 +300,112 @@ nav a.current {
   opacity: 0.8;
 }
 
+/* Inventory Controls Styles */
+#inventory-controls {
+  background-color: var(--dark);
+  border-radius: 8px;
+  padding: 20px;
+  margin: 20px auto;
+  max-width: 1200px;
+  border: 1px solid var(--light);
+}
+
+.controls-section {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.controls-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 15px;
+  align-items: flex-end;
+}
+
+.control-group {
+  display: flex;
+  flex-direction: column;
+  min-width: 150px;
+}
+
+.control-group label {
+  color: var(--text);
+  font-size: 14px;
+  margin-bottom: 5px;
+  font-weight: 500;
+}
+
+.control-group select,
+.control-group input[type="number"] {
+  padding: 8px 12px;
+  border-radius: 4px;
+  border: 1px solid var(--light);
+  background-color: var(--gray);
+  color: var(--text);
+  font-size: 14px;
+}
+
+.control-group select:focus,
+.control-group input[type="number"]:focus {
+  outline: none;
+  border-color: var(--pop);
+  box-shadow: 0 0 0 2px rgba(46, 204, 113, 0.2);
+}
+
+.float-range {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.float-range input[type="number"] {
+  width: 80px;
+}
+
+.float-range span {
+  color: var(--text);
+  font-size: 14px;
+}
+
+#apply-filters,
+#clear-filters {
+  padding: 10px 20px;
+  border-radius: 4px;
+  border: none;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+#apply-filters {
+  background-color: var(--pop);
+  color: var(--gray);
+}
+
+#apply-filters:hover {
+  background-color: #27ae60;
+  transform: translateY(-1px);
+}
+
+#clear-filters {
+  background-color: var(--light);
+  color: var(--text);
+}
+
+#clear-filters:hover {
+  background-color: var(--error);
+  color: var(--text);
+}
+
+.filter-count {
+  color: var(--pop);
+  font-size: 14px;
+  font-weight: 500;
+  margin-left: 15px;
+}
+
 @media (max-width: 768px) {
   #inventory-grid {
     grid-template-columns: 1fr;
@@ -313,5 +419,18 @@ nav a.current {
   .item-details {
     grid-template-columns: 1fr;
     gap: 6px;
+  }
+  
+  .controls-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  
+  .control-group {
+    min-width: auto;
+  }
+  
+  .float-range {
+    justify-content: space-between;
   }
 }
