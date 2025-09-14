@@ -440,7 +440,7 @@ const conversionView = new DataView(conversionBuffer);
 let inventoryItems = []; // Store all items with their data
 let filteredItems = []; // Store currently filtered/sorted items
 let currentSort = { field: 'date', order: 'asc' };
-let currentFilters = { rarity: '', quality: '', floatMin: null, floatMax: null };
+let currentFilters = { rarity: '', quality: '', floatMin: null, floatMax: null, hideCommemorative: true };
 
 function uint32ToFloat32(uint32Value) {
   conversionView.setUint32(0, uint32Value);
@@ -573,6 +573,13 @@ function getQualityValue(quality) {
 
 function filterItems(items) {
   return items.filter(item => {
+    // Hide commemorative items filter (paintindex 0)
+    if (currentFilters.hideCommemorative && 
+        item.detailedData && 
+        item.detailedData.paintindex === 0) {
+      return false;
+    }
+    
     // Rarity filter
     if (currentFilters.rarity && item.steamData.rarity !== currentFilters.rarity) {
       return false;
@@ -824,7 +831,7 @@ function resetInterface() {
   inventoryItems = [];
   filteredItems = [];
   currentSort = { field: 'date', order: 'asc' };
-  currentFilters = { rarity: '', quality: '', floatMin: null, floatMax: null };
+  currentFilters = { rarity: '', quality: '', floatMin: null, floatMax: null, hideCommemorative: true };
   
   // Cancel any ongoing analysis
   if (analysisController) {
@@ -864,6 +871,7 @@ window.addEventListener("load", function () {
     filterQuality: document.getElementById("filter-quality"),
     filterFloatMin: document.getElementById("filter-float-min"),
     filterFloatMax: document.getElementById("filter-float-max"),
+    hideCommemorative: document.getElementById("hide-commemorative"),
     applyFilters: document.getElementById("apply-filters"),
     clearFilters: document.getElementById("clear-filters")
   };
@@ -917,6 +925,7 @@ window.addEventListener("load", function () {
     currentFilters.quality = elements.filterQuality.value;
     currentFilters.floatMin = elements.filterFloatMin.value ? parseFloat(elements.filterFloatMin.value) : null;
     currentFilters.floatMax = elements.filterFloatMax.value ? parseFloat(elements.filterFloatMax.value) : null;
+    currentFilters.hideCommemorative = elements.hideCommemorative.checked;
     applySortAndFilter();
   });
 
@@ -926,12 +935,14 @@ window.addEventListener("load", function () {
     elements.filterQuality.value = '';
     elements.filterFloatMin.value = '';
     elements.filterFloatMax.value = '';
+    elements.hideCommemorative.checked = true;
     
     // Reset filter data
     currentFilters.rarity = '';
     currentFilters.quality = '';
     currentFilters.floatMin = null;
     currentFilters.floatMax = null;
+    currentFilters.hideCommemorative = true;
     
     applySortAndFilter();
   });
@@ -944,6 +955,12 @@ window.addEventListener("load", function () {
 
   elements.filterFloatMax.addEventListener("input", function() {
     currentFilters.floatMax = this.value ? parseFloat(this.value) : null;
+    applySortAndFilter();
+  });
+
+  // Auto-apply filter when checkbox is toggled
+  elements.hideCommemorative.addEventListener("change", function() {
+    currentFilters.hideCommemorative = this.checked;
     applySortAndFilter();
   });
 
