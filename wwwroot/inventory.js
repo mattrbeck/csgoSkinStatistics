@@ -439,7 +439,7 @@ const conversionView = new DataView(conversionBuffer);
 // Inventory data and controls
 let inventoryItems = []; // Store all items with their data
 let filteredItems = []; // Store currently filtered/sorted items
-let currentSort = { field: 'date', order: 'asc' };
+let currentSort = { field: 'rarity', order: 'desc' };
 let currentFilters = { rarity: '', quality: '', floatMin: null, floatMax: null, hideCommemorative: true };
 
 function uint32ToFloat32(uint32Value) {
@@ -830,7 +830,7 @@ function resetInterface() {
   // Reset data
   inventoryItems = [];
   filteredItems = [];
-  currentSort = { field: 'date', order: 'asc' };
+  currentSort = { field: 'rarity', order: 'desc' };
   currentFilters = { rarity: '', quality: '', floatMin: null, floatMax: null, hideCommemorative: true };
   
   // Cancel any ongoing analysis
