@@ -206,29 +206,38 @@
     </div>
 
     <template id="inventory-item-template">
-      <div class="item-header">
-        <div class="item-name" data-field="name"></div>
-      </div>
-      <div class="item-details">
-        <div class="detail-row">
-          <span class="detail-label">Float:</span>
-          <span class="detail-value loading-placeholder" data-field="float">Analyzing...</span>
+      <div class="item-content">
+        <div class="item-left">
+          <div class="item-image-container">
+            <img class="item-image" data-field="image" src="" alt="Item image" loading="lazy">
+          </div>
+          <div class="item-actions">
+            <a href="#" class="inspect-link" data-field="inspect-link">Inspect</a>
+          </div>
         </div>
-        <div class="detail-row">
-          <span class="detail-label">Wear:</span>
-          <span class="detail-value" data-field="wear">Unknown</span>
+        <div class="item-info">
+          <div class="item-header">
+            <div class="item-name" data-field="name"></div>
+          </div>
+          <div class="item-details">
+            <div class="detail-row">
+              <span class="detail-label">Float:</span>
+              <span class="detail-value loading-placeholder" data-field="float">Analyzing...</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Wear:</span>
+              <span class="detail-value" data-field="wear">Unknown</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Pattern:</span>
+              <span class="detail-value loading-placeholder" data-field="pattern">Analyzing...</span>
+            </div>
+            <div class="detail-row">
+              <span class="detail-label">Rarity:</span>
+              <span class="detail-value" data-field="rarity">Unknown</span>
+            </div>
+          </div>
         </div>
-        <div class="detail-row">
-          <span class="detail-label">Rarity:</span>
-          <span class="detail-value" data-field="rarity">Unknown</span>
-        </div>
-        <div class="detail-row">
-          <span class="detail-label">Pattern:</span>
-          <span class="detail-value loading-placeholder" data-field="pattern">Analyzing...</span>
-        </div>
-      </div>
-      <div class="item-actions">
-        <a href="#" class="inspect-link" data-field="inspect-link">Inspect In Game</a>
       </div>
     </template>
 
