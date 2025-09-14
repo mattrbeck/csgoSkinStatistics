@@ -58,6 +58,48 @@ class InventoryItem extends HTMLElement {
         border-left-color: var(--error, #cc492f);
       }
       
+      .item-content {
+        display: flex;
+        gap: 12px;
+        align-items: flex-start;
+      }
+      
+      .item-left {
+        flex-shrink: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+      }
+      
+      .item-image-container {
+        width: 64px;
+        height: 48px;
+        background-color: var(--gray, #34495e);
+        border-radius: 4px;
+        overflow: hidden;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      
+      .item-image {
+        max-width: 100%;
+        max-height: 48px;
+        width: auto;
+        height: auto;
+        object-fit: contain;
+      }
+      
+      .item-info {
+        flex: 1;
+        min-width: 0;
+      }
+      
+      .item-actions {
+        margin: 0;
+      }
+      
       .item-header {
         margin-bottom: 10px;
       }
@@ -83,7 +125,7 @@ class InventoryItem extends HTMLElement {
       
       .item-details {
         display: grid;
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: 2fr 3fr;
         gap: 8px;
         font-size: 14px;
       }
@@ -122,14 +164,17 @@ class InventoryItem extends HTMLElement {
       
       .inspect-link {
         display: inline-block;
-        padding: 8px 16px;
+        padding: 4px 8px;
         background-color: var(--pop, #2ecc71);
         color: var(--gray, #1f2d3a);
-        border-radius: 4px;
-        font-size: 12px;
+        border-radius: 3px;
+        font-size: 10px;
         font-weight: bold;
         text-decoration: none;
         transition: all 0.3s ease;
+        width: 64px;
+        text-align: center;
+        box-sizing: border-box;
       }
       
       .inspect-link:hover {
@@ -141,6 +186,36 @@ class InventoryItem extends HTMLElement {
         0% { left: -100%; }
         25% { left: -100%; }
         100% { left: 100%; }
+      }
+      
+      @media (max-width: 768px) {
+        .item-content {
+          gap: 10px;
+        }
+        
+        .item-left {
+          gap: 6px;
+        }
+        
+        .item-image-container {
+          width: 80px;
+          height: 60px;
+        }
+        
+        .item-image {
+          max-height: 60px;
+        }
+        
+        .inspect-link {
+          width: 80px;
+          font-size: 10px;
+          padding: 4px 8px;
+        }
+        
+        .item-details {
+          grid-template-columns: 1fr;
+          gap: 4px;
+        }
       }
     `;
     
@@ -170,6 +245,7 @@ class InventoryItem extends HTMLElement {
     const wearElement = this.shadowRoot.querySelector('[data-field="wear"]');
     const rarityElement = this.shadowRoot.querySelector('[data-field="rarity"]');
     const inspectElement = this.shadowRoot.querySelector('[data-field="inspect-link"]');
+    const imageElement = this.shadowRoot.querySelector('[data-field="image"]');
 
 
     if (nameElement) {
@@ -199,6 +275,19 @@ class InventoryItem extends HTMLElement {
 
     if (inspectElement) {
       inspectElement.href = this.itemData.inspect_link || '#';
+    }
+
+    // Set item image
+    if (imageElement) {
+      if (this.itemData.icon_url_large) {
+        imageElement.src = `https://steamcommunity-a.akamaihd.net/economy/image/${this.itemData.icon_url_large}`;
+      } else if (this.itemData.icon_url) {
+        imageElement.src = `https://steamcommunity-a.akamaihd.net/economy/image/${this.itemData.icon_url}`;
+      } else {
+        // Fallback placeholder image
+        imageElement.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA4MCA2MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjgwIiBoZWlnaHQ9IjYwIiBmaWxsPSIjMkYzRDRBIi8+CjxwYXRoIGQ9Ik0zNSAyNUg0NVYzNUgzNVYyNVoiIGZpbGw9IiM1RTk4RDkiLz4KPHBhdGggZD0iTTQwIDIwVjQwIiBzdHJva2U9IiM1RTk4RDkiIHN0cm9rZS13aWR0aD0iMiIvPgo8cGF0aCBkPSJNMzAgMzBINTAiIHN0cm9rZT0iIzVFOThEOSIgc3Ryb2tlLXdpZHRoPSIyIi8+Cjwvc3ZnPgo=';
+      }
+      imageElement.alt = this.itemData.name || 'CS2 Item';
     }
 
     // Set border color based on item rarity

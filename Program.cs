@@ -213,6 +213,8 @@ namespace CSGOSkinAPI.Controllers
                                 rarity = rarityTag?.localized_tag_name,
                                 quality = qualityTag?.localized_tag_name,
                                 name_color = description.name_color,
+                                icon_url = description.icon_url,
+                                icon_url_large = description.icon_url_large,
                                 assetid = asset.assetid,
                                 classid = asset.classid,
                                 instanceid = asset.instanceid,
@@ -1234,6 +1236,12 @@ namespace CSGOSkinAPI.Models
         
         [JsonPropertyName("background_color")]
         public string? background_color { get; set; }
+        
+        [JsonPropertyName("icon_url")]
+        public string? icon_url { get; set; }
+        
+        [JsonPropertyName("icon_url_large")]
+        public string? icon_url_large { get; set; }
         
         [JsonPropertyName("type")]
         public string? type { get; set; }
