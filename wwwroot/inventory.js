@@ -860,6 +860,9 @@ window.addEventListener("load", function () {
     stattrakItems: document.getElementById("stattrak-items"),
     inventoryContainer: document.getElementById("inventory-container"),
     sidebar: document.getElementById("sidebar"),
+    sidebarHeader: document.getElementById("sidebar-header"),
+    sidebarArrow: document.getElementById("sidebar-arrow"),
+    sidebarSections: document.getElementById("sidebar-sections"),
     inventoryGrid: document.getElementById("inventory-grid"),
     status: document.getElementById("status"),
     filterCount: document.getElementById("filter-count"),
@@ -962,6 +965,16 @@ window.addEventListener("load", function () {
   elements.hideCommemorative.addEventListener("change", function() {
     currentFilters.hideCommemorative = this.checked;
     applySortAndFilter();
+  });
+
+  // Mobile sidebar toggle functionality
+  elements.sidebarHeader.addEventListener("click", function() {
+    const sections = elements.sidebarSections;
+    const arrow = elements.sidebarArrow;
+    
+    // Toggle expanded class
+    sections.classList.toggle("expanded");
+    arrow.classList.toggle("rotated");
   });
 
   if (window.location.hash) {

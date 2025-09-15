@@ -478,13 +478,36 @@ inventory-item {
   padding: 20px;
 }
 
+/* Desktop sidebar header */
+.sidebar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  cursor: pointer;
+}
+
 .sidebar h3 {
-  margin: 0 0 20px 0;
+  margin: 0;
   color: var(--text);
   font-size: 18px;
   font-weight: 600;
   border-bottom: 2px solid var(--pop);
   padding-bottom: 10px;
+  flex: 1;
+}
+
+.sidebar-arrow {
+  display: none;
+  font-size: 16px;
+  color: var(--text);
+  transition: transform 0.3s ease;
+  margin-left: 10px;
+}
+
+.sidebar-sections {
+  transition: max-height 0.3s ease, opacity 0.3s ease;
+  overflow: hidden;
 }
 
 .sidebar-section {
@@ -587,9 +610,43 @@ inventory-item {
     max-width: none;
   }
   
-  
   .sidebar-content {
     padding: 15px;
+  }
+  
+  /* Show arrow on mobile */
+  .sidebar-arrow {
+    display: block !important;
+  }
+  
+  .sidebar-header {
+    cursor: pointer;
+    margin-bottom: 0;
+    padding: 10px 0;
+  }
+  
+  .sidebar h3 {
+    border-bottom: none;
+    padding-bottom: 0;
+  }
+  
+  /* Collapsed state by default on mobile */
+  .sidebar-sections {
+    max-height: 0;
+    opacity: 0;
+    margin-top: 0;
+  }
+  
+  /* Expanded state */
+  .sidebar-sections.expanded {
+    max-height: 1000px;
+    opacity: 1;
+    margin-top: 15px;
+  }
+  
+  /* Arrow rotation */
+  .sidebar-arrow.rotated {
+    transform: rotate(180deg);
   }
   
   .sidebar-section {
