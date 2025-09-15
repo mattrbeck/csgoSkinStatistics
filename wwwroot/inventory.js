@@ -724,8 +724,8 @@ async function analyzeInventory(steamId) {
       elements.inventoryStatus.style.display = 'none';
       elements.status.textContent = `Successfully loaded ${csgoItems.length} items (all from database)`;
       
-      // Show inventory controls
-      elements.inventoryControls.style.display = 'block';
+      // Show sidebar controls
+      elements.sidebar.style.display = 'block';
       
       // Initialize filtered items with all items (default sort by date)
       filteredItems = [...inventoryItems];
@@ -779,8 +779,8 @@ async function analyzeInventory(steamId) {
     const analyzedItems = itemsNeedingAnalysis.length;
     elements.status.textContent = `Successfully loaded ${totalItems} items (${preloadedCount} from database, ${analyzedItems} analyzed)`;
     
-    // Show inventory controls
-    elements.inventoryControls.style.display = 'block';
+    // Show sidebar controls
+    elements.sidebar.style.display = 'block';
     
     // Initialize filtered items with all items (default sort by date)
     filteredItems = [...inventoryItems];
@@ -819,7 +819,7 @@ function resetInterface() {
   elements.inventoryStatus.style.display = 'none';
   elements.inventoryContainer.style.display = 'none';
   elements.inventorySummary.style.display = 'none';
-  elements.inventoryControls.style.display = 'none';
+  elements.sidebar.style.display = 'none';
   elements.inventoryGrid.innerHTML = '';
   elements.status.textContent = '';
   
@@ -859,7 +859,7 @@ window.addEventListener("load", function () {
     csgoItems: document.getElementById("csgo-items"),
     stattrakItems: document.getElementById("stattrak-items"),
     inventoryContainer: document.getElementById("inventory-container"),
-    inventoryControls: document.getElementById("inventory-controls"),
+    sidebar: document.getElementById("sidebar"),
     inventoryGrid: document.getElementById("inventory-grid"),
     status: document.getElementById("status"),
     filterCount: document.getElementById("filter-count"),
@@ -871,9 +871,7 @@ window.addEventListener("load", function () {
     filterQuality: document.getElementById("filter-quality"),
     filterFloatMin: document.getElementById("filter-float-min"),
     filterFloatMax: document.getElementById("filter-float-max"),
-    hideCommemorative: document.getElementById("hide-commemorative"),
-    applyFilters: document.getElementById("apply-filters"),
-    clearFilters: document.getElementById("clear-filters")
+    hideCommemorative: document.getElementById("hide-commemorative")
   };
 
   elements.textbox.addEventListener("keydown", function (event) {
@@ -920,30 +918,15 @@ window.addEventListener("load", function () {
     applySortAndFilter();
   });
 
-  elements.applyFilters.addEventListener("click", function() {
-    currentFilters.rarity = elements.filterRarity.value;
-    currentFilters.quality = elements.filterQuality.value;
-    currentFilters.floatMin = elements.filterFloatMin.value ? parseFloat(elements.filterFloatMin.value) : null;
-    currentFilters.floatMax = elements.filterFloatMax.value ? parseFloat(elements.filterFloatMax.value) : null;
-    currentFilters.hideCommemorative = elements.hideCommemorative.checked;
+  // Auto-apply filters when rarity changes
+  elements.filterRarity.addEventListener("change", function() {
+    currentFilters.rarity = this.value;
     applySortAndFilter();
   });
 
-  elements.clearFilters.addEventListener("click", function() {
-    // Reset filter controls
-    elements.filterRarity.value = '';
-    elements.filterQuality.value = '';
-    elements.filterFloatMin.value = '';
-    elements.filterFloatMax.value = '';
-    elements.hideCommemorative.checked = true;
-    
-    // Reset filter data
-    currentFilters.rarity = '';
-    currentFilters.quality = '';
-    currentFilters.floatMin = null;
-    currentFilters.floatMax = null;
-    currentFilters.hideCommemorative = true;
-    
+  // Auto-apply filters when quality changes
+  elements.filterQuality.addEventListener("change", function() {
+    currentFilters.quality = this.value;
     applySortAndFilter();
   });
 
