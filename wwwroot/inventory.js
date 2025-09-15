@@ -910,6 +910,23 @@ window.addEventListener("load", function () {
   // Sorting and filtering controls
   elements.sortSelect.addEventListener("change", function() {
     currentSort.field = this.value;
+    
+    // Set default order based on field type
+    switch (this.value) {
+      case 'float':
+      case 'date':
+      case 'name':
+        currentSort.order = 'asc';
+        break;
+      case 'rarity':
+      case 'quality':
+        currentSort.order = 'desc';
+        break;
+    }
+    
+    // Update the order dropdown to reflect the change
+    elements.sortOrder.value = currentSort.order;
+    
     applySortAndFilter();
   });
 
