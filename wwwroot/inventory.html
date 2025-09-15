@@ -132,83 +132,90 @@
       </div>
     </div>
 
-    <div id="inventory-controls" style="display: none;">
-      <div class="controls-section">
-        <div class="controls-row">
-          <div class="control-group">
-            <label for="sort-select">Sort by:</label>
-            <select id="sort-select">
-              <option value="date">Date</option>
-              <option value="name">Name</option>
-              <option value="rarity" selected>Rarity</option>
-              <option value="quality">Quality</option>
-              <option value="float">Float</option>
-            </select>
-          </div>
+    <div id="main-layout">
+      <div id="sidebar" class="sidebar" style="display: none;">
+        <div class="sidebar-content">
+          <h3>Sort & Filter</h3>
           
-          <div class="control-group">
-            <label for="sort-order">Order:</label>
-            <select id="sort-order">
-              <option value="asc">Ascending</option>
-              <option value="desc" selected>Descending</option>
-            </select>
+          <div class="sidebar-section">
+            <h4>Sort Options</h4>
+            <div class="control-group">
+              <label for="sort-select">Sort by:</label>
+              <select id="sort-select">
+                <option value="date">Date</option>
+                <option value="name">Name</option>
+                <option value="rarity" selected>Rarity</option>
+                <option value="quality">Quality</option>
+                <option value="float">Float</option>
+              </select>
+            </div>
+            
+            <div class="control-group">
+              <label for="sort-order">Order:</label>
+              <select id="sort-order">
+                <option value="asc">Ascending</option>
+                <option value="desc" selected>Descending</option>
+              </select>
+            </div>
           </div>
-        </div>
-        
-        <div class="controls-row">
-          <div class="control-group">
-            <label for="filter-rarity">Filter by Rarity:</label>
-            <select id="filter-rarity">
-              <option value="">All Rarities</option>
-              <option value="Consumer Grade">Consumer Grade</option>
-              <option value="Industrial Grade">Industrial Grade</option>
-              <option value="Mil-Spec Grade">Mil-Spec Grade</option>
-              <option value="Restricted">Restricted</option>
-              <option value="Classified">Classified</option>
-              <option value="Covert">Covert</option>
-              <option value="Extraordinary">Extraordinary</option>
-              <option value="Contraband">Contraband</option>
-            </select>
-          </div>
-          
-          <div class="control-group">
-            <label for="filter-quality">Filter by Quality:</label>
-            <select id="filter-quality">
-              <option value="">All Qualities</option>
-              <option value="Factory New">Factory New</option>
-              <option value="Minimal Wear">Minimal Wear</option>
-              <option value="Field-Tested">Field-Tested</option>
-              <option value="Well-Worn">Well-Worn</option>
-              <option value="Battle-Scarred">Battle-Scarred</option>
-            </select>
-          </div>
-          
-          <div class="control-group">
-            <label for="filter-float-min">Float Range:</label>
-            <div class="float-range">
-              <input type="number" id="filter-float-min" step="0.001" min="0" max="1" placeholder="Min">
-              <span>to</span>
-              <input type="number" id="filter-float-max" step="0.001" min="0" max="1" placeholder="Max">
+
+          <div class="sidebar-section">
+            <h4>Filter Options</h4>
+            <div class="control-group">
+              <label for="filter-rarity">Rarity:</label>
+              <select id="filter-rarity">
+                <option value="">All Rarities</option>
+                <option value="Consumer Grade">Consumer Grade</option>
+                <option value="Industrial Grade">Industrial Grade</option>
+                <option value="Mil-Spec Grade">Mil-Spec Grade</option>
+                <option value="Restricted">Restricted</option>
+                <option value="Classified">Classified</option>
+                <option value="Covert">Covert</option>
+                <option value="Extraordinary">Extraordinary</option>
+                <option value="Contraband">Contraband</option>
+              </select>
+            </div>
+            
+            <div class="control-group">
+              <label for="filter-quality">Quality:</label>
+              <select id="filter-quality">
+                <option value="">All Qualities</option>
+                <option value="Factory New">Factory New</option>
+                <option value="Minimal Wear">Minimal Wear</option>
+                <option value="Field-Tested">Field-Tested</option>
+                <option value="Well-Worn">Well-Worn</option>
+                <option value="Battle-Scarred">Battle-Scarred</option>
+              </select>
+            </div>
+            
+            <div class="control-group">
+              <label for="filter-float-min">Float Range:</label>
+              <div class="float-range">
+                <input type="number" id="filter-float-min" step="0.001" min="0" max="1" placeholder="Min">
+                <span>to</span>
+                <input type="number" id="filter-float-max" step="0.001" min="0" max="1" placeholder="Max">
+              </div>
+            </div>
+            
+            <div class="control-group checkbox-group">
+              <label for="hide-commemorative">
+                <input type="checkbox" id="hide-commemorative" checked>
+                Hide commemorative items
+              </label>
+            </div>
+            
+            <div class="filter-count-container">
+              <span id="filter-count" class="filter-count"></span>
             </div>
           </div>
         </div>
-        
-        <div class="controls-row">
-          <div class="control-group checkbox-group">
-            <label for="hide-commemorative">
-              <input type="checkbox" id="hide-commemorative" checked>
-              Hide commemorative items
-            </label>
-          </div>
-          <button id="apply-filters" type="button">Apply Filters</button>
-          <button id="clear-filters" type="button">Clear All</button>
-          <span id="filter-count" class="filter-count"></span>
+      </div>
+
+      <div id="content-area" class="content-area">
+        <div id="inventory-container">
+          <div id="inventory-grid"></div>
         </div>
       </div>
-    </div>
-
-    <div id="inventory-container">
-      <div id="inventory-grid"></div>
     </div>
 
     <template id="inventory-item-template">
