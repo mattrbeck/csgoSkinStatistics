@@ -135,9 +135,13 @@
     <div id="main-layout">
       <div id="sidebar" class="sidebar" style="display: none;">
         <div class="sidebar-content">
-          <h3>Sort & Filter</h3>
+          <div class="sidebar-header" id="sidebar-header">
+            <h3>Sort & Filter</h3>
+            <span class="sidebar-arrow" id="sidebar-arrow">▼</span>
+          </div>
           
-          <div class="sidebar-section">
+          <div class="sidebar-sections" id="sidebar-sections">
+            <div class="sidebar-section">
             <h4>Sort Options</h4>
             <div class="control-group">
               <label for="sort-select">Sort by:</label>
@@ -207,6 +211,7 @@
             <div class="filter-count-container">
               <span id="filter-count" class="filter-count"></span>
             </div>
+          </div>
           </div>
         </div>
       </div>
