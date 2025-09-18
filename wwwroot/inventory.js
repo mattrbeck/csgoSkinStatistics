@@ -632,7 +632,7 @@ function applySortAndFilter() {
   displayItems(filteredItems);
 }
 
-async function analyzeInventory(steamId) {
+async function analyzeInventory(userInput, resolvedSteamId = null) {
   try {
     // Reset cancellation state and create new AbortController
     isCancelled = false;
@@ -650,7 +650,7 @@ async function analyzeInventory(steamId) {
     elements.loadingMessage.textContent = 'Fetching inventory data...';
     updateProgress(0, 0);
 
-    const response = await fetch(`/api/inventory?steamid=${encodeURIComponent(steamId)}`, {
+    const response = await fetch(`/api/inventory?steamid=${encodeURIComponent(userInput)}`, {
       signal: analysisController.signal
     });
     const inventoryData = await response.json();
@@ -664,10 +664,32 @@ async function analyzeInventory(steamId) {
       throw new Error('Analysis was cancelled');
     }
 
+    // Clear the input field after successful server response
+    elements.textbox.value = '';
+
     const csgoItems = inventoryData.csgo_items || [];
-    
+
     if (csgoItems.length === 0) {
       throw new Error('No CS2 items found in inventory or inventory is private');
+    }
+
+    // Extract the resolved SteamId64 from the first item's inspect link
+    // All items will have the same owner SteamId64 in their inspect links
+    let actualSteamId = resolvedSteamId;
+    if (!actualSteamId && csgoItems.length > 0 && csgoItems[0].inspect_link) {
+      const inspectMatch = csgoItems[0].inspect_link.match(/S(\d+)A/);
+      if (inspectMatch && validateSteamId(inspectMatch[1])) {
+        actualSteamId = inspectMatch[1];
+      }
+    }
+
+    // Update the URL hash with the resolved SteamId64 if we have it and it's different from the input
+    if (actualSteamId && validateSteamId(actualSteamId)) {
+      // Only update hash if it's different from the current hash (to replace the URL-encoded input)
+      const currentHash = decodeURIComponent(window.location.hash.substring(1));
+      if (currentHash !== actualSteamId) {
+        window.location.hash = actualSteamId;
+      }
     }
 
     // Show the inventory container and render all items immediately
@@ -822,26 +844,44 @@ function resetInterface() {
   elements.sidebar.style.display = 'none';
   elements.inventoryGrid.innerHTML = '';
   elements.status.textContent = '';
-  
+
   // Reset button states
   elements.button.style.display = 'inline-block';
   elements.cancelButton.style.display = 'none';
-  
+
   // Reset data
   inventoryItems = [];
   filteredItems = [];
   currentSort = { field: 'rarity', order: 'desc' };
   currentFilters = { rarity: '', quality: '', floatMin: null, floatMax: null, hideCommemorative: true };
-  
+
   // Cancel any ongoing analysis
   if (analysisController) {
     cancelAnalysis();
   }
+
+  // Note: We don't clear the hash here to preserve shareable links
 }
 
 function validateSteamId(steamId) {
   const steamId64Regex = /^7656119\d{10}$/;
   return steamId64Regex.test(steamId);
+}
+
+function extractSteamIdFromInput(input) {
+  // Check if it's already a valid SteamId64
+  if (validateSteamId(input)) {
+    return input;
+  }
+
+  // Try to extract from Steam profile URL
+  const profileMatch = input.match(/steamcommunity\.com\/profiles\/(\d+)/);
+  if (profileMatch && validateSteamId(profileMatch[1])) {
+    return profileMatch[1];
+  }
+
+  // Return null for custom URLs or invalid input - let the server handle it
+  return null;
 }
 
 window.addEventListener("load", function () {
@@ -887,22 +927,22 @@ window.addEventListener("load", function () {
   elements.button.addEventListener("click", function (element) {
     element.target.blur();
 
-    const steamId = elements.textbox.value.trim();
-    
-    if (!steamId) {
-      elements.errorDisplay.innerHTML = 'Please enter a Steam user ID';
-      elements.errorDisplay.style.display = 'block';
-      return;
-    }
-    
-    if (!validateSteamId(steamId)) {
-      elements.errorDisplay.innerHTML = 'Invalid Steam ID format. Please enter a valid Steam 64-bit ID (e.g., 76561198261551396)';
+    const userInput = elements.textbox.value.trim();
+
+    if (!userInput) {
+      elements.errorDisplay.innerHTML = 'Please enter a Steam profile URL';
       elements.errorDisplay.style.display = 'block';
       return;
     }
 
+    // Extract SteamId64 if possible, otherwise let server handle resolution
+    const extractedSteamId = extractSteamIdFromInput(userInput);
+
+    // Immediately set the hash to the user's input (URL encoded)
+    window.location.hash = encodeURIComponent(userInput);
+
     resetInterface();
-    analyzeInventory(steamId);
+    analyzeInventory(userInput, extractedSteamId);
   });
 
   elements.cancelButton.addEventListener("click", function (element) {
@@ -978,9 +1018,16 @@ window.addEventListener("load", function () {
   });
 
   if (window.location.hash) {
-    const hashSteamId = window.location.hash.substring(1);
-    if (validateSteamId(hashSteamId)) {
-      elements.textbox.value = hashSteamId;
+    const hashValue = decodeURIComponent(window.location.hash.substring(1));
+    const extractedId = extractSteamIdFromInput(hashValue);
+
+    if (extractedId) {
+      // If we can extract a SteamId64, use it directly
+      elements.textbox.value = extractedId;
+      elements.button.click();
+    } else if (hashValue && (hashValue.includes('steamcommunity.com') || !hashValue.match(/^\d+$/))) {
+      // If it looks like a URL or custom ID, try it
+      elements.textbox.value = hashValue;
       elements.button.click();
     }
   }
