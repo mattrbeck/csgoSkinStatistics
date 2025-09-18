@@ -24,6 +24,7 @@ builder.Services.AddResponseCompression(options =>
     options.MimeTypes = Microsoft.AspNetCore.ResponseCompression.ResponseCompressionDefaults.MimeTypes.Concat(
         ["application/javascript", "text/css", "text/html", "text/json", "text/plain"]);
 });
+builder.Services.AddHttpClient();
 builder.Services.AddSingleton<SteamService>();
 builder.Services.AddSingleton<DatabaseService>();
 builder.Services.AddSingleton<ConstDataService>();
@@ -62,8 +63,10 @@ namespace CSGOSkinAPI.Controllers
 {
     [ApiController]
     [Route("api")]
-    public partial class SkinController(SteamService steamService, DatabaseService dbService, ConstDataService constDataService) : ControllerBase
+    public partial class SkinController(SteamService steamService, DatabaseService dbService, ConstDataService constDataService, IHttpClientFactory httpClientFactory) : ControllerBase
     {
+        private static readonly string? SteamApiKey = Environment.GetEnvironmentVariable("STEAM_API_KEY");
+
         [GeneratedRegex(@"steam://rungame/730/76561202255233023/ csgo_econ_action_preview ([SM])(\d+)A(\d+)D(\d+)", RegexOptions.Compiled)]
         private static partial Regex InspectUrlRegex();
         [GeneratedRegex(@"steam://rungame/730/76561202255233023/ csgo_econ_action_preview ([0-9A-F]+)", RegexOptions.Compiled)]
@@ -127,12 +130,16 @@ namespace CSGOSkinAPI.Controllers
                     return BadRequest(new { error = "Steam ID is required" });
                 }
 
-                if (!ulong.TryParse(steamid, out var steamId) || !IsValidSteamId64(steamId))
+                var resolvedSteamId = await ResolveSteamIdAsync(steamid);
+                if (resolvedSteamId == null)
                 {
-                    return BadRequest(new { error = "Invalid Steam ID format" });
+                    return BadRequest(new { error = "Unable to resolve Steam ID or inventory" });
                 }
 
-                using var httpClient = new HttpClient();
+                var steamId = resolvedSteamId.Value;
+                steamid = steamId.ToString(); // Use resolved SteamId64 for inventory URL
+
+                using var httpClient = httpClientFactory.CreateClient();
                 httpClient.Timeout = TimeSpan.FromSeconds(10);
                 
                 var inventoryUrl = $"https://steamcommunity.com/inventory/{steamid}/730/2?l=english&count=2000";
@@ -259,6 +266,84 @@ namespace CSGOSkinAPI.Controllers
         private static bool IsValidSteamId64(ulong steamId)
         {
             return steamId.ToString().StartsWith("76561") && steamId.ToString().Length == 17;
+        }
+
+        private async Task<ulong?> ResolveSteamIdAsync(string input)
+        {
+            // Check if it's already a valid SteamId64
+            if (ulong.TryParse(input, out var steamId) && IsValidSteamId64(steamId))
+            {
+                return steamId;
+            }
+
+            // Try to parse as Steam profile URL
+            var profileMatch = Regex.Match(input, @"steamcommunity\.com/profiles/(\d+)");
+            if (profileMatch.Success && ulong.TryParse(profileMatch.Groups[1].Value, out steamId) && IsValidSteamId64(steamId))
+            {
+                return steamId;
+            }
+
+            // Try to parse as Steam custom URL
+            var customUrlMatch = Regex.Match(input, @"steamcommunity\.com/id/([^/?]+)");
+            if (customUrlMatch.Success)
+            {
+                var customUrl = customUrlMatch.Groups[1].Value;
+                return await ResolveCustomUrlToSteamId64Async(customUrl);
+            }
+
+            // If it doesn't contain steamcommunity.com, treat it as a potential custom URL directly
+            if (!input.Contains("steamcommunity.com") && !input.All(char.IsDigit))
+            {
+                return await ResolveCustomUrlToSteamId64Async(input);
+            }
+
+            return null;
+        }
+
+        private async Task<ulong?> ResolveCustomUrlToSteamId64Async(string customUrl)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(SteamApiKey))
+                {
+                    Console.WriteLine("Steam API key not configured");
+                    return null;
+                }
+
+                using var httpClient = httpClientFactory.CreateClient();
+                httpClient.Timeout = TimeSpan.FromSeconds(5);
+
+                var apiUrl = $"https://api.steampowered.com/ISteamUser/ResolveVanityURL/v0001/?key={SteamApiKey}&vanityurl={customUrl}";
+
+                var response = await httpClient.GetAsync(apiUrl);
+                if (!response.IsSuccessStatusCode)
+                {
+                    Console.WriteLine($"Steam API request failed: {response.StatusCode}");
+                    return null;
+                }
+
+                var jsonContent = await response.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(jsonContent);
+
+                if (doc.RootElement.TryGetProperty("response", out var responseElement) &&
+                    responseElement.TryGetProperty("success", out var successElement) &&
+                    successElement.GetInt32() == 1 &&
+                    responseElement.TryGetProperty("steamid", out var steamIdElement))
+                {
+                    if (ulong.TryParse(steamIdElement.GetString(), out var steamId))
+                    {
+                        return steamId;
+                    }
+                }
+
+                Console.WriteLine($"Failed to resolve custom URL '{customUrl}' to SteamId64");
+                return null;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error resolving custom URL '{customUrl}': {ex.Message}");
+                return null;
+            }
         }
 
         private static (ulong s, ulong a, ulong d, ulong m, CEconItemPreviewDataBlock? directItem)? ParseInspectUrl(string url)
