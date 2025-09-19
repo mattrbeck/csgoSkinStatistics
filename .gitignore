@@ -4,3 +4,18 @@ bin/
 obj/
 .claude/
 .idea/
+node_modules/
+
+# Test artifacts
+coverage/
+.nyc_output/
+TestResults/
+*.trx
+*.coverage
+junit.xml
+*_test.db
+*.test.db
+
+# Jest
+__snapshots__/
+.jest/
