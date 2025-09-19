@@ -13,4 +13,10 @@
     <PackageReference Include="SteamKit2" Version="3.3.1" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Remove="csgoSkinStatistics.Tests/**" />
+    <Content Remove="csgoSkinStatistics.Tests/**" />
+    <None Remove="csgoSkinStatistics.Tests/**" />
+  </ItemGroup>
+
 </Project>

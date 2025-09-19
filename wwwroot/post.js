@@ -179,7 +179,7 @@ window.addEventListener("load", function () {
     itemQuality: document.getElementById("item_quality"),
     status: document.getElementById("status"),
     stattrakIndicator: document.getElementById("stattrak-indicator"),
-    inspectButton: document.getElementById("inspect_button"),
+    inspectButton: document.getElementById("inspect-button"),
     textbox: document.getElementById("textbox"),
     button: document.getElementById("button"),
     errorDisplay: document.getElementById("error-display"),

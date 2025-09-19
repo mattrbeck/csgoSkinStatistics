@@ -50,6 +50,7 @@ nav a.current {
   from {
     background-color: var(--error);
   }
+
   to {
     background-color: #e74c3c;
   }
@@ -59,6 +60,7 @@ nav a.current {
   from {
     background-color: #e74c3c;
   }
+
   to {
     background-color: var(--error);
   }
@@ -135,6 +137,11 @@ nav a.current {
   margin-bottom: 5px;
 }
 
+.float-range span {
+  color: var(--text);
+  font-size: 14px;
+}
+
 .stat-item span:last-child {
   font-size: 24px;
   font-weight: bold;
@@ -186,13 +193,6 @@ inventory-item {
   font-size: 14px;
 }
 
-.control-group select:focus,
-.control-group input[type="number"]:focus {
-  outline: none;
-  border-color: var(--pop);
-  box-shadow: 0 0 0 2px rgba(46, 204, 113, 0.2);
-}
-
 .float-range {
   display: flex;
   align-items: center;
@@ -201,6 +201,13 @@ inventory-item {
 
 .float-range input[type="number"] {
   width: 80px;
+}
+
+.control-group select:focus,
+.control-group input[type="number"]:focus {
+  outline: none;
+  border-color: var(--pop);
+  box-shadow: 0 0 0 2px rgb(46 204 113 / 20%);
 }
 
 .checkbox-group {
@@ -242,12 +249,6 @@ inventory-item {
   font-size: 12px;
   font-weight: bold;
 }
-
-.float-range span {
-  color: var(--text);
-  font-size: 14px;
-}
-
 
 /* Main layout with three-column structure */
 #main-layout {
@@ -317,7 +318,7 @@ inventory-item {
 }
 
 .sidebar h4 {
-  margin: 0 0 15px 0;
+  margin: 0 0 15px;
   color: var(--text);
   font-size: 14px;
   font-weight: 500;
@@ -384,13 +385,13 @@ inventory-item {
 }
 
 /* Allow content to expand on narrower screens */
-@media (max-width: 1320px) {
+@media (width <= 1320px) {
   .content-area {
     max-width: none;
   }
 }
 
-@media (max-width: 1024px) {
+@media (width <= 1024px) {
   #main-layout {
     flex-direction: column;
     max-width: none;
@@ -456,7 +457,7 @@ inventory-item {
   }
 }
 
-@media (max-width: 768px) {
+@media (width <= 768px) {
   .content-area {
     padding: 0;
   }
