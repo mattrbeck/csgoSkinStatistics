@@ -610,7 +610,7 @@ function displayItems(items) {
   const inventoryGrid = elements.inventoryGrid;
   inventoryGrid.innerHTML = '';
   
-  items.forEach((itemData, displayIndex) => {
+  items.forEach((itemData) => {
     const itemElement = createItemElement(itemData.steamData, itemData.originalIndex);
     inventoryGrid.appendChild(itemElement);
     

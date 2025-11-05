@@ -951,11 +951,17 @@ namespace CSGOSkinAPI.Services
 
     public class DatabaseService
     {
-        private const string ConnectionString = "Data Source=searches.db;foreign keys=true;";
+        private readonly string _connectionString;
+
+        public DatabaseService(string? databasePath = null)
+        {
+            var dbPath = databasePath ?? "searches.db";
+            _connectionString = $"Data Source={dbPath};foreign keys=true;";
+        }
 
         public async Task InitializeDatabaseAsync()
         {
-            using var connection = new SqliteConnection(ConnectionString);
+            using var connection = new SqliteConnection(_connectionString);
             await connection.OpenAsync();
 
             var createTableCommand = @"
@@ -1006,7 +1012,7 @@ namespace CSGOSkinAPI.Services
 
         public async Task<List<CEconItemPreviewDataBlock.Sticker>> GetStickersAsync(ulong itemId, bool stickersTable)
         {
-            using var connection = new SqliteConnection(ConnectionString);
+            using var connection = new SqliteConnection(_connectionString);
             await connection.OpenAsync();
 
             const string stickersQuery = "SELECT * FROM stickers WHERE itemid = @itemid ORDER BY slot";
@@ -1055,7 +1061,7 @@ namespace CSGOSkinAPI.Services
 
         public async Task<CEconItemPreviewDataBlock?> GetItemAsync(ulong itemId)
         {
-            using var connection = new SqliteConnection(ConnectionString);
+            using var connection = new SqliteConnection(_connectionString);
             await connection.OpenAsync();
 
             var query = "SELECT * FROM searches WHERE itemid = @itemid";
@@ -1101,7 +1107,7 @@ namespace CSGOSkinAPI.Services
 
         public async Task SaveItemAsync(CEconItemPreviewDataBlock item)
         {
-            using var connection = new SqliteConnection(ConnectionString);
+            using var connection = new SqliteConnection(_connectionString);
             await connection.OpenAsync();
 
             var insert = @"
@@ -1139,9 +1145,9 @@ namespace CSGOSkinAPI.Services
             }
         }
 
-        private static async Task SaveStickersAsync(ulong itemId, List<CEconItemPreviewDataBlock.Sticker> items, bool stickerTable)
+        private async Task SaveStickersAsync(ulong itemId, List<CEconItemPreviewDataBlock.Sticker> items, bool stickerTable)
         {
-            using var connection = new SqliteConnection(ConnectionString);
+            using var connection = new SqliteConnection(_connectionString);
             await connection.OpenAsync();
 
             const string insertSchema = @"

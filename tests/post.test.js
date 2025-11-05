@@ -112,122 +112,170 @@ describe('Utility Functions', () => {
 });
 
 describe('Display Functions', () => {
-  function display(iteminfo, url, loadTime) {
-    // Mock elements for testing
-    const testElements = {
-      itemName: document.getElementById('item_name'),
-      itemPaintwear: document.getElementById('item_paintwear'),
-      itemWear: document.getElementById('item_wear'),
-      itemRarity: document.getElementById('item_rarity'),
-      itemItemid: document.getElementById('item_itemid'),
-      itemPaintseed: document.getElementById('item_paintseed'),
-      status: document.getElementById('status'),
-      stattrakIndicator: document.getElementById('stattrak-indicator'),
-      inspectButton: document.getElementById('inspect-button'),
-      errorDisplay: document.getElementById('error-display'),
-    };
-
-    if (iteminfo.error) {
-      testElements.errorDisplay.innerHTML = iteminfo.error;
-      testElements.errorDisplay.style.display = 'block';
-      return;
-    }
-
-    const conversionBuffer = new ArrayBuffer(4);
-    const conversionView = new DataView(conversionBuffer);
-
-    function uint32ToFloat32(uint32Value) {
-      conversionView.setUint32(0, uint32Value);
-      return conversionView.getFloat32(0);
-    }
-
-    function getWearFromFloat(float) {
-      if (float < 0.07) return "Factory New";
-      if (float < 0.15) return "Minimal Wear";
-      if (float < 0.38) return "Field-Tested";
-      if (float < 0.45) return "Well-Worn";
-      return "Battle-Scarred";
-    }
-
-    function getRarityFromNumber(rarityNumber) {
-      const rarities = [
-        "Default",
-        "Consumer Grade",
-        "Industrial Grade",
-        "Mil-Spec",
-        "Restricted",
-        "Classified",
-        "Covert",
-        "Contraband",
-      ];
-      return rarities[rarityNumber] || "Unknown";
-    }
-
-    testElements.itemName.innerHTML = `${iteminfo.weapon} | ${iteminfo.skin} <span class="pop">${iteminfo.special}</span>`;
-    testElements.itemName.classList.remove("knife", "souvenir");
-
-    if (iteminfo.quality === 3) {
-      testElements.itemName.classList.add("knife");
-    }
-    if (iteminfo.quality === 12) {
-      testElements.itemName.classList.add("souvenir");
-    }
-
-    const paintwearFloat = uint32ToFloat32(iteminfo.paintwear);
-    testElements.itemPaintwear.innerHTML = paintwearFloat;
-    testElements.itemWear.innerHTML = getWearFromFloat(paintwearFloat);
-    testElements.itemRarity.innerHTML = getRarityFromNumber(iteminfo.rarity);
-
-    if (iteminfo.itemid == 0) {
-      testElements.itemItemid.innerHTML = "Unknown";
-    } else {
-      testElements.itemItemid.innerHTML = iteminfo.itemid;
-    }
-
-    testElements.itemPaintseed.innerHTML = iteminfo.paintseed;
-    testElements.status.innerHTML = `Loaded in ${loadTime} seconds`;
-    testElements.stattrakIndicator.classList.remove("yes");
-
-    if (iteminfo.stattrak) {
-      testElements.stattrakIndicator.classList.add("yes");
-    }
-
-    testElements.inspectButton.href = url;
-  }
+  // Mock the helper functions that display() depends on
+  const mockStopLoading = jest.fn();
+  const mockHandleError = jest.fn();
 
   // Global elements variable like in the real implementation
   let elements;
 
+  function display(iteminfo, url, loadTime) {
+    mockStopLoading();
+
+    if (iteminfo.error) {
+      mockHandleError(iteminfo.error);
+      return;
+    }
+
+    try {
+      const conversionBuffer = new ArrayBuffer(4);
+      const conversionView = new DataView(conversionBuffer);
+
+      function uint32ToFloat32(uint32Value) {
+        conversionView.setUint32(0, uint32Value);
+        return conversionView.getFloat32(0);
+      }
+
+      function getWearFromFloat(float) {
+        if (float < 0.07) return "Factory New";
+        if (float < 0.15) return "Minimal Wear";
+        if (float < 0.38) return "Field-Tested";
+        if (float < 0.45) return "Well-Worn";
+        return "Battle-Scarred";
+      }
+
+      function getRarityFromNumber(rarityNumber) {
+        const rarities = [
+          "Default",
+          "Consumer Grade",
+          "Industrial Grade",
+          "Mil-Spec",
+          "Restricted",
+          "Classified",
+          "Covert",
+          "Contraband",
+        ];
+        return rarities[rarityNumber] || "Unknown";
+      }
+
+      elements.itemName.innerHTML = `${iteminfo.weapon} | ${iteminfo.skin} <span class="pop">${iteminfo.special}</span>`;
+      elements.itemName.classList.remove("knife", "souvenir");
+
+      if (iteminfo.quality === 3) {
+        elements.itemName.classList.add("knife");
+      }
+      if (iteminfo.quality === 12) {
+        elements.itemName.classList.add("souvenir");
+      }
+
+      const paintwearFloat = uint32ToFloat32(iteminfo.paintwear);
+      elements.itemPaintwear.innerHTML = paintwearFloat;
+      elements.itemWear.innerHTML = getWearFromFloat(paintwearFloat);
+      elements.itemRarity.innerHTML = getRarityFromNumber(iteminfo.rarity);
+
+      if (iteminfo.itemid == 0) {
+        elements.itemItemid.innerHTML = "Unknown";
+      } else {
+        elements.itemItemid.innerHTML = iteminfo.itemid;
+      }
+
+      elements.itemPaintseed.innerHTML = iteminfo.paintseed;
+      elements.status.innerHTML = `Loaded in ${loadTime} seconds`;
+      elements.stattrakIndicator.classList.remove("yes");
+
+      if (iteminfo.stattrak) {
+        elements.stattrakIndicator.classList.add("yes");
+      }
+
+      elements.inspectButton.href = url;
+    } catch (e) {
+      mockHandleError("An error occurred while displaying the item data");
+      throw e;
+    }
+  }
+
   function setupDisplayDOM() {
     document.body.innerHTML = `
-      <div id="item_name"></div>
-      <div id="item_paintwear"></div>
-      <div id="item_wear"></div>
-      <div id="item_rarity"></div>
-      <div id="item_itemid"></div>
-      <div id="item_paintseed"></div>
+      <div>
+        <div id="item_name"></div>
+      </div>
+      <div>
+        <div id="item_paintwear"></div>
+      </div>
+      <div>
+        <div id="item_wear"></div>
+      </div>
+      <div>
+        <div id="item_rarity"></div>
+      </div>
+      <div>
+        <div id="item_itemid"></div>
+      </div>
+      <div>
+        <div id="item_paintseed"></div>
+      </div>
       <div id="status"></div>
       <div id="stattrak-indicator"></div>
       <a id="inspect-button"></a>
       <div id="error-display" style="display: none;"></div>
     `;
 
-    // Initialize elements like in the real implementation
+    // Initialize elements with proper mocking
+    const itemNameEl = document.getElementById("item_name");
+    const stattrakEl = document.getElementById("stattrak-indicator");
+
     elements = {
-      itemName: document.getElementById("item_name"),
-      itemPaintwear: document.getElementById("item_paintwear"),
-      itemWear: document.getElementById("item_wear"),
-      itemRarity: document.getElementById("item_rarity"),
-      itemItemid: document.getElementById("item_itemid"),
-      itemPaintseed: document.getElementById("item_paintseed"),
-      status: document.getElementById("status"),
-      stattrakIndicator: document.getElementById("stattrak-indicator"),
-      inspectButton: document.getElementById("inspect-button"),
-      errorDisplay: document.getElementById("error-display"),
+      itemName: {
+        ...itemNameEl,
+        classList: { add: jest.fn(), remove: jest.fn() },
+        innerHTML: ""
+      },
+      itemPaintwear: {
+        ...document.getElementById("item_paintwear"),
+        innerHTML: ""
+      },
+      itemWear: {
+        ...document.getElementById("item_wear"),
+        innerHTML: ""
+      },
+      itemRarity: {
+        ...document.getElementById("item_rarity"),
+        innerHTML: ""
+      },
+      itemItemid: {
+        ...document.getElementById("item_itemid"),
+        innerHTML: ""
+      },
+      itemPaintseed: {
+        ...document.getElementById("item_paintseed"),
+        innerHTML: ""
+      },
+      status: {
+        ...document.getElementById("status"),
+        innerHTML: ""
+      },
+      stattrakIndicator: {
+        ...stattrakEl,
+        classList: { add: jest.fn(), remove: jest.fn() }
+      },
+      inspectButton: {
+        ...document.getElementById("inspect-button"),
+        href: ""
+      },
+      errorDisplay: {
+        ...document.getElementById("error-display"),
+        innerHTML: "",
+        style: { display: "" }
+      },
     };
   }
 
-  test.skip('display should handle valid item data correctly', () => {
+  beforeEach(() => {
+    mockStopLoading.mockClear();
+    mockHandleError.mockClear();
+  });
+
+  test('display should handle valid item data correctly', () => {
     setupDisplayDOM();
 
     const itemInfo = {
@@ -245,22 +293,42 @@ describe('Display Functions', () => {
     const url = "steam://inspect/test";
     const loadTime = "2.5";
 
-    // Just verify the function doesn't crash - DOM testing is complex in Jest
-    expect(() => display(itemInfo, url, loadTime)).not.toThrow();
+    display(itemInfo, url, loadTime);
+
+    // Verify stopLoading was called
+    expect(mockStopLoading).toHaveBeenCalled();
+
+    // Verify DOM updates
+    expect(elements.itemName.innerHTML).toBe("AK-47 | Redline <span class=\"pop\">StatTrak™</span>");
+    expect(elements.itemPaintwear.innerHTML).toBe(1);
+    expect(elements.itemWear.innerHTML).toBe("Battle-Scarred");
+    expect(elements.itemRarity.innerHTML).toBe("Mil-Spec");
+    expect(elements.itemItemid.innerHTML).toBe(12345);
+    expect(elements.itemPaintseed.innerHTML).toBe(661);
+    expect(elements.status.innerHTML).toBe("Loaded in 2.5 seconds");
+    expect(elements.inspectButton.href).toBe(url);
+
+    // Verify StatTrak indicator was added
+    expect(elements.stattrakIndicator.classList.add).toHaveBeenCalledWith("yes");
   });
 
-  test.skip('display should handle error correctly', () => {
+  test('display should handle error correctly', () => {
     setupDisplayDOM();
 
     const itemInfo = {
       error: "Item not found"
     };
 
-    // Just verify the function doesn't crash with error input
-    expect(() => display(itemInfo, "", "0")).not.toThrow();
+    display(itemInfo, "", "0");
+
+    // Verify stopLoading was called
+    expect(mockStopLoading).toHaveBeenCalled();
+
+    // Verify handleError was called with the error message
+    expect(mockHandleError).toHaveBeenCalledWith("Item not found");
   });
 
-  test.skip('display should handle knife items correctly', () => {
+  test('display should handle knife items correctly', () => {
     setupDisplayDOM();
 
     const itemInfo = {
@@ -275,11 +343,18 @@ describe('Display Functions', () => {
       stattrak: false
     };
 
-    // Just verify the function doesn't crash with knife input
-    expect(() => display(itemInfo, "", "1.0")).not.toThrow();
+    display(itemInfo, "", "1.0");
+
+    // Verify knife class was added
+    expect(elements.itemName.classList.add).toHaveBeenCalledWith("knife");
+
+    // Verify other fields are set correctly
+    expect(elements.itemName.innerHTML).toBe("Karambit | Doppler <span class=\"pop\">Phase 2</span>");
+    expect(elements.itemWear.innerHTML).toBe("Battle-Scarred");
+    expect(elements.itemRarity.innerHTML).toBe("Covert");
   });
 
-  test.skip('display should handle souvenir items correctly', () => {
+  test('display should handle souvenir items correctly', () => {
     setupDisplayDOM();
 
     const itemInfo = {
@@ -294,8 +369,18 @@ describe('Display Functions', () => {
       stattrak: false
     };
 
-    // Just verify the function doesn't crash with souvenir input
-    expect(() => display(itemInfo, "", "1.5")).not.toThrow();
+    display(itemInfo, "", "1.5");
+
+    // Verify souvenir class was added
+    expect(elements.itemName.classList.add).toHaveBeenCalledWith("souvenir");
+
+    // Verify other fields are set correctly
+    expect(elements.itemName.innerHTML).toBe("AK-47 | Safari Mesh <span class=\"pop\"></span>");
+    expect(elements.itemWear.innerHTML).toBe("Battle-Scarred");
+    expect(elements.itemRarity.innerHTML).toBe("Industrial Grade");
+
+    // Verify StatTrak was not added (souvenirs can't be StatTrak)
+    expect(elements.stattrakIndicator.classList.add).not.toHaveBeenCalledWith("yes");
   });
 });
 
