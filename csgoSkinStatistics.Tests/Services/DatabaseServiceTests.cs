@@ -10,33 +10,28 @@ namespace csgoSkinStatistics.Tests.Services;
 public class DatabaseServiceTests : IDisposable
 {
     private readonly DatabaseService _databaseService;
-    private readonly string _testDbPath = "test_searches.db";
+    private readonly string _testDbPath;
 
     public DatabaseServiceTests()
     {
+        // Create a unique database file for this test instance
+        _testDbPath = $"test_searches_{Guid.NewGuid():N}.db";
+
         // Clean up any existing test database
         if (File.Exists(_testDbPath))
         {
             File.Delete(_testDbPath);
         }
-        if (File.Exists("searches.db"))
-        {
-            File.Delete("searches.db");
-        }
 
-        _databaseService = new DatabaseService();
+        _databaseService = new DatabaseService(_testDbPath);
     }
 
     public void Dispose()
     {
-        // Clean up test databases
+        // Clean up test database
         if (File.Exists(_testDbPath))
         {
             File.Delete(_testDbPath);
-        }
-        if (File.Exists("searches.db"))
-        {
-            File.Delete("searches.db");
         }
     }
 
@@ -45,7 +40,7 @@ public class DatabaseServiceTests : IDisposable
     {
         await _databaseService.InitializeDatabaseAsync();
 
-        using var connection = new SqliteConnection("Data Source=searches.db;foreign keys=true;");
+        using var connection = new SqliteConnection($"Data Source={_testDbPath};foreign keys=true;");
         await connection.OpenAsync();
 
         var command = new SqliteCommand("SELECT name FROM sqlite_master WHERE type='table'", connection);
@@ -62,7 +57,7 @@ public class DatabaseServiceTests : IDisposable
         Assert.Contains("keychains", tables);
     }
 
-    [Fact(Skip = "Database isolation issue - would require service refactoring")]
+    [Fact]
     public async Task SaveItemAsync_ShouldSaveItemToDatabase()
     {
         await _databaseService.InitializeDatabaseAsync();
@@ -94,12 +89,9 @@ public class DatabaseServiceTests : IDisposable
         Assert.Equal(item.paintseed, retrievedItem.paintseed);
         Assert.Equal(item.inventory, retrievedItem.inventory);
         Assert.Equal(item.origin, retrievedItem.origin);
-
-        // Cleanup
-        File.Delete("searches.db");
     }
 
-    [Fact(Skip = "Database isolation issue - would require service refactoring")]
+    [Fact]
     public async Task SaveItemWithExtrasAsync_ShouldSaveItemWithStickersAndKeychains()
     {
         await _databaseService.InitializeDatabaseAsync();
@@ -150,9 +142,6 @@ public class DatabaseServiceTests : IDisposable
         Assert.Equal(0u, keychain.slot);
         Assert.Equal(100u, keychain.sticker_id);
         Assert.Equal(0.2f, keychain.wear);
-
-        // Cleanup
-        File.Delete("searches.db");
     }
 
     [Fact]
@@ -163,12 +152,9 @@ public class DatabaseServiceTests : IDisposable
         var result = await _databaseService.GetItemAsync(99999);
 
         Assert.Null(result);
-
-        // Cleanup
-        File.Delete("searches.db");
     }
 
-    [Fact(Skip = "Database isolation issue - would require service refactoring")]
+    [Fact]
     public async Task GetStickersAsync_ShouldReturnCorrectStickers()
     {
         await _databaseService.InitializeDatabaseAsync();
@@ -207,8 +193,5 @@ public class DatabaseServiceTests : IDisposable
         Assert.Equal(2, stickers.Count);
         Assert.Equal(0u, stickers[0].slot);
         Assert.Equal(1u, stickers[1].slot);
-
-        // Cleanup
-        File.Delete("searches.db");
     }
 }
