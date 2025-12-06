@@ -737,22 +737,23 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
     }
     
     console.log(`Pre-loaded ${preloadedCount} items from database, ${itemsNeedingAnalysis.length} items need analysis`);
-    
+
     // Update summary with initial data including pre-loaded items
     updateSummary(inventoryData, processedItems);
-    
+
+    // Show sidebar controls immediately after rendering items
+    // This allows users to interact with sort/filter while analysis continues
+    elements.sidebar.style.display = 'block';
+
+    // Initialize filtered items with all items and apply initial sort/filter
+    filteredItems = [...inventoryItems];
+    applySortAndFilter();
+
     if (itemsNeedingAnalysis.length === 0) {
       // All items were pre-loaded!
       elements.inventoryStatus.style.display = 'none';
       elements.status.textContent = `Successfully loaded ${csgoItems.length} items (all from database)`;
-      
-      // Show sidebar controls
-      elements.sidebar.style.display = 'block';
-      
-      // Initialize filtered items with all items (default sort by date)
-      filteredItems = [...inventoryItems];
-      applySortAndFilter();
-      
+
       return;
     }
     
@@ -800,12 +801,8 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
     const totalItems = csgoItems.length;
     const analyzedItems = itemsNeedingAnalysis.length;
     elements.status.textContent = `Successfully loaded ${totalItems} items (${preloadedCount} from database, ${analyzedItems} analyzed)`;
-    
-    // Show sidebar controls
-    elements.sidebar.style.display = 'block';
-    
-    // Initialize filtered items with all items (default sort by date)
-    filteredItems = [...inventoryItems];
+
+    // Re-apply sort and filter now that all items have detailed data
     applySortAndFilter();
     
   } catch (error) {
