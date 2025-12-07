@@ -6,6 +6,12 @@
   --text: #ecf0f1;
   --error: #cc492f;
   --souvenir: #ccb22f;
+
+  /* Quality colors based on CS2 schema */
+  --genuine: #4D7455;    /* Genuine - Green */
+  --vintage: #476291;    /* Vintage - Blue */
+  --valve: #A050CF;      /* Developer/Valve - Purple */
+  --selfmade: #70B04A;   /* Self-Made - Bright Green */
 }
 
 .pop {
@@ -124,6 +130,26 @@ body {
 .souvenir::before {
   content: "Souvenir  ";
   color: var(--souvenir);
+}
+
+.genuine::before {
+  content: "Genuine  ";
+  color: var(--genuine);
+}
+
+.vintage::before {
+  content: "Vintage  ";
+  color: var(--vintage);
+}
+
+.valve::before {
+  content: "Valve  ";
+  color: var(--valve);
+}
+
+.selfmade::before {
+  content: "Self-Made  ";
+  color: var(--selfmade);
 }
 
 #container {

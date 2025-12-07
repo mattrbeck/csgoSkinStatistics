@@ -23,13 +23,51 @@ function getRarityFromNumber(rarityNumber) {
     "Default",
     "Consumer Grade",
     "Industrial Grade",
-    "Mil-Spec",
+    "Mil-Spec Grade",
     "Restricted",
     "Classified",
     "Covert",
     "Contraband",
   ];
   return rarities[rarityNumber] || "Unknown";
+}
+
+// Quality defines the category of existence / provenance state of the item
+// This is distinct from wear (Factory New, etc.) which is determined by float value
+function getQualityFromNumber(qualityNumber) {
+  const qualities = {
+    0: "Normal",       // Stock/Vanilla items, default weapons
+    1: "Genuine",      // Promotional items from real-world events
+    2: "Vintage",      // Legacy items predating economy updates
+    3: "★",            // Unusual - Knives and Gloves (star prefix)
+    4: "Unique",       // Standard drops from cases (no prefix)
+    5: "Community",    // Reserved/Deprecated
+    6: "Valve",        // Developer items with Flying Bits effect
+    7: "Self-Made",    // Workshop creator items with Community Sparkle
+    9: "StatTrak™",    // Items with kill counter (Strange)
+    12: "Souvenir",    // Tournament drops with pre-applied stickers
+  };
+  return qualities[qualityNumber] || null;
+}
+
+function getOriginFromNumber(originNumber) {
+  const origins = {
+    0: "Timed Drop",      // Random drop at end of match
+    1: "Achievement",     // Granted via achievement (mostly obsolete)
+    2: "Purchased",       // Bought from in-game store
+    3: "Traded",          // Obtained via trade
+    4: "Crafted",         // Created via Trade Up Contract
+    8: "Unboxed",         // Found in Crate (case opening)
+    24: "Tournament Drop" // Dropped during a Major (Souvenir Packages)
+  };
+  return origins[originNumber] || "Unknown";
+}
+
+// Check if defindex belongs to knife/glove category (500+ for knives, 5000+ for gloves)
+function isKnifeOrGlove(defindex) {
+  // Knives typically have defindex 500-600
+  // Gloves typically have defindex 5000+
+  return (defindex >= 500 && defindex < 600) || defindex >= 5000;
 }
 
 function display(iteminfo, url, loadTime) {
@@ -42,11 +80,22 @@ function display(iteminfo, url, loadTime) {
 
   try {
     elements.itemName.innerHTML = `${iteminfo.weapon} | ${iteminfo.skin} <span class="pop">${iteminfo.special}</span>`;
-    elements.itemName.classList.remove("knife", "souvenir");
-    if (iteminfo.quality === 3) {
+    elements.itemName.classList.remove("knife", "souvenir", "genuine", "vintage", "valve", "selfmade");
+    // Check for knife/glove using defindex (500-600 for knives, 5000+ for gloves)
+    // This is more reliable than quality === 3, since StatTrak knives have quality 9
+    if (isKnifeOrGlove(iteminfo.defindex)) {
       elements.itemName.classList.add("knife");
     }
-    if (iteminfo.quality === 12) {
+    // Handle special qualities
+    if (iteminfo.quality === 1) {
+      elements.itemName.classList.add("genuine");
+    } else if (iteminfo.quality === 2) {
+      elements.itemName.classList.add("vintage");
+    } else if (iteminfo.quality === 6) {
+      elements.itemName.classList.add("valve");
+    } else if (iteminfo.quality === 7) {
+      elements.itemName.classList.add("selfmade");
+    } else if (iteminfo.quality === 12) {
       elements.itemName.classList.add("souvenir");
     }
     const paintwearFloat = uint32ToFloat32(iteminfo.paintwear);
@@ -59,6 +108,9 @@ function display(iteminfo, url, loadTime) {
       elements.itemItemid.innerHTML = iteminfo.itemid;
     }
     elements.itemPaintseed.innerHTML = iteminfo.paintseed;
+    elements.itemOrigin.innerHTML = getOriginFromNumber(iteminfo.origin);
+    const qualityName = getQualityFromNumber(iteminfo.quality);
+    elements.itemQuality.innerHTML = qualityName || "Unique";
     elements.status.innerHTML = `Loaded in ${loadTime} seconds`;
     elements.stattrakIndicator.classList.remove("yes");
     if (iteminfo.stattrak) {
@@ -73,12 +125,14 @@ function display(iteminfo, url, loadTime) {
 
 function resetFields() {
   elements.itemName.innerHTML = "-";
-  elements.itemName.classList.remove("knife", "souvenir");
+  elements.itemName.classList.remove("knife", "souvenir", "genuine", "vintage", "valve", "selfmade");
   elements.itemPaintwear.innerHTML = "-";
   elements.itemWear.innerHTML = "-";
   elements.itemRarity.innerHTML = "-";
   elements.itemItemid.innerHTML = "-";
   elements.itemPaintseed.innerHTML = "-";
+  elements.itemOrigin.innerHTML = "-";
+  elements.itemQuality.innerHTML = "-";
   elements.status.innerHTML = "";
   elements.stattrakIndicator.classList.remove("yes");
   elements.inspectButton.href = "#";
@@ -92,6 +146,8 @@ function startLoading() {
   elements.itemRarity.parentElement.classList.add("loading");
   elements.itemItemid.parentElement.classList.add("loading");
   elements.itemPaintseed.parentElement.classList.add("loading");
+  elements.itemOrigin.parentElement.classList.add("loading");
+  elements.itemQuality.parentElement.classList.add("loading");
 }
 
 function stopLoading() {
@@ -101,6 +157,8 @@ function stopLoading() {
   elements.itemRarity.parentElement.classList.remove("loading");
   elements.itemItemid.parentElement.classList.remove("loading");
   elements.itemPaintseed.parentElement.classList.remove("loading");
+  elements.itemOrigin.parentElement.classList.remove("loading");
+  elements.itemQuality.parentElement.classList.remove("loading");
 }
 
 function handleError(errorMessage) {
@@ -117,6 +175,8 @@ window.addEventListener("load", function () {
     itemRarity: document.getElementById("item_rarity"),
     itemItemid: document.getElementById("item_itemid"),
     itemPaintseed: document.getElementById("item_paintseed"),
+    itemOrigin: document.getElementById("item_origin"),
+    itemQuality: document.getElementById("item_quality"),
     status: document.getElementById("status"),
     stattrakIndicator: document.getElementById("stattrak-indicator"),
     inspectButton: document.getElementById("inspect_button"),
