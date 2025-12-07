@@ -442,6 +442,10 @@ let filteredItems = []; // Store currently filtered/sorted items
 let currentSort = { field: 'rarity', order: 'desc' };
 let currentFilters = { rarity: '', quality: '', floatMin: null, floatMax: null, hideCommemorative: true };
 
+// Analysis queue management
+let itemsNeedingAnalysis = []; // Items that need detailed analysis
+let analyzedCount = 0; // Track how many items have been analyzed
+
 function uint32ToFloat32(uint32Value) {
   conversionView.setUint32(0, uint32Value);
   return conversionView.getFloat32(0);
@@ -480,7 +484,9 @@ function updateItemWithDetails(itemData, index, inspectLink) {
   const itemElement = document.getElementById(`item-${index}`);
   if (itemElement && itemElement.updateWithDetails) {
     itemElement.updateWithDetails(itemData, inspectLink);
+    return true;
   }
+  return false;
 }
 
 function updateProgress(completed, total) {
@@ -609,17 +615,29 @@ function filterItems(items) {
 function displayItems(items) {
   const inventoryGrid = elements.inventoryGrid;
   inventoryGrid.innerHTML = '';
-  
+
+  const itemsWithDetails = [];
+
   items.forEach((itemData) => {
     const itemElement = createItemElement(itemData.steamData, itemData.originalIndex);
     inventoryGrid.appendChild(itemElement);
-    
-    // If we have detailed data, update the element immediately
+
+    // Track items that need their details updated
     if (itemData.detailedData) {
-      updateItemWithDetails(itemData.detailedData, itemData.originalIndex, itemData.steamData.inspect_link);
+      itemsWithDetails.push({ element: itemElement, data: itemData });
     }
   });
-  
+
+  // Wait for web components to be fully connected before updating details
+  // Use a double RAF to ensure rendering is complete
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      itemsWithDetails.forEach(({ data }) => {
+        updateItemWithDetails(data.detailedData, data.originalIndex, data.steamData.inspect_link);
+      });
+    });
+  });
+
   // Update filter count
   if (elements.filterCount) {
     elements.filterCount.textContent = `Showing ${items.length} of ${inventoryItems.length} items`;
@@ -630,6 +648,47 @@ function applySortAndFilter() {
   filteredItems = filterItems(inventoryItems);
   filteredItems = sortItems(filteredItems, currentSort.field, currentSort.order);
   displayItems(filteredItems);
+
+  // If analysis is in progress, reorder the remaining items in the queue
+  if (itemsNeedingAnalysis.length > 0 && analyzedCount < itemsNeedingAnalysis.length) {
+    reorderAnalysisQueue();
+  }
+}
+
+// Reorder the analysis queue based on the current sort order
+// This ensures we analyze items in the order they appear on screen
+function reorderAnalysisQueue() {
+  if (analyzedCount >= itemsNeedingAnalysis.length) {
+    return; // All items analyzed
+  }
+
+  // Get the unanalyzed items
+  const unanalyzed = itemsNeedingAnalysis.slice(analyzedCount);
+
+  // Get the current sorted order from filteredItems
+  const sortedIndices = filteredItems.map(item => item.originalIndex);
+
+  // Separate items into visible (in current filtered view) and not visible
+  const visibleItems = [];
+  const notVisibleItems = [];
+
+  for (const item of unanalyzed) {
+    const positionInSort = sortedIndices.indexOf(item.index);
+    if (positionInSort !== -1) {
+      visibleItems.push({ item, position: positionInSort });
+    } else {
+      notVisibleItems.push(item);
+    }
+  }
+
+  // Sort visible items by their position in the current sort
+  visibleItems.sort((a, b) => a.position - b.position);
+
+  // Extract just the items (without position metadata)
+  const sortedVisibleItems = visibleItems.map(x => x.item);
+
+  // Replace the unanalyzed portion with reordered items (visible first, then not visible)
+  itemsNeedingAnalysis.splice(analyzedCount, unanalyzed.length, ...sortedVisibleItems, ...notVisibleItems);
 }
 
 async function analyzeInventory(userInput, resolvedSteamId = null) {
@@ -703,23 +762,24 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
     elements.loadingMessage.textContent = `Found ${csgoItems.length} CS2 items - rendering now...`;
     const processedItems = [];
     let preloadedCount = 0;
-    const itemsNeedingAnalysis = [];
-    
+    itemsNeedingAnalysis = []; // Reset the global analysis queue
+    analyzedCount = 0; // Reset the counter
+
     // Initialize inventory data structure
     inventoryItems = [];
-    
+
     for (let i = 0; i < csgoItems.length; i++) {
       const item = csgoItems[i];
       const itemElement = createItemElement(item, i);
       inventoryGrid.appendChild(itemElement);
-      
+
       // Store item data in our structure
       const itemData = {
         originalIndex: i,
         steamData: item,
         detailedData: null
       };
-      
+
       // Check if we have existing data for this item
       if (item.existing_data) {
         // Item already exists in database - update it immediately
@@ -732,7 +792,7 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
         processedItems[i] = null;
         itemsNeedingAnalysis.push({ item, index: i });
       }
-      
+
       inventoryItems.push(itemData);
     }
     
@@ -756,7 +816,11 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
 
       return;
     }
-    
+
+    // Reorder the analysis queue based on the current sort order
+    // This ensures we analyze items in the order they appear on screen
+    reorderAnalysisQueue();
+
     // Now start the detailed analysis phase for remaining items
     elements.loadingMessage.textContent = `Getting precise float values for ${itemsNeedingAnalysis.length} new items...`;
     updateProgress(preloadedCount, csgoItems.length);
@@ -768,31 +832,35 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
         throw new Error('Analysis was cancelled');
       }
 
+      // Mark this item as being processed BEFORE fetching
+      // This prevents reorderAnalysisQueue from moving it while we're fetching
+      analyzedCount = i + 1;
+
       const { item, index } = itemsNeedingAnalysis[i];
-      
+
       try {
         const itemResponse = await fetch(`/api?${new URLSearchParams({url: item.inspect_link})}`, {
           signal: analysisController.signal
         });
         const itemData = await itemResponse.json();
-        
+
         processedItems[index] = itemData.error ? null : itemData;
         updateItemWithDetails(itemData, index, item.inspect_link);
-        
+
         // Update our item data structure
         if (inventoryItems[index] && !itemData.error) {
           inventoryItems[index].detailedData = itemData;
         }
-        
+
       } catch (error) {
         console.error(`Error loading item ${index}:`, error);
         processedItems[index] = null;
         updateItemWithDetails({ error: 'Failed to load item details' }, index, item.inspect_link);
       }
-      
+
       updateProgress(preloadedCount + i + 1, csgoItems.length);
       updateSummary(inventoryData, processedItems);
-      
+
       // Small delay to prevent overwhelming the API
       await new Promise(resolve => setTimeout(resolve, 100));
     }
@@ -849,6 +917,8 @@ function resetInterface() {
   // Reset data
   inventoryItems = [];
   filteredItems = [];
+  itemsNeedingAnalysis = [];
+  analyzedCount = 0;
   currentSort = { field: 'rarity', order: 'desc' };
   currentFilters = { rarity: '', quality: '', floatMin: null, floatMax: null, hideCommemorative: true };
 
