@@ -122,6 +122,26 @@ class InventoryItem extends HTMLElement {
         content: "Souvenir  ";
         color: var(--souvenir, #ccb22f);
       }
+
+      .item-name.genuine::before {
+        content: "Genuine  ";
+        color: var(--genuine, #4D7455);
+      }
+
+      .item-name.vintage::before {
+        content: "Vintage  ";
+        color: var(--vintage, #476291);
+      }
+
+      .item-name.valve::before {
+        content: "Valve  ";
+        color: var(--valve, #A050CF);
+      }
+
+      .item-name.selfmade::before {
+        content: "Self-Made  ";
+        color: var(--selfmade, #70B04A);
+      }
       
       .item-details {
         display: grid;
@@ -303,9 +323,8 @@ class InventoryItem extends HTMLElement {
     const rarityColors = {
       // Standard weapon skin rarities (CS2/CS:GO)
       'Consumer Grade': '#B0C3D9',       // Light Gray/White
-      'Industrial Grade': '#5E98D9',     // Light Blue  
+      'Industrial Grade': '#5E98D9',     // Light Blue
       'Mil-Spec Grade': '#4B69FF',       // Blue
-      'Mil-Spec': '#4B69FF',             // Blue (alternative naming)
       'Restricted': '#8847FF',           // Purple
       'Classified': '#D32CE6',           // Pink/Magenta
       'Covert': '#EB4B4B',              // Red
@@ -382,20 +401,45 @@ class InventoryItem extends HTMLElement {
       if (itemData.stattrak) {
         nameText += '<span class="stattrak-badge" style="display: inline-block; background-color: var(--pop, #2ecc71); color: var(--gray, #1f2d3a); font-size: 10px; font-weight: bold; padding: 2px 6px; border-radius: 3px; margin-left: 8px; vertical-align: middle;">ST</span>';
       }
-      if (itemData.quality === 3) {
+      // Check for knife/glove using defindex (500-600 for knives, 5000+ for gloves)
+      // This is more reliable than quality === 3, since StatTrak knives have quality 9
+      if (isKnifeOrGlove(itemData.defindex)) {
         nameElement.classList.add('knife');
       }
-      if (itemData.quality === 12) {
+      // Handle special qualities (quality field defines provenance/category)
+      if (itemData.quality === 1) {
+        nameElement.classList.add('genuine');
+      } else if (itemData.quality === 2) {
+        nameElement.classList.add('vintage');
+      } else if (itemData.quality === 6) {
+        nameElement.classList.add('valve');
+      } else if (itemData.quality === 7) {
+        nameElement.classList.add('selfmade');
+      } else if (itemData.quality === 12) {
         nameElement.classList.add('souvenir');
       }
       nameElement.innerHTML = nameText;
     }
 
-    // Update float value
+    // Update float value - display 6 decimal places for overview, full precision on hover
     if (floatElement) {
       const paintwearFloat = uint32ToFloat32(itemData.paintwear);
+      const fullFloat = paintwearFloat.toString();
       floatElement.textContent = paintwearFloat.toFixed(6);
+      floatElement.title = `${fullFloat} (click to copy)`;
+      floatElement.dataset.fullFloat = fullFloat;
+      floatElement.style.cursor = 'copy';
       floatElement.classList.remove('loading-placeholder');
+
+      // Add click-to-copy functionality
+      floatElement.onclick = () => {
+        navigator.clipboard.writeText(fullFloat).then(() => {
+          floatElement.textContent = 'Copied!';
+          setTimeout(() => {
+            floatElement.textContent = paintwearFloat.toFixed(6);
+          }, 1000);
+        });
+      };
     }
     
     // Update wear if we got better data, otherwise keep existing
@@ -440,7 +484,7 @@ const conversionView = new DataView(conversionBuffer);
 let inventoryItems = []; // Store all items with their data
 let filteredItems = []; // Store currently filtered/sorted items
 let currentSort = { field: 'rarity', order: 'desc' };
-let currentFilters = { rarity: '', quality: '', floatMin: null, floatMax: null, hideCommemorative: true };
+let currentFilters = { rarity: '', wear: '', floatMin: null, floatMax: null, hideCommemorative: true };
 
 // Analysis queue management
 let itemsNeedingAnalysis = []; // Items that need detailed analysis
@@ -464,13 +508,20 @@ function getRarityFromNumber(rarityNumber) {
     "Default",
     "Consumer Grade",
     "Industrial Grade",
-    "Mil-Spec",
+    "Mil-Spec Grade",
     "Restricted",
     "Classified",
     "Covert",
     "Contraband",
   ];
   return rarities[rarityNumber] || "Unknown";
+}
+
+// Check if defindex belongs to knife/glove category (500+ for knives, 5000+ for gloves)
+function isKnifeOrGlove(defindex) {
+  // Knives typically have defindex 500-600
+  // Gloves typically have defindex 5000+
+  return (defindex >= 500 && defindex < 600) || defindex >= 5000;
 }
 
 function createItemElement(item, index) {
@@ -523,10 +574,6 @@ function sortItems(items, field, order) {
         valueA = getRarityValue(a.steamData.rarity || '');
         valueB = getRarityValue(b.steamData.rarity || '');
         break;
-      case 'quality':
-        valueA = getQualityValue(a.steamData.wear || '');
-        valueB = getQualityValue(b.steamData.wear || '');
-        break;
       case 'float':
         valueA = a.detailedData && a.detailedData.paintwear ? uint32ToFloat32(a.detailedData.paintwear) : 999;
         valueB = b.detailedData && b.detailedData.paintwear ? uint32ToFloat32(b.detailedData.paintwear) : 999;
@@ -551,7 +598,6 @@ function getRarityValue(rarity) {
     'Industrial Grade': 2,
     'High Grade': 2,
     'Mil-Spec Grade': 3,
-    'Mil-Spec': 3,
     'Remarkable': 3,
     'Distinguished': 4,
     'Restricted': 4,
@@ -564,17 +610,6 @@ function getRarityValue(rarity) {
     'Extraordinary': 9
   };
   return rarityOrder[rarity] || 0;
-}
-
-function getQualityValue(quality) {
-  const qualityOrder = {
-    'Factory New': 1,
-    'Minimal Wear': 2,
-    'Field-Tested': 3,
-    'Well-Worn': 4,
-    'Battle-Scarred': 5
-  };
-  return qualityOrder[quality] || 0;
 }
 
 function filterItems(items) {
@@ -591,8 +626,8 @@ function filterItems(items) {
       return false;
     }
     
-    // Quality filter
-    if (currentFilters.quality && item.steamData.wear !== currentFilters.quality) {
+    // Wear filter
+    if (currentFilters.wear && item.steamData.wear !== currentFilters.wear) {
       return false;
     }
     
@@ -920,7 +955,7 @@ function resetInterface() {
   itemsNeedingAnalysis = [];
   analyzedCount = 0;
   currentSort = { field: 'rarity', order: 'desc' };
-  currentFilters = { rarity: '', quality: '', floatMin: null, floatMax: null, hideCommemorative: true };
+  currentFilters = { rarity: '', wear: '', floatMin: null, floatMax: null, hideCommemorative: true };
 
   // Cancel any ongoing analysis
   if (analysisController) {
@@ -978,7 +1013,7 @@ window.addEventListener("load", function () {
     sortSelect: document.getElementById("sort-select"),
     sortOrder: document.getElementById("sort-order"),
     filterRarity: document.getElementById("filter-rarity"),
-    filterQuality: document.getElementById("filter-quality"),
+    filterWear: document.getElementById("filter-wear"),
     filterFloatMin: document.getElementById("filter-float-min"),
     filterFloatMax: document.getElementById("filter-float-max"),
     hideCommemorative: document.getElementById("hide-commemorative")
@@ -1029,7 +1064,6 @@ window.addEventListener("load", function () {
         currentSort.order = 'asc';
         break;
       case 'rarity':
-      case 'quality':
         currentSort.order = 'desc';
         break;
     }
@@ -1051,9 +1085,9 @@ window.addEventListener("load", function () {
     applySortAndFilter();
   });
 
-  // Auto-apply filters when quality changes
-  elements.filterQuality.addEventListener("change", function() {
-    currentFilters.quality = this.value;
+  // Auto-apply filters when wear changes
+  elements.filterWear.addEventListener("change", function() {
+    currentFilters.wear = this.value;
     applySortAndFilter();
   });
 

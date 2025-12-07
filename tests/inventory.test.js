@@ -58,7 +58,7 @@ describe('Inventory Utility Functions', () => {
       "Default",
       "Consumer Grade",
       "Industrial Grade",
-      "Mil-Spec",
+      "Mil-Spec Grade",
       "Restricted",
       "Classified",
       "Covert",
@@ -111,17 +111,6 @@ describe('Inventory Item Sorting', () => {
     return rarityOrder[rarity] || 0;
   }
 
-  function getQualityValue(quality) {
-    const qualityOrder = {
-      'Factory New': 1,
-      'Minimal Wear': 2,
-      'Field-Tested': 3,
-      'Well-Worn': 4,
-      'Battle-Scarred': 5
-    };
-    return qualityOrder[quality] || 0;
-  }
-
   function sortItems(items, field, order) {
     return [...items].sort((a, b) => {
       let valueA, valueB;
@@ -134,10 +123,6 @@ describe('Inventory Item Sorting', () => {
         case 'rarity':
           valueA = getRarityValue(a.steamData.rarity || '');
           valueB = getRarityValue(b.steamData.rarity || '');
-          break;
-        case 'quality':
-          valueA = getQualityValue(a.steamData.wear || '');
-          valueB = getQualityValue(b.steamData.wear || '');
           break;
         case 'float':
           const conversionBuffer = new ArrayBuffer(4);
@@ -170,13 +155,6 @@ describe('Inventory Item Sorting', () => {
     expect(getRarityValue('Unknown')).toBe(0);
   });
 
-  test('getQualityValue should return correct numeric values', () => {
-    expect(getQualityValue('Factory New')).toBe(1);
-    expect(getQualityValue('Field-Tested')).toBe(3);
-    expect(getQualityValue('Battle-Scarred')).toBe(5);
-    expect(getQualityValue('Unknown')).toBe(0);
-  });
-
   test('sortItems should sort by rarity correctly', () => {
     const items = [
       {
@@ -201,32 +179,6 @@ describe('Inventory Item Sorting', () => {
     expect(sorted[0].steamData.rarity).toBe('Covert');
     expect(sorted[1].steamData.rarity).toBe('Restricted');
     expect(sorted[2].steamData.rarity).toBe('Consumer Grade');
-  });
-
-  test('sortItems should sort by quality correctly', () => {
-    const items = [
-      {
-        originalIndex: 0,
-        steamData: { name: 'Item A', rarity: 'Consumer Grade', wear: 'Battle-Scarred' },
-        detailedData: null
-      },
-      {
-        originalIndex: 1,
-        steamData: { name: 'Item B', rarity: 'Covert', wear: 'Factory New' },
-        detailedData: null
-      },
-      {
-        originalIndex: 2,
-        steamData: { name: 'Item C', rarity: 'Restricted', wear: 'Field-Tested' },
-        detailedData: null
-      }
-    ];
-
-    const sorted = sortItems(items, 'quality', 'asc');
-
-    expect(sorted[0].steamData.wear).toBe('Factory New');
-    expect(sorted[1].steamData.wear).toBe('Field-Tested');
-    expect(sorted[2].steamData.wear).toBe('Battle-Scarred');
   });
 
   test('sortItems should sort by name correctly', () => {
@@ -278,8 +230,8 @@ describe('Inventory Filtering', () => {
         return false;
       }
 
-      // Quality filter
-      if (filters.quality && item.steamData.wear !== filters.quality) {
+      // Wear filter
+      if (filters.wear && item.steamData.wear !== filters.wear) {
         return false;
       }
 
@@ -315,14 +267,14 @@ describe('Inventory Filtering', () => {
       }
     ];
 
-    const filters = { rarity: 'Consumer Grade', quality: '', floatMin: null, floatMax: null, hideCommemorative: false };
+    const filters = { rarity: 'Consumer Grade', wear: '', floatMin: null, floatMax: null, hideCommemorative: false };
     const filtered = filterItems(items, filters);
 
     expect(filtered).toHaveLength(2);
     expect(filtered.every(item => item.steamData.rarity === 'Consumer Grade')).toBe(true);
   });
 
-  test('should filter by quality correctly', () => {
+  test('should filter by wear correctly', () => {
     const items = [
       {
         steamData: { rarity: 'Consumer Grade', wear: 'Factory New' },
@@ -338,7 +290,7 @@ describe('Inventory Filtering', () => {
       }
     ];
 
-    const filters = { rarity: '', quality: 'Factory New', floatMin: null, floatMax: null, hideCommemorative: false };
+    const filters = { rarity: '', wear: 'Factory New', floatMin: null, floatMax: null, hideCommemorative: false };
     const filtered = filterItems(items, filters);
 
     expect(filtered).toHaveLength(2);
@@ -361,7 +313,7 @@ describe('Inventory Filtering', () => {
       }
     ];
 
-    const filters = { rarity: '', quality: '', floatMin: 0.08, floatMax: 0.5, hideCommemorative: false };
+    const filters = { rarity: '', wear: '', floatMin: 0.08, floatMax: 0.5, hideCommemorative: false };
     const filtered = filterItems(items, filters);
 
     expect(filtered).toHaveLength(1);
@@ -380,7 +332,7 @@ describe('Inventory Filtering', () => {
       }
     ];
 
-    const filters = { rarity: '', quality: '', floatMin: null, floatMax: null, hideCommemorative: true };
+    const filters = { rarity: '', wear: '', floatMin: null, floatMax: null, hideCommemorative: true };
     const filtered = filterItems(items, filters);
 
     expect(filtered).toHaveLength(1);
