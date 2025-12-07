@@ -1016,7 +1016,11 @@ window.addEventListener("load", function () {
     filterWear: document.getElementById("filter-wear"),
     filterFloatMin: document.getElementById("filter-float-min"),
     filterFloatMax: document.getElementById("filter-float-max"),
-    hideCommemorative: document.getElementById("hide-commemorative")
+    hideCommemorative: document.getElementById("hide-commemorative"),
+    // Float slider elements
+    floatSliderMin: document.getElementById("float-slider-min"),
+    floatSliderMax: document.getElementById("float-slider-max"),
+    floatSliderRange: document.getElementById("float-slider-range")
   };
 
   elements.textbox.addEventListener("keydown", function (event) {
@@ -1085,20 +1089,143 @@ window.addEventListener("load", function () {
     applySortAndFilter();
   });
 
-  // Auto-apply filters when wear changes
+  // Wear ranges for each condition
+  const wearRanges = {
+    'Factory New': { min: 0.00, max: 0.07 },
+    'Minimal Wear': { min: 0.07, max: 0.15 },
+    'Field-Tested': { min: 0.15, max: 0.38 },
+    'Well-Worn': { min: 0.38, max: 0.45 },
+    'Battle-Scarred': { min: 0.45, max: 1.00 }
+  };
+
+  // Auto-apply filters when wear changes and update float controls
   elements.filterWear.addEventListener("change", function() {
     currentFilters.wear = this.value;
+
+    // Update float range based on wear selection
+    if (this.value && wearRanges[this.value]) {
+      const range = wearRanges[this.value];
+      elements.filterFloatMin.value = range.min.toFixed(3);
+      elements.filterFloatMax.value = range.max.toFixed(3);
+      elements.floatSliderMin.value = range.min;
+      elements.floatSliderMax.value = range.max;
+      currentFilters.floatMin = range.min;
+      currentFilters.floatMax = range.max;
+      updateSliderVisual();
+    } else if (!this.value) {
+      // Clear float filters when "All Wear Levels" is selected
+      elements.filterFloatMin.value = '';
+      elements.filterFloatMax.value = '';
+      elements.floatSliderMin.value = 0;
+      elements.floatSliderMax.value = 1;
+      currentFilters.floatMin = null;
+      currentFilters.floatMax = null;
+      updateSliderVisual();
+    }
+
     applySortAndFilter();
   });
 
-  // Auto-apply filters when typing in float inputs
+  // Float slider functionality
+  function updateSliderVisual() {
+    const minVal = parseFloat(elements.floatSliderMin.value);
+    const maxVal = parseFloat(elements.floatSliderMax.value);
+    const minPercent = minVal * 100;
+    const maxPercent = maxVal * 100;
+
+    elements.floatSliderRange.style.left = minPercent + '%';
+    elements.floatSliderRange.style.width = (maxPercent - minPercent) + '%';
+  }
+
+  // Check if current float range matches a wear level and update dropdown
+  function syncWearFromFloat() {
+    const minVal = currentFilters.floatMin;
+    const maxVal = currentFilters.floatMax;
+
+    // If both are null, clear wear filter
+    if (minVal === null && maxVal === null) {
+      elements.filterWear.value = '';
+      currentFilters.wear = '';
+      return;
+    }
+
+    // Check if current range matches a wear level (with small tolerance for floating point)
+    const tolerance = 0.001;
+    for (const [wearName, range] of Object.entries(wearRanges)) {
+      if (minVal !== null && maxVal !== null &&
+          Math.abs(minVal - range.min) < tolerance &&
+          Math.abs(maxVal - range.max) < tolerance) {
+        elements.filterWear.value = wearName;
+        currentFilters.wear = wearName;
+        return;
+      }
+    }
+
+    // No exact match - clear wear filter
+    elements.filterWear.value = '';
+    currentFilters.wear = '';
+  }
+
+  // Update input boxes and visual immediately on slider drag
+  elements.floatSliderMin.addEventListener("input", function() {
+    let minVal = parseFloat(this.value);
+    let maxVal = parseFloat(elements.floatSliderMax.value);
+
+    // Prevent min from exceeding max
+    if (minVal > maxVal) {
+      minVal = maxVal;
+      this.value = minVal;
+    }
+
+    elements.filterFloatMin.value = minVal.toFixed(3);
+    updateSliderVisual();
+  });
+
+  elements.floatSliderMax.addEventListener("input", function() {
+    let maxVal = parseFloat(this.value);
+    let minVal = parseFloat(elements.floatSliderMin.value);
+
+    // Prevent max from going below min
+    if (maxVal < minVal) {
+      maxVal = minVal;
+      this.value = maxVal;
+    }
+
+    elements.filterFloatMax.value = maxVal.toFixed(3);
+    updateSliderVisual();
+  });
+
+  // Apply filter only when slider is released
+  elements.floatSliderMin.addEventListener("change", function() {
+    const minVal = parseFloat(this.value);
+    currentFilters.floatMin = minVal;
+    syncWearFromFloat();
+    applySortAndFilter();
+  });
+
+  elements.floatSliderMax.addEventListener("change", function() {
+    const maxVal = parseFloat(this.value);
+    currentFilters.floatMax = maxVal;
+    syncWearFromFloat();
+    applySortAndFilter();
+  });
+
+  // Update sliders when typing in input boxes
   elements.filterFloatMin.addEventListener("input", function() {
+    const value = this.value ? parseFloat(this.value) : 0;
+    elements.floatSliderMin.value = value;
+    updateSliderVisual();
     currentFilters.floatMin = this.value ? parseFloat(this.value) : null;
+    syncWearFromFloat();
     applySortAndFilter();
   });
 
   elements.filterFloatMax.addEventListener("input", function() {
+    const value = this.value ? parseFloat(this.value) : 1;
+    elements.floatSliderMax.value = value;
+    updateSliderVisual();
     currentFilters.floatMax = this.value ? parseFloat(this.value) : null;
+    syncWearFromFloat();
     applySortAndFilter();
   });
 
@@ -1107,6 +1234,9 @@ window.addEventListener("load", function () {
     currentFilters.hideCommemorative = this.checked;
     applySortAndFilter();
   });
+
+  // Initialize slider visual
+  updateSliderVisual();
 
   // Mobile sidebar toggle functionality
   elements.sidebarHeader.addEventListener("click", function() {
