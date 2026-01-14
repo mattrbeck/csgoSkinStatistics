@@ -26,7 +26,7 @@ function display(iteminfo, url, loadTime) {
       elements.itemName.classList.add("valve");
     } else if (iteminfo.quality === 7) {
       elements.itemName.classList.add("selfmade");
-    } else if (iteminfo.quality === 12) {
+    } else if (iteminfo.souvenir) {
       elements.itemName.classList.add("souvenir");
     }
     

@@ -453,7 +453,7 @@ namespace CSGOSkinAPI.Services
             return null;
         }
 
-        private async Task SendGCRequest(SteamAccountManager accountManager, ulong s, ulong a, ulong d, ulong m, ulong jobId)
+        private static async Task SendGCRequest(SteamAccountManager accountManager, ulong s, ulong a, ulong d, ulong m, ulong jobId)
         {
             await accountManager.RateLimitSemaphore.WaitAsync();
             try
@@ -554,7 +554,7 @@ namespace CSGOSkinAPI.Services
             }
         }
 
-        private void OnConnected(SteamClient.ConnectedCallback callback, SteamAccountManager accountManager)
+        private static void OnConnected(SteamClient.ConnectedCallback callback, SteamAccountManager accountManager)
         {
             Console.WriteLine($"[{accountManager.Account.Username}] Steam client connected");
             accountManager.IsConnected = true;
@@ -588,7 +588,7 @@ namespace CSGOSkinAPI.Services
             }
         }
 
-        private void OnLoggedOn(SteamUser.LoggedOnCallback callback, SteamAccountManager accountManager)
+        private static void OnLoggedOn(SteamUser.LoggedOnCallback callback, SteamAccountManager accountManager)
         {
             Console.WriteLine($"[{accountManager.Account.Username}] Steam logon result: {callback.Result}");
             if (callback.Result != EResult.OK)
@@ -621,7 +621,7 @@ namespace CSGOSkinAPI.Services
             });
         }
 
-        private void OnLoggedOff(SteamUser.LoggedOffCallback callback, SteamAccountManager accountManager)
+        private static void OnLoggedOff(SteamUser.LoggedOffCallback callback, SteamAccountManager accountManager)
         {
             Console.WriteLine($"[{accountManager.Account.Username}] Steam user logged off. Result: {callback.Result}");
             accountManager.IsLoggedIn = false;
@@ -893,7 +893,7 @@ namespace CSGOSkinAPI.Services
             }
         }
 
-        private async Task SaveStickersAsync(ulong itemId, List<CEconItemPreviewDataBlock.Sticker> items, bool stickerTable)
+        private static async Task SaveStickersAsync(ulong itemId, List<CEconItemPreviewDataBlock.Sticker> items, bool stickerTable)
         {
             using var connection = new SqliteConnection(ConnectionString);
             await connection.OpenAsync();
@@ -1042,12 +1042,12 @@ namespace CSGOSkinAPI.Services
             return "";
         }
 
-        private float GetPaintWear(uint paintWear)
+        private static double GetPaintWear(uint paintWear)
         {
-            return BitConverter.UInt32BitsToSingle(paintWear);
+            return (double)BitConverter.UInt32BitsToSingle(paintWear);
         }
 
-        private string GetWearFromFloat(float paintWear)
+        private static string GetWearFromFloat(double paintWear)
         {
             if (paintWear < 0.07) return "Factory New";
             if (paintWear < 0.15) return "Minimal Wear";
@@ -1074,7 +1074,7 @@ namespace CSGOSkinAPI.Services
              return "Unknown";
         }
 
-        public bool IsSouvenir(uint quality)
+        private static bool IsSouvenir(uint quality)
         {
             return quality == 12;
         }
@@ -1085,10 +1085,10 @@ namespace CSGOSkinAPI.Services
              {
                  return qualityName;
              }
-             return "Unique";
+             return "Unknown";
         }
 
-        private bool IsKnifeOrGlove(uint defindex)
+        private static bool IsKnifeOrGlove(uint defindex)
         {
             // Knives typically have defindex 500-600
             // Gloves typically have defindex 5000+
@@ -1117,7 +1117,7 @@ namespace CSGOSkinAPI.Models
         public string RarityName { get; set; } = string.Empty;
         public string QualityName { get; set; } = string.Empty;
         public string OriginName { get; set; } = string.Empty;
-        public float PaintWear { get; set; }
+        public double PaintWear { get; set; }
         public bool IsKnifeOrGlove { get; set; }
         public bool IsSouvenir { get; set; }
         public string MarketHashName { get; set; } = string.Empty;
