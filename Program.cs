@@ -167,20 +167,40 @@ namespace CSGOSkinAPI.Controllers
                 item.inventory,
                 item.origin,
                 stattrak = item.ShouldSerializekilleatervalue(),
+                souvenir = itemInfo.IsSouvenir,
+                market_hash_name = itemInfo.MarketHashName,
                 special = itemInfo.Special,
                 weapon = itemInfo.Type,
                 skin = itemInfo.Name,
+                wear_name = itemInfo.WearName,
+                rarity_name = itemInfo.RarityName,
+                quality_name = itemInfo.QualityName,
+                origin_name = itemInfo.OriginName,
+                paintwear_float = itemInfo.PaintWear,
+                is_knife_or_glove = itemInfo.IsKnifeOrGlove,
                 stickers = item.stickers.Select(s => new
                 {
                     s.slot,
                     s.sticker_id,
-                    s.wear
+                    s.wear,
+                    s.scale,
+                    s.rotation,
+                    s.offset_x,
+                    s.offset_y,
+                    s.offset_z,
+                    s.pattern,
                 }).ToArray(),
                 keychains = item.keychains.Select(k => new
                 {
                     k.slot,
                     k.sticker_id,
-                    k.wear
+                    k.wear,
+                    k.scale,
+                    k.rotation,
+                    k.offset_x,
+                    k.offset_y,
+                    k.offset_z,
+                    k.pattern,
                 }).ToArray(),
                 s,
                 a,
@@ -433,7 +453,7 @@ namespace CSGOSkinAPI.Services
             return null;
         }
 
-        private async Task SendGCRequest(SteamAccountManager accountManager, ulong s, ulong a, ulong d, ulong m, ulong jobId)
+        private static async Task SendGCRequest(SteamAccountManager accountManager, ulong s, ulong a, ulong d, ulong m, ulong jobId)
         {
             await accountManager.RateLimitSemaphore.WaitAsync();
             try
@@ -534,7 +554,7 @@ namespace CSGOSkinAPI.Services
             }
         }
 
-        private void OnConnected(SteamClient.ConnectedCallback callback, SteamAccountManager accountManager)
+        private static void OnConnected(SteamClient.ConnectedCallback callback, SteamAccountManager accountManager)
         {
             Console.WriteLine($"[{accountManager.Account.Username}] Steam client connected");
             accountManager.IsConnected = true;
@@ -568,7 +588,7 @@ namespace CSGOSkinAPI.Services
             }
         }
 
-        private void OnLoggedOn(SteamUser.LoggedOnCallback callback, SteamAccountManager accountManager)
+        private static void OnLoggedOn(SteamUser.LoggedOnCallback callback, SteamAccountManager accountManager)
         {
             Console.WriteLine($"[{accountManager.Account.Username}] Steam logon result: {callback.Result}");
             if (callback.Result != EResult.OK)
@@ -601,7 +621,7 @@ namespace CSGOSkinAPI.Services
             });
         }
 
-        private void OnLoggedOff(SteamUser.LoggedOffCallback callback, SteamAccountManager accountManager)
+        private static void OnLoggedOff(SteamUser.LoggedOffCallback callback, SteamAccountManager accountManager)
         {
             Console.WriteLine($"[{accountManager.Account.Username}] Steam user logged off. Result: {callback.Result}");
             accountManager.IsLoggedIn = false;
@@ -873,7 +893,7 @@ namespace CSGOSkinAPI.Services
             }
         }
 
-        private async Task SaveStickersAsync(ulong itemId, List<CEconItemPreviewDataBlock.Sticker> items, bool stickerTable)
+        private static async Task SaveStickersAsync(ulong itemId, List<CEconItemPreviewDataBlock.Sticker> items, bool stickerTable)
         {
             using var connection = new SqliteConnection(ConnectionString);
             await connection.OpenAsync();
@@ -927,6 +947,10 @@ namespace CSGOSkinAPI.Services
             var pattern = GetPatternName(item.paintindex);
             var paintseed = (int)item.paintseed;
             var paintindex = (int)item.paintindex;
+            var paintWear = GetPaintWear(item.paintwear);
+            var wearName = GetWearFromFloat(paintWear);
+            var isKnifeOrGlove = IsKnifeOrGlove(item.defindex);
+            var isSouvenir = IsSouvenir(item.quality);
 
             var special = "";
 
@@ -955,8 +979,32 @@ namespace CSGOSkinAPI.Services
             {
                 Name = pattern,
                 Type = weaponType,
-                Special = special
+                Special = special,
+                WearName = wearName,
+                RarityName = GetRarityFromNumber(item.rarity),
+                QualityName = GetQualityFromNumber(item.quality),
+                OriginName = GetOriginFromNumber(item.origin),
+                PaintWear = paintWear,
+                IsKnifeOrGlove = isKnifeOrGlove,
+                IsSouvenir = isSouvenir,
+                MarketHashName = GetMarketHashName(weaponType, pattern, wearName, isKnifeOrGlove, isSouvenir, item.ShouldSerializekilleatervalue())
             };
+        }
+
+        private string GetMarketHashName(string weaponType, string pattern, string wearName, bool isKnifeOrGlove, bool isSouvenir, bool isStatTrak)
+        {
+            var marketHashName = "";
+            if (isKnifeOrGlove) marketHashName += GetQualityFromNumber(3) + " "; // ★
+            if (isSouvenir) marketHashName += GetQualityFromNumber(12) + " "; // Souvenir
+            else if (isStatTrak) marketHashName += GetQualityFromNumber(9) + " "; // StatTrak™
+
+            marketHashName += weaponType;
+
+            if (pattern != GetPatternName(0)) // Vanilla
+            {
+                marketHashName += $" | {pattern} ({wearName})";
+            }
+            return marketHashName;
         }
 
         private double GetFadePercent(int paintseed, bool reversed)
@@ -993,6 +1041,59 @@ namespace CSGOSkinAPI.Services
             Console.WriteLine($"Skin {paintIndex} is missing from constants");
             return "";
         }
+
+        private static double GetPaintWear(uint paintWear)
+        {
+            return (double)BitConverter.UInt32BitsToSingle(paintWear);
+        }
+
+        private static string GetWearFromFloat(double paintWear)
+        {
+            if (paintWear < 0.07) return "Factory New";
+            if (paintWear < 0.15) return "Minimal Wear";
+            if (paintWear < 0.38) return "Field-Tested";
+            if (paintWear < 0.45) return "Well-Worn";
+            return "Battle-Scarred";
+        }
+
+        private string GetRarityFromNumber(uint rarity)
+        {
+            if (_constData.Rarities != null && rarity < _constData.Rarities.Count)
+            {
+                return _constData.Rarities[(int)rarity];
+            }
+            return "Unknown";
+        }
+
+        private string GetOriginFromNumber(uint origin)
+        {
+             if (_constData.Origins?.TryGetValue(origin.ToString(), out var originName) == true)
+             {
+                 return originName;
+             }
+             return "Unknown";
+        }
+
+        private static bool IsSouvenir(uint quality)
+        {
+            return quality == 12;
+        }
+
+        private string GetQualityFromNumber(uint quality)
+        {
+             if (_constData.Qualities?.TryGetValue(quality.ToString(), out var qualityName) == true)
+             {
+                 return qualityName;
+             }
+             return "Unknown";
+        }
+
+        private static bool IsKnifeOrGlove(uint defindex)
+        {
+            // Knives typically have defindex 500-600
+            // Gloves typically have defindex 5000+
+            return (defindex >= 500 && defindex < 600) || defindex >= 5000;
+        }
     }
 }
 
@@ -1012,6 +1113,14 @@ namespace CSGOSkinAPI.Models
         public string Name { get; set; } = string.Empty;
         public string Type { get; set; } = string.Empty;
         public string Special { get; set; } = string.Empty;
+        public string WearName { get; set; } = string.Empty;
+        public string RarityName { get; set; } = string.Empty;
+        public string QualityName { get; set; } = string.Empty;
+        public string OriginName { get; set; } = string.Empty;
+        public double PaintWear { get; set; }
+        public bool IsKnifeOrGlove { get; set; }
+        public bool IsSouvenir { get; set; }
+        public string MarketHashName { get; set; } = string.Empty;
     }
 
     public class ConstData
@@ -1027,6 +1136,9 @@ namespace CSGOSkinAPI.Models
         public int[]? FireiceOrder { get; set; }
         public Dictionary<string, string>? Doppler { get; set; }
         public Dictionary<string, string>? Kimonos { get; set; }
+        public List<string>? Rarities { get; set; }
+        public Dictionary<string, string>? Qualities { get; set; }
+        public Dictionary<string, string>? Origins { get; set; }
 
         public static readonly string[] FireIceNames = ["", "1st Max", "2nd Max", "3rd Max", "4th Max", "5th Max", "6th Max", "7th Max", "8th Max", "9th Max", "10th Max", "FFI"];
     }

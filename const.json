@@ -4231,5 +4231,36 @@
     "20123":"Pinups Sticker Capsule",
     "20124":"Slid3 Sticker Capsule",
     "20125":"Team Roles Sticker Capsule"
+  },
+  "rarities":[
+    "Default",
+    "Consumer Grade",
+    "Industrial Grade",
+    "Mil-Spec Grade",
+    "Restricted",
+    "Classified",
+    "Covert",
+    "Contraband"
+  ],
+  "qualities":{
+    "0":"Normal",
+    "1":"Genuine",
+    "2":"Vintage",
+    "3":"★",
+    "4":"Unique",
+    "5":"Community",
+    "6":"Valve",
+    "7":"Self-Made",
+    "9":"StatTrak™",
+    "12":"Souvenir"
+  },
+  "origins":{
+    "0":"Timed Drop",
+    "1":"Achievement",
+    "2":"Purchased",
+    "3":"Traded",
+    "4":"Crafted",
+    "8":"Unboxed",
+    "24":"Tournament Drop"
   }
 }
