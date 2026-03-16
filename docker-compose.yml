@@ -1,0 +1,20 @@
+version: '3'
+
+services:
+  skinstats:
+    build: ./skinstats
+    depends_on:
+      - skin_ids
+    environment:
+      - steam_user=${steam_user}
+      - steam_pass=${steam_pass}
+    ports:
+      - "5000:5000"
+    restart: on-failure
+  skin_ids:
+    build: ./skin_ids
+    healthcheck:
+      test: wget -qO - skin_ids:5001/get_skin_ids > /dev/null || exit 1
+      interval: 0s
+      timeout: 1s
+      retries: 300
