@@ -1,6 +1,9 @@
 let elements;
-const inspectPrefix =
-  "steam://rungame/730/76561202255233023/+csgo_econ_action_preview%20";
+// We post the full steam:// link: the server matches on the command within it,
+// and the "Inspect In Game" button reuses the same link to hand off to Steam.
+// This is the run/730// form Steam's own site now emits, which drops the old
+// dummy steamid the legacy rungame/<steamid> form required.
+const inspectPrefix = "steam://run/730//+csgo_econ_action_preview%20";
 
 function display(iteminfo, url, loadTime) {
   stopLoading();
@@ -126,7 +129,10 @@ window.addEventListener("load", function () {
     element.target.blur();
 
     const input = elements.textbox.value;
-    const reduced = input.replace(inspectPrefix, "");
+    // Strip either the legacy (rungame/<steamid>) or new (run/730//) prefix.
+    const reduced = input
+      .replace(/^.*csgo_econ_action_preview(%20|\s+)/i, "")
+      .trim();
     if (/^[SM]\d+A\d+D\d+$/.test(reduced) || /^[0-9A-F]+$/.test(reduced)) {
       elements.textbox.value = reduced;
       window.location.hash = reduced;

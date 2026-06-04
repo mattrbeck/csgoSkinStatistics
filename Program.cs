@@ -64,9 +64,11 @@ namespace CSGOSkinAPI.Controllers
     [Route("api")]
     public partial class SkinController(SteamService steamService, DatabaseService dbService, ConstDataService constDataService) : ControllerBase
     {
-        [GeneratedRegex(@"steam://rungame/730/76561202255233023/ csgo_econ_action_preview ([SM])(\d+)A(\d+)D(\d+)", RegexOptions.Compiled)]
+        // Match on the command itself rather than the prefix, which changed from
+        // the legacy "rungame/730/<steamid>/" to "run/730//" in March 2026.
+        [GeneratedRegex(@"csgo_econ_action_preview ([SM])(\d+)A(\d+)D(\d+)", RegexOptions.Compiled)]
         private static partial Regex InspectUrlRegex();
-        [GeneratedRegex(@"steam://rungame/730/76561202255233023/ csgo_econ_action_preview ([0-9A-F]+)", RegexOptions.Compiled)]
+        [GeneratedRegex(@"csgo_econ_action_preview ([0-9A-F]+)", RegexOptions.Compiled)]
         private static partial Regex InspectUrlHexRegex();
 
         [HttpGet]
@@ -129,8 +131,23 @@ namespace CSGOSkinAPI.Controllers
                     Console.WriteLine($"Failed to decode URL: {url}");
                     return null;
                 }
-                // Read the bytes, dropping the leading null byte and the trailing 4 checksum bytes
-                var hexBytes = Convert.FromHexString(hexMatch.Groups[1].Value)[1..^4];
+                var rawBytes = Convert.FromHexString(hexMatch.Groups[1].Value);
+                // Need at least the leading byte, one protobuf byte, and the 4-byte checksum.
+                if (rawBytes.Length < 6)
+                {
+                    Console.WriteLine($"Hex payload too short: {url}");
+                    return null;
+                }
+                // As of March 2026 the payload is XOR-obfuscated with its first byte
+                // as the key. Legacy masked links start with 0x00, so this is a no-op
+                // for them and deobfuscates the new self-encoded links.
+                var xorKey = rawBytes[0];
+                for (var i = 0; i < rawBytes.Length; i++)
+                {
+                    rawBytes[i] ^= xorKey;
+                }
+                // Drop the leading xor byte and the trailing 4 checksum bytes
+                var hexBytes = rawBytes[1..^4];
                 var itemInfoProto = Serializer.Deserialize<CEconItemPreviewDataBlock>(new MemoryStream(hexBytes));
                 return (0, itemInfoProto.itemid, 0, 0, itemInfoProto);
             }
