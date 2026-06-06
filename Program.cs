@@ -65,8 +65,6 @@ namespace CSGOSkinAPI.Controllers
     [Route("api")]
     public partial class SkinController(SteamService steamService, DatabaseService dbService, ConstDataService constDataService, IHttpClientFactory httpClientFactory) : ControllerBase
     {
-        private static readonly string? SteamApiKey = Environment.GetEnvironmentVariable("STEAM_API_KEY");
-
         // Match on the command itself rather than the prefix, which changed from
         // the legacy "rungame/730/<steamid>/" to "run/730//" in March 2026.
         [GeneratedRegex(@"csgo_econ_action_preview ([SM])(\d+)A(\d+)D(\d+)", RegexOptions.Compiled)]
@@ -306,36 +304,24 @@ namespace CSGOSkinAPI.Controllers
         {
             try
             {
-                if (string.IsNullOrEmpty(SteamApiKey))
-                {
-                    Console.WriteLine("Steam API key not configured");
-                    return null;
-                }
-
                 using var httpClient = httpClientFactory.CreateClient();
                 httpClient.Timeout = TimeSpan.FromSeconds(5);
 
-                var apiUrl = $"https://api.steampowered.com/ISteamUser/ResolveVanityURL/v0001/?key={SteamApiKey}&vanityurl={customUrl}";
+                // The public profile XML feed exposes the SteamId64 without an API key.
+                var xmlUrl = $"https://steamcommunity.com/id/{customUrl}/?xml=1";
 
-                var response = await httpClient.GetAsync(apiUrl);
+                var response = await httpClient.GetAsync(xmlUrl);
                 if (!response.IsSuccessStatusCode)
                 {
-                    Console.WriteLine($"Steam API request failed: {response.StatusCode}");
+                    Console.WriteLine($"Steam profile request failed: {response.StatusCode}");
                     return null;
                 }
 
-                var jsonContent = await response.Content.ReadAsStringAsync();
-                using var doc = JsonDocument.Parse(jsonContent);
-
-                if (doc.RootElement.TryGetProperty("response", out var responseElement) &&
-                    responseElement.TryGetProperty("success", out var successElement) &&
-                    successElement.GetInt32() == 1 &&
-                    responseElement.TryGetProperty("steamid", out var steamIdElement))
+                var xmlContent = await response.Content.ReadAsStringAsync();
+                var match = Regex.Match(xmlContent, @"<steamID64>(\d+)</steamID64>");
+                if (match.Success && ulong.TryParse(match.Groups[1].Value, out var steamId))
                 {
-                    if (ulong.TryParse(steamIdElement.GetString(), out var steamId))
-                    {
-                        return steamId;
-                    }
+                    return steamId;
                 }
 
                 Console.WriteLine($"Failed to resolve custom URL '{customUrl}' to SteamId64");
