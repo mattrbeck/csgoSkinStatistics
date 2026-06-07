@@ -167,23 +167,57 @@ namespace CSGOSkinAPI.Controllers
                     return BadRequest(new { error = "Invalid inventory data or inventory is empty" });
                 }
 
+                // The Steam Community inventory response is split across three parallel arrays
+                // that we have to stitch together to build a usable inspect link per item:
+                //
+                //   {
+                //     "assets":          [ { "assetid": "519...", "classid": "799...", "instanceid": "302..." }, ... ],
+                //     "descriptions":    [ { "classid": "799...", "instanceid": "302...",   // shared by all assets of this kind
+                //                            "actions": [ { "link": "steam://run/730//+csgo_econ_action_preview%20%propid:6%" } ],
+                //                            "tags": [...] }, ... ],
+                //     "asset_properties":[ { "assetid": "519...",                            // per-asset, only for items that have them
+                //                            "asset_properties": [ { "propertyid": 6, "string_value": "352581D6EDF7..." }, ... ] }, ... ]
+                //   }
+                //
+                // The inspect link lives on the *description* (shared by every copy of that skin), so it can't
+                // embed per-asset data directly. Instead Steam templates it with placeholders we must fill in:
+                //   - %owner_steamid% / %assetid% -> identify which copy in whose inventory (the classic S..A..D.. form)
+                //   - %propid:N%                  -> the value of property N in *this asset's* asset_properties entry.
+                // For skins, propid 6 ("Item Certificate") is a self-contained, XOR-obfuscated hex payload; once
+                // substituted in, the link becomes the hex form that ParseInspectUrl decodes directly into full
+                // item data with no Game Coordinator round-trip. (Fixed items like music kits skip the templating
+                // and ship the hex inline, so they need no substitution at all.)
+                //
+                // Build assetid -> properties up front so the per-item loop can resolve %propid:N% in O(1).
+                var propsByAsset = inventoryData.asset_properties?
+                    .ToDictionary(ap => ap.assetid, ap => ap.asset_properties ?? [])
+                    ?? [];
+
                 var csgoItems = new List<object>();
                 foreach (var asset in inventoryData.assets)
                 {
-                    var description = inventoryData.descriptions.FirstOrDefault(d => 
+                    var description = inventoryData.descriptions.FirstOrDefault(d =>
                         d.classid == asset.classid && d.instanceid == asset.instanceid);
-                    
+
                     if (description?.actions != null)
                     {
-                        var inspectAction = description.actions.FirstOrDefault(a => 
+                        var inspectAction = description.actions.FirstOrDefault(a =>
                             a.link?.Contains("csgo_econ_action_preview") == true);
-                            
+
                         if (inspectAction?.link != null)
                         {
-                            var inspectLink = inspectAction.link
+                            // Fill the template placeholders described above.
+                            propsByAsset.TryGetValue(asset.assetid, out var assetProps);
+                            var inspectLink = Regex.Replace(inspectAction.link, @"%propid:(\d+)%", m =>
+                            {
+                                var pid = int.Parse(m.Groups[1].Value);
+                                var prop = assetProps?.FirstOrDefault(p => p.propertyid == pid);
+                                return prop?.string_value ?? prop?.int_value ?? prop?.float_value ?? m.Value;
+                            });
+                            inspectLink = inspectLink
                                 .Replace("%owner_steamid%", steamid)
                                 .Replace("%assetid%", asset.assetid);
-                                
+
                             // Extract wear and rarity from tags
                             var wearTag = description.tags?.FirstOrDefault(t => t.category == "Exterior");
                             var rarityTag = description.tags?.FirstOrDefault(t => t.category == "Rarity");
@@ -1389,11 +1423,41 @@ namespace CSGOSkinAPI.Models
         [JsonPropertyName("descriptions")]
         public List<SteamDescription>? descriptions { get; set; }
         
+        [JsonPropertyName("asset_properties")]
+        public List<SteamAssetProperties>? asset_properties { get; set; }
+
         [JsonPropertyName("total_inventory_count")]
         public int total { get; set; }
-        
+
         [JsonPropertyName("success")]
         public int success { get; set; }
+    }
+
+    // Per-asset properties; see GetInventoryData for how %propid:N% inspect-link
+    // placeholders resolve against these. Steam sends every value as a string under
+    // int_value/float_value/string_value depending on the property's type.
+    public class SteamAssetProperties
+    {
+        [JsonPropertyName("assetid")]
+        public string assetid { get; set; } = string.Empty;
+
+        [JsonPropertyName("asset_properties")]
+        public List<SteamAssetProperty>? asset_properties { get; set; }
+    }
+
+    public class SteamAssetProperty
+    {
+        [JsonPropertyName("propertyid")]
+        public int propertyid { get; set; }
+
+        [JsonPropertyName("int_value")]
+        public string? int_value { get; set; }
+
+        [JsonPropertyName("float_value")]
+        public string? float_value { get; set; }
+
+        [JsonPropertyName("string_value")]
+        public string? string_value { get; set; }
     }
 
     public class SteamAsset
@@ -1466,10 +1530,10 @@ namespace CSGOSkinAPI.Models
         
         [JsonPropertyName("actions")]
         public List<SteamAction>? actions { get; set; }
-        
+
         [JsonPropertyName("descriptions")]
         public List<SteamItemDescription>? descriptions { get; set; }
-        
+
         [JsonPropertyName("tags")]
         public List<SteamTag>? tags { get; set; }
     }
