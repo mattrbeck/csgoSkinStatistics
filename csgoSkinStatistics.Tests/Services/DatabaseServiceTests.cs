@@ -173,6 +173,68 @@ public class DatabaseServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task SaveItemWithExtrasAsync_ReSavingSameItem_DoesNotDuplicateExtras()
+    {
+        await _databaseService.InitializeDatabaseAsync();
+
+        CEconItemPreviewDataBlock MakeItem()
+        {
+            var item = new CEconItemPreviewDataBlock
+            {
+                itemid = 777,
+                defindex = 7,
+                paintindex = 10,
+                rarity = 3,
+                quality = 4,
+                paintwear = 1065353216,
+                paintseed = 5,
+                inventory = 2147483649,
+                origin = 8
+            };
+            item.stickers.Add(new CEconItemPreviewDataBlock.Sticker { slot = 0, sticker_id = 1, wear = 0.1f });
+            item.stickers.Add(new CEconItemPreviewDataBlock.Sticker { slot = 1, sticker_id = 2, wear = 0.2f });
+            item.keychains.Add(new CEconItemPreviewDataBlock.Sticker { slot = 0, sticker_id = 100, wear = 0.3f });
+            return item;
+        }
+
+        // Saving the same itemid twice must clear-and-rewrite, not append.
+        await _databaseService.SaveItemWithExtrasAsync(MakeItem());
+        await _databaseService.SaveItemWithExtrasAsync(MakeItem());
+
+        Assert.Equal(2, (await _databaseService.GetStickersAsync(777, true)).Count);
+        Assert.Single(await _databaseService.GetStickersAsync(777, false));
+    }
+
+    [Fact]
+    public async Task SaveItemWithExtrasAsync_SupportsMultipleStickersInSameSlot()
+    {
+        await _databaseService.InitializeDatabaseAsync();
+
+        var item = new CEconItemPreviewDataBlock
+        {
+            itemid = 888,
+            defindex = 24,
+            paintindex = 688,
+            rarity = 4,
+            quality = 4,
+            paintwear = 1043574843,
+            paintseed = 185,
+            inventory = 2147483649,
+            origin = 8
+        };
+        // Stacked craft: two stickers share slot 2 (mirrors the live UMP-45 test).
+        item.stickers.Add(new CEconItemPreviewDataBlock.Sticker { slot = 2, sticker_id = 4515, wear = 0f });
+        item.stickers.Add(new CEconItemPreviewDataBlock.Sticker { slot = 2, sticker_id = 4516, wear = 0f });
+
+        await _databaseService.SaveItemWithExtrasAsync(item);
+
+        var stickers = await _databaseService.GetStickersAsync(888, true);
+        Assert.Equal(2, stickers.Count);
+        Assert.All(stickers, s => Assert.Equal(2u, s.slot));
+        Assert.Equal(new[] { 4515u, 4516u }, stickers.Select(s => s.sticker_id).OrderBy(x => x).ToArray());
+    }
+
+    [Fact]
     public async Task GetItemAsync_ShouldReturnNullForNonExistentItem()
     {
         await _databaseService.InitializeDatabaseAsync();

@@ -451,6 +451,8 @@ namespace CSGOSkinAPI.Controllers
                 origin_name = itemInfo.OriginName,
                 paintwear_float = itemInfo.PaintWear,
                 is_knife_or_glove = itemInfo.IsKnifeOrGlove,
+                // Ordered array; `slot` is NOT unique — CS2 stacks multiple stickers in one
+                // slot (verified live), so consumers must iterate positionally, never key by slot.
                 stickers = item.stickers.Select(s => new
                 {
                     s.slot,
@@ -1141,13 +1143,17 @@ namespace CSGOSkinAPI.Services
         {
             using var connection = new SqliteConnection(_connectionString);
             await connection.OpenAsync();
+            await InsertSearchRowAsync(item, connection, null);
+        }
 
+        private static async Task InsertSearchRowAsync(CEconItemPreviewDataBlock item, SqliteConnection connection, SqliteTransaction? transaction)
+        {
             var insert = @"
-                INSERT OR REPLACE INTO searches 
+                INSERT OR REPLACE INTO searches
                 (itemid, defindex, paintindex, rarity, quality, paintwear, paintseed, inventory, origin, stattrak)
                 VALUES (@itemid, @defindex, @paintindex, @rarity, @quality, @paintwear, @paintseed, @inventory, @origin, @stattrak)";
 
-            using var command = new SqliteCommand(insert, connection);
+            using var command = new SqliteCommand(insert, connection, transaction);
             command.Parameters.AddWithValue("@itemid", (long)item.itemid);
             command.Parameters.AddWithValue("@defindex", item.defindex);
             command.Parameters.AddWithValue("@paintindex", item.paintindex);
@@ -1175,24 +1181,44 @@ namespace CSGOSkinAPI.Services
                 return;
             }
 
-            await SaveItemAsync(itemInfo);
+            // Persist the row and its extras atomically, and idempotently: re-saving the
+            // same itemid must not duplicate sticker/keychain rows. The searches row uses
+            // INSERT OR REPLACE, but the extras are plain INSERTs into tables with no
+            // unique constraint on (itemid, slot) — slots are deliberately non-unique so
+            // stacked stickers can share a slot — so we clear and rewrite the whole set
+            // rather than relying on an upsert. (See docs/inventory-endpoint-cert.md 3b.)
+            using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync();
+            using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync();
+
+            await InsertSearchRowAsync(itemInfo, connection, transaction);
+            await ClearExtrasAsync(itemInfo.itemid, connection, transaction);
 
             if (itemInfo.stickers?.Count > 0)
             {
-                await SaveStickersAsync(itemInfo.itemid, itemInfo.stickers, true);
+                await SaveStickersAsync(itemInfo.itemid, itemInfo.stickers, true, connection, transaction);
             }
 
             if (itemInfo.keychains?.Count > 0)
             {
-                await SaveStickersAsync(itemInfo.itemid, itemInfo.keychains, false);
+                await SaveStickersAsync(itemInfo.itemid, itemInfo.keychains, false, connection, transaction);
+            }
+
+            await transaction.CommitAsync();
+        }
+
+        private static async Task ClearExtrasAsync(ulong itemId, SqliteConnection connection, SqliteTransaction transaction)
+        {
+            foreach (var table in new[] { "stickers", "keychains" })
+            {
+                using var command = new SqliteCommand($"DELETE FROM {table} WHERE itemid = @itemid", connection, transaction);
+                command.Parameters.AddWithValue("@itemid", (long)itemId);
+                await command.ExecuteNonQueryAsync();
             }
         }
 
-        private async Task SaveStickersAsync(ulong itemId, List<CEconItemPreviewDataBlock.Sticker> items, bool stickerTable)
+        private static async Task SaveStickersAsync(ulong itemId, List<CEconItemPreviewDataBlock.Sticker> items, bool stickerTable, SqliteConnection connection, SqliteTransaction transaction)
         {
-            using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync();
-
             const string insertSchema = @"
                 (itemid, slot, sticker_id, wear, scale, rotation, tint_id, offset_x, offset_y, offset_z, pattern, highlight_reel) VALUES
                 (@itemid, @slot, @sticker_id, @wear, @scale, @rotation, @tint_id, @offset_x, @offset_y, @offset_z, @pattern, @highlight_reel)";
@@ -1203,7 +1229,7 @@ namespace CSGOSkinAPI.Services
 
             foreach (var item in items)
             {
-                using var insertCommand = new SqliteCommand(insertQuery, connection);
+                using var insertCommand = new SqliteCommand(insertQuery, connection, transaction);
                 insertCommand.Parameters.AddWithValue("@itemid", (long)itemId);
                 insertCommand.Parameters.AddWithValue("@slot", item.slot);
                 insertCommand.Parameters.AddWithValue("@sticker_id", item.sticker_id);
