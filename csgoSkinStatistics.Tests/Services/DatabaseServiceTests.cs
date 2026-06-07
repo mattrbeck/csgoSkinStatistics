@@ -145,6 +145,34 @@ public class DatabaseServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task SaveItemWithExtrasAsync_ShouldSkipZeroItemId()
+    {
+        await _databaseService.InitializeDatabaseAsync();
+
+        // Music kits, graffiti, passes, etc. decode with itemid == 0. They must not
+        // be persisted, or they would all collide on the itemid PRIMARY KEY.
+        var item = new CEconItemPreviewDataBlock
+        {
+            itemid = 0,
+            defindex = 1314,
+            paintindex = 0,
+            rarity = 3,
+            quality = 4,
+            paintwear = 0,
+            paintseed = 0,
+            inventory = 2147483649,
+            origin = 8
+        };
+
+        item.stickers.Add(new CEconItemPreviewDataBlock.Sticker { slot = 0, sticker_id = 1, wear = 0.5f });
+
+        await _databaseService.SaveItemWithExtrasAsync(item);
+
+        Assert.Null(await _databaseService.GetItemAsync(0));
+        Assert.Empty(await _databaseService.GetStickersAsync(0, true));
+    }
+
+    [Fact]
     public async Task GetItemAsync_ShouldReturnNullForNonExistentItem()
     {
         await _databaseService.InitializeDatabaseAsync();

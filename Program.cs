@@ -96,6 +96,13 @@ namespace CSGOSkinAPI.Controllers
                     }
                 }
 
+                // Cache hit is authoritative, never stale: an itemid encodes an immutable
+                // item config. Any mutation (sticker/keychain applied or removed, name tag,
+                // etc.) mints a brand-new itemid in the GC, so the row we stored for this id
+                // can never disagree with the live item. (Only the StatTrak kill count and
+                // inventory slot drift under a fixed itemid, and we persist neither — stattrak
+                // is a bool. See docs/inventory-endpoint-cert.md, "applying a sticker mints a
+                // new itemid".) That is why we can return the cached copy without re-querying.
                 var existingItem = await dbService.GetItemAsync(a);
                 if (existingItem != null)
                 {
@@ -984,6 +991,11 @@ namespace CSGOSkinAPI.Services
             using var connection = new SqliteConnection(_connectionString);
             await connection.OpenAsync();
 
+            // `itemid` is a sound PRIMARY KEY because it is immutable identity: the GC mints
+            // a new itemid whenever an item's config changes (stickers, name tag, ...), so a
+            // row here never goes stale. Caveat: non-paint types (music kits, graffiti,
+            // passes, ...) decode with itemid == 0 and would all collide on key 0 — they are
+            // filtered out before persistence in SaveItemWithExtrasAsync.
             var createTableCommand = @"
                 CREATE TABLE IF NOT EXISTS searches (
                     itemid INTEGER PRIMARY KEY NOT NULL,
@@ -1152,6 +1164,17 @@ namespace CSGOSkinAPI.Services
 
         public async Task SaveItemWithExtrasAsync(CEconItemPreviewDataBlock itemInfo)
         {
+            // Music kits, graffiti, passes, standalone stickers, tools, etc. decode
+            // with itemid == 0 (it is intrinsic to those defindex types, not a missing
+            // value). Since `searches.itemid` is the PRIMARY KEY, persisting any of them
+            // would collapse every zero-itemid item onto key 0 and, with INSERT OR
+            // REPLACE, silently overwrite each other. These items carry no expensive
+            // float/seed worth caching, so skip them. (See docs/inventory-endpoint-cert.md.)
+            if (itemInfo.itemid == 0)
+            {
+                return;
+            }
+
             await SaveItemAsync(itemInfo);
 
             if (itemInfo.stickers?.Count > 0)
