@@ -115,18 +115,21 @@
     </div>
 
     <div id="inventory-summary" style="display: none;">
-      <h2>Inventory Summary</h2>
+      <a id="summary-profile" class="summary-profile" href="#" target="_blank" rel="noopener" style="display: none;">
+        <img id="summary-avatar" class="summary-avatar" src="" alt="" style="display: none;">
+        <span id="summary-persona" class="summary-persona"></span>
+      </a>
       <div id="summary-stats">
         <div class="stat-item">
-          <span class="stat-label">Total Items:</span>
+          <span class="stat-label">Total Items</span>
           <span id="total-items">0</span>
         </div>
         <div class="stat-item">
-          <span class="stat-label">CS2 Items:</span>
+          <span class="stat-label">CS2 Items</span>
           <span id="csgo-items">0</span>
         </div>
         <div class="stat-item">
-          <span class="stat-label">StatTrak Items:</span>
+          <span class="stat-label">StatTrak Items</span>
           <span id="stattrak-items">0</span>
         </div>
       </div>
@@ -210,7 +213,7 @@
             <div class="control-group checkbox-group">
               <label for="hide-commemorative">
                 <input type="checkbox" id="hide-commemorative" checked>
-                Hide commemorative items
+                Hide items without a float
               </label>
             </div>
             

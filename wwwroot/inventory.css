@@ -117,6 +117,33 @@ nav a.current {
   color: var(--pop);
 }
 
+.summary-profile {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 18px;
+  text-decoration: none;
+  color: var(--text);
+}
+
+.summary-profile:hover .summary-persona {
+  color: var(--pop);
+}
+
+.summary-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.summary-persona {
+  font-size: 18px;
+  font-weight: bold;
+  color: var(--text);
+}
+
 #summary-stats {
   display: flex;
   justify-content: space-around;
@@ -466,11 +493,51 @@ inventory-item {
     grid-template-columns: 1fr;
   }
   
-  #summary-stats {
-    flex-direction: column;
-    gap: 15px;
+  #inventory-summary {
+    margin: 16px auto;
+    padding: 14px;
   }
-  
+
+  #inventory-summary h2 {
+    font-size: 18px;
+    margin-bottom: 12px;
+  }
+
+  .summary-profile {
+    margin-bottom: 12px;
+  }
+
+  .summary-avatar {
+    width: 40px;
+    height: 40px;
+  }
+
+  .summary-persona {
+    font-size: 16px;
+  }
+
+  /* Keep the three stats in a single compact row on mobile so the
+     actual inventory items are reachable with much less scrolling. */
+  #summary-stats {
+    flex-direction: row;
+    justify-content: space-between;
+    flex-wrap: nowrap;
+    gap: 8px;
+  }
+
+  .stat-item {
+    flex: 1;
+  }
+
+  .stat-label {
+    font-size: 11px;
+    margin-bottom: 2px;
+  }
+
+  .stat-item span:last-child {
+    font-size: 18px;
+  }
+
   .sidebar h3 {
     font-size: 16px;
   }

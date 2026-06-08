@@ -559,6 +559,34 @@ function updateSummary(inventoryData, processedItems) {
   elements.totalItems.textContent = totalItems;
   elements.csgoItems.textContent = csgoItems;
   elements.stattrakItems.textContent = stattrakItems;
+
+  updateProfileSummary(inventoryData);
+}
+
+function updateProfileSummary(inventoryData) {
+  const persona = inventoryData.persona_name;
+  const avatar = inventoryData.avatar;
+  const profileUrl = inventoryData.profile_url;
+
+  // Show the persona name (and link) only when we actually have a name.
+  if (persona) {
+    elements.summaryPersona.textContent = persona;
+    elements.summaryProfile.href = profileUrl || '#';
+    elements.summaryProfile.style.display = 'inline-flex';
+  } else {
+    elements.summaryPersona.textContent = '';
+    elements.summaryProfile.style.display = 'none';
+  }
+
+  // Show the avatar only when we have a valid URL; never render a broken image.
+  if (avatar) {
+    elements.summaryAvatar.src = avatar;
+    elements.summaryAvatar.alt = persona ? `${persona}'s avatar` : 'Profile avatar';
+    elements.summaryAvatar.style.display = 'inline-block';
+  } else {
+    elements.summaryAvatar.removeAttribute('src');
+    elements.summaryAvatar.style.display = 'none';
+  }
 }
 
 function sortItems(items, field, order) {
@@ -737,10 +765,11 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
     elements.cancelButton.style.display = 'inline-block';
     
     elements.errorDisplay.style.display = 'none';
+    elements.status.textContent = '';
     elements.inventoryStatus.style.display = 'block';
     elements.inventoryContainer.style.display = 'none';
     elements.inventorySummary.style.display = 'none';
-    
+
     elements.loadingMessage.textContent = 'Fetching inventory data...';
     updateProgress(0, 0);
 
@@ -767,10 +796,16 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
       throw new Error('No CS2 items found in inventory or inventory is private');
     }
 
-    // Extract the resolved SteamId64 from the first item's inspect link
-    // All items will have the same owner SteamId64 in their inspect links
-    let actualSteamId = resolvedSteamId;
-    if (!actualSteamId && csgoItems.length > 0 && csgoItems[0].inspect_link) {
+    // Determine the canonical SteamId64 for the share hash.
+    // Prefer the resolved id from the response (the backend now returns it),
+    // then any id we extracted from the input, then fall back to the legacy
+    // inspect-link regex (kept only as a last resort).
+    let actualSteamId = null;
+    if (inventoryData.steamid && validateSteamId(inventoryData.steamid)) {
+      actualSteamId = inventoryData.steamid;
+    } else if (resolvedSteamId && validateSteamId(resolvedSteamId)) {
+      actualSteamId = resolvedSteamId;
+    } else if (csgoItems.length > 0 && csgoItems[0].inspect_link) {
       const inspectMatch = csgoItems[0].inspect_link.match(/S(\d+)A/);
       if (inspectMatch && validateSteamId(inspectMatch[1])) {
         actualSteamId = inspectMatch[1];
@@ -831,7 +866,7 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
       inventoryItems.push(itemData);
     }
     
-    console.log(`Pre-loaded ${preloadedCount} items from database, ${itemsNeedingAnalysis.length} items need analysis`);
+    console.log(`Resolved ${preloadedCount} items from the inventory response, ${itemsNeedingAnalysis.length} need a Game Coordinator lookup`);
 
     // Update summary with initial data including pre-loaded items
     updateSummary(inventoryData, processedItems);
@@ -845,10 +880,8 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
     applySortAndFilter();
 
     if (itemsNeedingAnalysis.length === 0) {
-      // All items were pre-loaded!
+      // Every item came fully resolved from the inventory response - nothing left to do.
       elements.inventoryStatus.style.display = 'none';
-      elements.status.textContent = `Successfully loaded ${csgoItems.length} items (all from database)`;
-
       return;
     }
 
@@ -903,7 +936,7 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
     elements.inventoryStatus.style.display = 'none';
     const totalItems = csgoItems.length;
     const analyzedItems = itemsNeedingAnalysis.length;
-    elements.status.textContent = `Successfully loaded ${totalItems} items (${preloadedCount} from database, ${analyzedItems} analyzed)`;
+    elements.status.textContent = `Loaded ${totalItems} items (${analyzedItems} via Game Coordinator)`;
 
     // Re-apply sort and filter now that all items have detailed data
     applySortAndFilter();
@@ -997,6 +1030,9 @@ window.addEventListener("load", function () {
     progressFill: document.getElementById("progress-fill"),
     progressText: document.getElementById("progress-text"),
     inventorySummary: document.getElementById("inventory-summary"),
+    summaryProfile: document.getElementById("summary-profile"),
+    summaryAvatar: document.getElementById("summary-avatar"),
+    summaryPersona: document.getElementById("summary-persona"),
     totalItems: document.getElementById("total-items"),
     csgoItems: document.getElementById("csgo-items"),
     stattrakItems: document.getElementById("stattrak-items"),

@@ -272,10 +272,16 @@ namespace CSGOSkinAPI.Controllers
                     }
                 }
 
+                var (personaName, avatar) = await GetProfileInfoAsync(steamId);
+
                 var result = new
                 {
                     total = inventoryData.total,
                     success = 1,
+                    steamid = steamId.ToString(),
+                    persona_name = personaName,
+                    avatar,
+                    profile_url = $"https://steamcommunity.com/profiles/{steamId}",
                     csgo_items = csgoItems
                 };
 
@@ -372,6 +378,41 @@ namespace CSGOSkinAPI.Controllers
             {
                 Console.WriteLine($"Error resolving custom URL '{customUrl}': {ex.Message}");
                 return null;
+            }
+        }
+
+        private async Task<(string? personaName, string? avatar)> GetProfileInfoAsync(ulong steamId)
+        {
+            try
+            {
+                using var httpClient = httpClientFactory.CreateClient();
+                httpClient.Timeout = TimeSpan.FromSeconds(5);
+
+                // The public profile XML feed works for a numeric SteamId64 and exposes
+                // persona name + avatar without an API key.
+                var xmlUrl = $"https://steamcommunity.com/profiles/{steamId}/?xml=1";
+
+                var response = await httpClient.GetAsync(xmlUrl);
+                if (!response.IsSuccessStatusCode)
+                {
+                    Console.WriteLine($"Steam profile info request failed: {response.StatusCode}");
+                    return (null, null);
+                }
+
+                var xmlContent = await response.Content.ReadAsStringAsync();
+
+                var nameMatch = Regex.Match(xmlContent, @"<steamID><!\[CDATA\[(.*?)\]\]></steamID>", RegexOptions.Singleline);
+                var avatarMatch = Regex.Match(xmlContent, @"<avatarFull><!\[CDATA\[(.*?)\]\]></avatarFull>", RegexOptions.Singleline);
+
+                var personaName = nameMatch.Success ? nameMatch.Groups[1].Value : null;
+                var avatar = avatarMatch.Success ? avatarMatch.Groups[1].Value : null;
+
+                return (personaName, avatar);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error fetching profile info for '{steamId}': {ex.Message}");
+                return (null, null);
             }
         }
 
