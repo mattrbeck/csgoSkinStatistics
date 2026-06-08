@@ -117,6 +117,17 @@ nav a.current {
   color: var(--pop);
 }
 
+.ban-alert {
+  margin-top: 18px;
+  padding: 12px 16px;
+  border-radius: 6px;
+  background-color: rgba(204, 73, 47, 0.15);
+  border: 1px solid var(--error, #cc492f);
+  color: var(--error, #cc492f);
+  font-weight: bold;
+  text-align: center;
+}
+
 .summary-profile {
   display: inline-flex;
   align-items: center;

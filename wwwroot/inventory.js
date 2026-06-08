@@ -591,6 +591,28 @@ function updateProfileSummary(inventoryData) {
     elements.summaryAvatar.removeAttribute('src');
     elements.summaryAvatar.style.display = 'none';
   }
+
+  // Warn if this account cannot trade. tradeBanState is "None"/"Probation"/"Banned";
+  // a limited account is likewise blocked from trading and the market.
+  if (elements.banAlert) {
+    const tradeBan = inventoryData.trade_ban_state;
+    const warnings = [];
+    if (tradeBan && tradeBan !== 'None') {
+      warnings.push(tradeBan === 'Probation'
+        ? '⚠️ This user is on trade probation and cannot trade.'
+        : '⚠️ This user is trade banned and cannot trade or use the market.');
+    }
+    if (inventoryData.limited_account) {
+      warnings.push('⚠️ This account is limited and cannot trade or use the market.');
+    }
+    if (warnings.length > 0) {
+      elements.banAlert.textContent = warnings.join(' ');
+      elements.banAlert.style.display = 'block';
+    } else {
+      elements.banAlert.textContent = '';
+      elements.banAlert.style.display = 'none';
+    }
+  }
 }
 
 function sortItems(items, field, order) {
@@ -1037,6 +1059,7 @@ window.addEventListener("load", function () {
     summaryProfile: document.getElementById("summary-profile"),
     summaryAvatar: document.getElementById("summary-avatar"),
     summaryPersona: document.getElementById("summary-persona"),
+    banAlert: document.getElementById("ban-alert"),
     totalItems: document.getElementById("total-items"),
     csgoItems: document.getElementById("csgo-items"),
     stattrakItems: document.getElementById("stattrak-items"),

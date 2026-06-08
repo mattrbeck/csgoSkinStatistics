@@ -289,7 +289,7 @@ namespace CSGOSkinAPI.Controllers
                     }
                 }
 
-                var (personaName, avatar) = await GetProfileInfoAsync(steamId);
+                var (personaName, avatar, tradeBanState, limitedAccount) = await GetProfileInfoAsync(steamId);
 
                 var result = new
                 {
@@ -298,6 +298,8 @@ namespace CSGOSkinAPI.Controllers
                     steamid = steamId.ToString(),
                     persona_name = personaName,
                     avatar,
+                    trade_ban_state = tradeBanState,
+                    limited_account = limitedAccount,
                     profile_url = $"https://steamcommunity.com/profiles/{steamId}",
                     csgo_items = csgoItems
                 };
@@ -398,7 +400,7 @@ namespace CSGOSkinAPI.Controllers
             }
         }
 
-        private async Task<(string? personaName, string? avatar)> GetProfileInfoAsync(ulong steamId)
+        private async Task<(string? personaName, string? avatar, string? tradeBanState, bool limitedAccount)> GetProfileInfoAsync(ulong steamId)
         {
             try
             {
@@ -413,23 +415,30 @@ namespace CSGOSkinAPI.Controllers
                 if (!response.IsSuccessStatusCode)
                 {
                     Console.WriteLine($"Steam profile info request failed: {response.StatusCode}");
-                    return (null, null);
+                    return (null, null, null, false);
                 }
 
                 var xmlContent = await response.Content.ReadAsStringAsync();
 
                 var nameMatch = Regex.Match(xmlContent, @"<steamID><!\[CDATA\[(.*?)\]\]></steamID>", RegexOptions.Singleline);
                 var avatarMatch = Regex.Match(xmlContent, @"<avatarFull><!\[CDATA\[(.*?)\]\]></avatarFull>", RegexOptions.Singleline);
+                // The same XML feed reports trade restrictions: tradeBanState is
+                // "None"/"Probation"/"Banned", and isLimitedAccount is 0/1. Either one means
+                // this user is restricted from trading or using the market.
+                var tradeBanMatch = Regex.Match(xmlContent, @"<tradeBanState>(.*?)</tradeBanState>", RegexOptions.Singleline);
+                var limitedMatch = Regex.Match(xmlContent, @"<isLimitedAccount>(\d+)</isLimitedAccount>", RegexOptions.Singleline);
 
                 var personaName = nameMatch.Success ? nameMatch.Groups[1].Value : null;
                 var avatar = avatarMatch.Success ? avatarMatch.Groups[1].Value : null;
+                var tradeBanState = tradeBanMatch.Success ? tradeBanMatch.Groups[1].Value : null;
+                var limitedAccount = limitedMatch.Success && limitedMatch.Groups[1].Value == "1";
 
-                return (personaName, avatar);
+                return (personaName, avatar, tradeBanState, limitedAccount);
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"Error fetching profile info for '{steamId}': {ex.Message}");
-                return (null, null);
+                return (null, null, null, false);
             }
         }
 
