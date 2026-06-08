@@ -229,6 +229,22 @@ namespace CSGOSkinAPI.Controllers
                             var wearTag = description.tags?.FirstOrDefault(t => t.category == "Exterior");
                             var rarityTag = description.tags?.FirstOrDefault(t => t.category == "Rarity");
                             var qualityTag = description.tags?.FirstOrDefault(t => t.category == "Quality");
+
+                            // StatTrak kill count, when Steam exposes it on the StatTrak score line
+                            // (e.g. "StatTrak™ Confirmed Kills: 1234"). Some copies only carry the
+                            // generic "This item tracks Confirmed Kills." line, which has no number.
+                            int? stattrakKills = null;
+                            var scoreLine = description.descriptions?
+                                .FirstOrDefault(l => l.name == "stattrak_score")?.value;
+                            if (scoreLine != null)
+                            {
+                                var killMatch = Regex.Match(scoreLine, @"Confirmed Kills:\s*([\d,]+)");
+                                if (killMatch.Success &&
+                                    int.TryParse(killMatch.Groups[1].Value.Replace(",", ""), out var kills))
+                                {
+                                    stattrakKills = kills;
+                                }
+                            }
                             
                             // Try to extract itemid from inspect link and check if we have this item in database
                             var parsed = ParseInspectUrl(inspectLink);
@@ -260,6 +276,7 @@ namespace CSGOSkinAPI.Controllers
                                 wear = wearTag?.localized_tag_name,
                                 rarity = rarityTag?.localized_tag_name,
                                 quality = qualityTag?.localized_tag_name,
+                                stattrak_kills = stattrakKills,
                                 name_color = description.name_color,
                                 icon_url = description.icon_url,
                                 icon_url_large = description.icon_url_large,
@@ -1641,7 +1658,10 @@ namespace CSGOSkinAPI.Models
     {
         [JsonPropertyName("type")]
         public string? type { get; set; }
-        
+
+        [JsonPropertyName("name")]
+        public string? name { get; set; }
+
         [JsonPropertyName("value")]
         public string? value { get; set; }
     }

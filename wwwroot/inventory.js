@@ -399,7 +399,11 @@ class InventoryItem extends HTMLElement {
         nameText += ` <span class="item-special" style="color: var(--pop, #2ecc71); font-weight: bold; margin-left: 5px;">${itemData.special}</span>`;
       }
       if (itemData.stattrak) {
-        nameText += '<span class="stattrak-badge" style="display: inline-block; background-color: var(--pop, #2ecc71); color: var(--gray, #1f2d3a); font-size: 10px; font-weight: bold; padding: 2px 6px; border-radius: 3px; margin-left: 8px; vertical-align: middle;">ST</span>';
+        const kills = this.itemData?.stattrak_kills;
+        const stTitle = (kills != null)
+          ? `StatTrak™ Confirmed Kills: ${kills.toLocaleString()}`
+          : 'StatTrak™';
+        nameText += `<span class="stattrak-badge" title="${stTitle}" style="display: inline-block; cursor: help; background-color: var(--pop, #2ecc71); color: var(--gray, #1f2d3a); font-size: 10px; font-weight: bold; padding: 2px 6px; border-radius: 3px; margin-left: 8px; vertical-align: middle;">ST</span>`;
       }
       // Check for knife/glove using defindex (500-600 for knives, 5000+ for gloves)
       // This is more reliable than quality === 3, since StatTrak knives have quality 9
