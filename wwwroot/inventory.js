@@ -403,7 +403,12 @@ class InventoryItem extends HTMLElement {
     // Enhance the name with detailed info if we got weapon/skin data
     if (itemData.weapon && itemData.skin && nameElement) {
       nameElement.className = 'item-name';
-      let nameText = hasSkin ? `${itemData.weapon} | ${itemData.skin}` : itemData.weapon;
+      // Skinned weapons show "Weapon | Skin". For skinless items (stickers, music kits,
+      // graffiti, etc.) the GC only returns a generic category word, so keep Steam's full
+      // name (the ★ is stripped here and re-added via CSS for knives/gloves).
+      let nameText = hasSkin
+        ? `${itemData.weapon} | ${itemData.skin}`
+        : (this.itemData.name || this.itemData.market_name || itemData.weapon || '').replace(/^★\s*/, '');
       if (itemData.special) {
         nameText += ` <span class="item-special" style="color: var(--pop, #2ecc71); font-weight: bold; margin-left: 5px;">${itemData.special}</span>`;
       }
