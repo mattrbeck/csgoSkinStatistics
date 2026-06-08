@@ -465,11 +465,16 @@ class InventoryItem extends HTMLElement {
       }
     }
     
-    // Update rarity if we got better data, otherwise keep existing  
+    // Keep Steam's rarity (set during the basic render) - it is correct for every item
+    // category. Only fall back to the numeric GC rarity when Steam gave us nothing, since
+    // getRarityFromNumber is a weapon-only ladder and mislabels medals, stickers, agents, etc.
     if (rarityElement) {
-      const detailedRarity = getRarityFromNumber(itemData.rarity);
-      if (detailedRarity !== 'Unknown' && detailedRarity !== rarityElement.textContent) {
-        rarityElement.textContent = detailedRarity;
+      const current = rarityElement.textContent;
+      if (!current || current === 'Unknown') {
+        const detailedRarity = getRarityFromNumber(itemData.rarity);
+        if (detailedRarity !== 'Unknown') {
+          rarityElement.textContent = detailedRarity;
+        }
       }
     }
     
