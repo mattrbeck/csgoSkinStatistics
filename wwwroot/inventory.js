@@ -390,11 +390,20 @@ class InventoryItem extends HTMLElement {
 
     this.classList.remove('loading');
     this.classList.add('loaded');
-    
+
+    // Items with no paint (paintindex 0) - medals, coins, pins, music kits, graffiti,
+    // vanilla knives, etc. - have no float, pattern, or skin. "Float: 0", "Pattern: 0",
+    // "Factory New" and "| Vanilla" are all meaningless for them, so we drop those rows.
+    const hasSkin = Number(itemData.paintindex) > 0;
+    const setRow = (el, show) => {
+      const row = el?.closest('.detail-row');
+      if (row) row.style.display = show ? '' : 'none';
+    };
+
     // Enhance the name with detailed info if we got weapon/skin data
     if (itemData.weapon && itemData.skin && nameElement) {
       nameElement.className = 'item-name';
-      let nameText = `${itemData.weapon} | ${itemData.skin}`;
+      let nameText = hasSkin ? `${itemData.weapon} | ${itemData.skin}` : itemData.weapon;
       if (itemData.special) {
         nameText += ` <span class="item-special" style="color: var(--pop, #2ecc71); font-weight: bold; margin-left: 5px;">${itemData.special}</span>`;
       }
@@ -426,7 +435,8 @@ class InventoryItem extends HTMLElement {
     }
 
     // Update float value - display 6 decimal places for overview, full precision on hover
-    if (floatElement) {
+    setRow(floatElement, hasSkin);
+    if (floatElement && hasSkin) {
       const paintwearFloat = uint32ToFloat32(itemData.paintwear);
       const fullFloat = paintwearFloat.toString();
       floatElement.textContent = paintwearFloat.toFixed(6);
@@ -447,7 +457,8 @@ class InventoryItem extends HTMLElement {
     }
     
     // Update wear if we got better data, otherwise keep existing
-    if (wearElement) {
+    setRow(wearElement, hasSkin);
+    if (wearElement && hasSkin) {
       const detailedWear = getWearFromFloat(uint32ToFloat32(itemData.paintwear));
       if (detailedWear !== 'Unknown' && detailedWear !== wearElement.textContent) {
         wearElement.textContent = detailedWear;
@@ -463,7 +474,8 @@ class InventoryItem extends HTMLElement {
     }
     
     // Update pattern seed
-    if (patternElement) {
+    setRow(patternElement, hasSkin);
+    if (patternElement && hasSkin) {
       patternElement.textContent = itemData.paintseed;
       patternElement.classList.remove('loading-placeholder');
     }
