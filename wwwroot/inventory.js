@@ -327,9 +327,9 @@ class InventoryItem extends HTMLElement {
       'Mil-Spec Grade': '#4B69FF',       // Blue
       'Restricted': '#8847FF',           // Purple
       'Classified': '#D32CE6',           // Pink/Magenta
-      'Covert': '#EB4B4B',              // Red
-      'Contraband': '#E4AE39',           // Orange
-      'Extraordinary': '#FFD700',        // Gold (knives/gloves)
+      'Covert': '#EB4B4B',              // Red (weapons)
+      'Extraordinary': '#EB4B4B',        // Red (knives/gloves) - same tier as Covert; Steam tags it eb4b4b
+      'Contraband': '#E4AE39',           // Gold/Orange (e.g. M4A4 Howl) - the only gold rarity
       
       // Agent rarities (based on Operation rewards)
       'Base Grade': '#B0C3D9',          // Light Gray/White
@@ -338,13 +338,13 @@ class InventoryItem extends HTMLElement {
       'Superior': '#D32CE6',            // Pink (76 stars)
       'Master': '#EB4B4B',              // Red (89 stars)
       
-      // Stickers and Patches (High Grade to Extraordinary)
-      'High Grade': '#5E98D9',          // Light Blue
-      'Remarkable': '#4B69FF',          // Blue
-      'Exotic': '#8847FF',              // Purple
-      
-      // Default for unrecognized types
-      'Stock': '#B0C3D9'                // Light Gray/White
+      // Stickers, charms, graffiti, etc. (same rarity-value colors as above)
+      'High Grade': '#4B69FF',          // Blue (value 3, == Mil-Spec/Distinguished)
+      'Remarkable': '#8847FF',          // Purple (value 4, == Restricted/Exceptional)
+      'Exotic': '#D32CE6',              // Pink (value 5, == Classified/Superior)
+
+      // Default weapon (no skin)
+      'Stock': '#DED6CC'                // Off-white/gray (Steam Rarity_Default_Weapon)
     };
     
     return rarityColors[rarity] || '#B0C3D9'; // Default to light gray if not found
