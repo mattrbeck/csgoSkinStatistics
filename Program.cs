@@ -378,35 +378,37 @@ namespace CSGOSkinAPI.Controllers
             return steamId.ToString().StartsWith("76561") && steamId.ToString().Length == 17;
         }
 
-        private async Task<ulong?> ResolveSteamIdAsync(string input)
+        // Classifies a user input - a raw SteamId64, a profiles/<id64> URL, an id/<vanity> URL,
+        // or a bare vanity name - into either a known SteamId64 or a vanity that still needs a
+        // lookup. Centralizes the parsing so every caller (resolve + profile XML) stays in sync.
+        private static (ulong? steamId64, string? vanity) ParseSteamInput(string input)
         {
-            // Check if it's already a valid SteamId64
-            if (ulong.TryParse(input, out var steamId) && IsValidSteamId64(steamId))
-            {
-                return steamId;
-            }
+            // Already a valid SteamId64
+            if (ulong.TryParse(input, out var id) && IsValidSteamId64(id))
+                return (id, null);
 
-            // Try to parse as Steam profile URL
+            // profiles/<id64> URL
             var profileMatch = Regex.Match(input, @"steamcommunity\.com/profiles/(\d+)");
-            if (profileMatch.Success && ulong.TryParse(profileMatch.Groups[1].Value, out steamId) && IsValidSteamId64(steamId))
-            {
-                return steamId;
-            }
+            if (profileMatch.Success && ulong.TryParse(profileMatch.Groups[1].Value, out var pid) && IsValidSteamId64(pid))
+                return (pid, null);
 
-            // Try to parse as Steam custom URL
+            // id/<vanity> URL
             var customUrlMatch = Regex.Match(input, @"steamcommunity\.com/id/([^/?]+)");
             if (customUrlMatch.Success)
-            {
-                var customUrl = customUrlMatch.Groups[1].Value;
-                return await ResolveCustomUrlToSteamId64Async(customUrl);
-            }
+                return (null, customUrlMatch.Groups[1].Value);
 
-            // If it doesn't contain steamcommunity.com, treat it as a potential custom URL directly
+            // Bare vanity name (not a steamcommunity URL, not an all-digit id)
             if (!input.Contains("steamcommunity.com") && !input.All(char.IsDigit))
-            {
-                return await ResolveCustomUrlToSteamId64Async(input);
-            }
+                return (null, input);
 
+            return (null, null);
+        }
+
+        private async Task<ulong?> ResolveSteamIdAsync(string input)
+        {
+            var (steamId64, vanity) = ParseSteamInput(input);
+            if (steamId64 != null) return steamId64;
+            if (vanity != null) return await ResolveCustomUrlToSteamId64Async(vanity);
             return null;
         }
 
@@ -476,24 +478,13 @@ namespace CSGOSkinAPI.Controllers
             };
         }
 
-        // Picks the profile XML feed URL for a user input, mirroring ResolveSteamIdAsync. Vanity
-        // inputs use /id/<vanity> (which also carries the SteamId64); numeric inputs use /profiles.
+        // Picks the profile XML feed URL for a user input. Vanity inputs use /id/<vanity> (which
+        // also carries the SteamId64); known ids use /profiles/<id64>.
         private static string? GetProfileXmlUrl(string input)
         {
-            var profileMatch = Regex.Match(input, @"steamcommunity\.com/profiles/(\d+)");
-            if (profileMatch.Success)
-                return $"https://steamcommunity.com/profiles/{profileMatch.Groups[1].Value}/?xml=1";
-
-            var customUrlMatch = Regex.Match(input, @"steamcommunity\.com/id/([^/?]+)");
-            if (customUrlMatch.Success)
-                return $"https://steamcommunity.com/id/{customUrlMatch.Groups[1].Value}/?xml=1";
-
-            if (input.All(char.IsDigit))
-                return $"https://steamcommunity.com/profiles/{input}/?xml=1";
-
-            if (!input.Contains("steamcommunity.com"))
-                return $"https://steamcommunity.com/id/{input}/?xml=1";
-
+            var (steamId64, vanity) = ParseSteamInput(input);
+            if (steamId64 != null) return $"https://steamcommunity.com/profiles/{steamId64}/?xml=1";
+            if (vanity != null) return $"https://steamcommunity.com/id/{vanity}/?xml=1";
             return null;
         }
 
