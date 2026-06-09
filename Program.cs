@@ -25,6 +25,18 @@ builder.Services.AddResponseCompression(options =>
         ["application/javascript", "text/css", "text/html", "text/json", "text/plain"]);
 });
 builder.Services.AddHttpClient();
+// Dedicated client for steamcommunity.com calls (inventory, profile, vanity resolve). Traffic is
+// bursty/low, so we keep pooled connections alive far longer than the defaults to avoid paying a
+// fresh TLS handshake (~100ms) on each cold request. PooledConnectionLifetime still rotates
+// connections periodically for DNS hygiene, and an infinite handler lifetime stops IHttpClientFactory
+// from recycling the handler (which would otherwise drop the warm connection pool every 2 minutes).
+builder.Services.AddHttpClient("steam")
+    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+    {
+        PooledConnectionIdleTimeout = TimeSpan.FromMinutes(10),
+        PooledConnectionLifetime = TimeSpan.FromMinutes(30),
+    })
+    .SetHandlerLifetime(Timeout.InfiniteTimeSpan);
 builder.Services.AddSingleton<SteamService>();
 builder.Services.AddSingleton<DatabaseService>();
 builder.Services.AddSingleton<ConstDataService>();
@@ -146,7 +158,7 @@ namespace CSGOSkinAPI.Controllers
                 var steamId = resolvedSteamId.Value;
                 steamid = steamId.ToString(); // Use resolved SteamId64 for inventory URL
 
-                using var httpClient = httpClientFactory.CreateClient();
+                using var httpClient = httpClientFactory.CreateClient("steam");
                 httpClient.Timeout = TimeSpan.FromSeconds(10);
                 
                 var inventoryUrl = $"https://steamcommunity.com/inventory/{steamid}/730/2?l=english&count=2000";
@@ -340,7 +352,7 @@ namespace CSGOSkinAPI.Controllers
 
             try
             {
-                using var httpClient = httpClientFactory.CreateClient();
+                using var httpClient = httpClientFactory.CreateClient("steam");
                 httpClient.Timeout = TimeSpan.FromSeconds(5);
 
                 var response = await httpClient.GetAsync(xmlUrl);
@@ -416,7 +428,7 @@ namespace CSGOSkinAPI.Controllers
         {
             try
             {
-                using var httpClient = httpClientFactory.CreateClient();
+                using var httpClient = httpClientFactory.CreateClient("steam");
                 httpClient.Timeout = TimeSpan.FromSeconds(5);
 
                 // The public profile XML feed exposes the SteamId64 without an API key.
