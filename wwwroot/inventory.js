@@ -585,8 +585,8 @@ function updateSummary(inventoryData, processedItems) {
   elements.totalItems.textContent = totalItems;
   elements.csgoItems.textContent = csgoItems;
   elements.stattrakItems.textContent = stattrakItems;
-
-  updateProfileSummary(inventoryData);
+  // Profile header (avatar/persona/trade-ban) is populated separately by the parallel
+  // /api/profile fetch kicked off in analyzeInventory.
 }
 
 function updateProfileSummary(inventoryData) {
@@ -820,6 +820,14 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
 
     elements.loadingMessage.textContent = 'Fetching inventory data...';
     updateProgress(0, 0);
+
+    // Fetch profile info (avatar, persona, trade-ban) in parallel and populate the header when
+    // it arrives. This is intentionally not awaited so item rendering never waits on Steam's
+    // profile feed; the summary block is hidden until items load, so early/late arrival is fine.
+    fetch(`/api/profile?steamid=${encodeURIComponent(userInput)}`, { signal: analysisController.signal })
+      .then(r => r.json())
+      .then(profile => { if (profile && profile.success) updateProfileSummary(profile); })
+      .catch(() => { /* profile is non-critical; ignore failures and aborts */ });
 
     const response = await fetch(`/api/inventory?steamid=${encodeURIComponent(userInput)}`, {
       signal: analysisController.signal

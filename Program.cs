@@ -289,18 +289,13 @@ namespace CSGOSkinAPI.Controllers
                     }
                 }
 
-                var (personaName, avatar, tradeBanState, limitedAccount) = await GetProfileInfoAsync(steamId);
-
+                // Profile info (avatar, persona, trade-ban) is fetched separately by the browser
+                // via /api/profile so item rendering never waits on Steam's profile feed.
                 var result = new
                 {
                     total = inventoryData.total,
                     success = 1,
                     steamid = steamId.ToString(),
-                    persona_name = personaName,
-                    avatar,
-                    trade_ban_state = tradeBanState,
-                    limited_account = limitedAccount,
-                    profile_url = $"https://steamcommunity.com/profiles/{steamId}",
                     csgo_items = csgoItems
                 };
 
@@ -326,6 +321,55 @@ namespace CSGOSkinAPI.Controllers
                 Console.WriteLine($"Error in GetInventoryData: {ex.Message}");
                 Console.WriteLine(ex.StackTrace);
                 return StatusCode(500, new { error = ex.Message });
+            }
+        }
+
+        [HttpGet("profile")]
+        public async Task<IActionResult> GetProfile([FromQuery] string steamid)
+        {
+            if (string.IsNullOrEmpty(steamid))
+            {
+                return BadRequest(new { error = "Steam ID is required" });
+            }
+
+            var xmlUrl = GetProfileXmlUrl(steamid);
+            if (xmlUrl == null)
+            {
+                return BadRequest(new { error = "Unable to determine profile for the given Steam ID" });
+            }
+
+            try
+            {
+                using var httpClient = httpClientFactory.CreateClient();
+                httpClient.Timeout = TimeSpan.FromSeconds(5);
+
+                var response = await httpClient.GetAsync(xmlUrl);
+                if (!response.IsSuccessStatusCode)
+                {
+                    return BadRequest(new { error = $"Failed to fetch profile: {response.StatusCode}" });
+                }
+
+                var profile = ParseProfileXml(await response.Content.ReadAsStringAsync());
+                if (profile.SteamId == null)
+                {
+                    return BadRequest(new { error = "Unable to resolve Steam profile" });
+                }
+
+                return Ok(new
+                {
+                    success = 1,
+                    steamid = profile.SteamId.ToString(),
+                    persona_name = profile.Persona,
+                    avatar = profile.Avatar,
+                    trade_ban_state = profile.TradeBanState,
+                    limited_account = profile.LimitedAccount,
+                    profile_url = $"https://steamcommunity.com/profiles/{profile.SteamId}"
+                });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error fetching profile for '{steamid}': {ex.Message}");
+                return StatusCode(500, new { error = "Failed to fetch profile" });
             }
         }
 
@@ -400,46 +444,57 @@ namespace CSGOSkinAPI.Controllers
             }
         }
 
-        private async Task<(string? personaName, string? avatar, string? tradeBanState, bool limitedAccount)> GetProfileInfoAsync(ulong steamId)
+        private sealed class ProfileInfo
         {
-            try
+            public ulong? SteamId { get; init; }
+            public string? Persona { get; init; }
+            public string? Avatar { get; init; }
+            public string? TradeBanState { get; init; }
+            public bool LimitedAccount { get; init; }
+        }
+
+        // Parses the public Steam profile XML feed. Both /id/<vanity>/?xml=1 and
+        // /profiles/<id64>/?xml=1 return the same shape, so the vanity feed yields the SteamId64
+        // *and* the profile info in one request - no separate resolve call needed.
+        private static ProfileInfo ParseProfileXml(string xml)
+        {
+            var idMatch = Regex.Match(xml, @"<steamID64>(\d+)</steamID64>");
+            var nameMatch = Regex.Match(xml, @"<steamID><!\[CDATA\[(.*?)\]\]></steamID>", RegexOptions.Singleline);
+            var avatarMatch = Regex.Match(xml, @"<avatarFull><!\[CDATA\[(.*?)\]\]></avatarFull>", RegexOptions.Singleline);
+            // tradeBanState is "None"/"Probation"/"Banned"; isLimitedAccount is 0/1. Either one
+            // means the user is restricted from trading or using the market.
+            var tradeBanMatch = Regex.Match(xml, @"<tradeBanState>(.*?)</tradeBanState>", RegexOptions.Singleline);
+            var limitedMatch = Regex.Match(xml, @"<isLimitedAccount>(\d+)</isLimitedAccount>", RegexOptions.Singleline);
+
+            return new ProfileInfo
             {
-                using var httpClient = httpClientFactory.CreateClient();
-                httpClient.Timeout = TimeSpan.FromSeconds(5);
+                SteamId = idMatch.Success && ulong.TryParse(idMatch.Groups[1].Value, out var id) ? id : null,
+                Persona = nameMatch.Success ? nameMatch.Groups[1].Value : null,
+                Avatar = avatarMatch.Success ? avatarMatch.Groups[1].Value : null,
+                TradeBanState = tradeBanMatch.Success ? tradeBanMatch.Groups[1].Value : null,
+                LimitedAccount = limitedMatch.Success && limitedMatch.Groups[1].Value == "1"
+            };
+        }
 
-                // The public profile XML feed works for a numeric SteamId64 and exposes
-                // persona name + avatar without an API key.
-                var xmlUrl = $"https://steamcommunity.com/profiles/{steamId}/?xml=1";
+        // Picks the profile XML feed URL for a user input, mirroring ResolveSteamIdAsync. Vanity
+        // inputs use /id/<vanity> (which also carries the SteamId64); numeric inputs use /profiles.
+        private static string? GetProfileXmlUrl(string input)
+        {
+            var profileMatch = Regex.Match(input, @"steamcommunity\.com/profiles/(\d+)");
+            if (profileMatch.Success)
+                return $"https://steamcommunity.com/profiles/{profileMatch.Groups[1].Value}/?xml=1";
 
-                var response = await httpClient.GetAsync(xmlUrl);
-                if (!response.IsSuccessStatusCode)
-                {
-                    Console.WriteLine($"Steam profile info request failed: {response.StatusCode}");
-                    return (null, null, null, false);
-                }
+            var customUrlMatch = Regex.Match(input, @"steamcommunity\.com/id/([^/?]+)");
+            if (customUrlMatch.Success)
+                return $"https://steamcommunity.com/id/{customUrlMatch.Groups[1].Value}/?xml=1";
 
-                var xmlContent = await response.Content.ReadAsStringAsync();
+            if (input.All(char.IsDigit))
+                return $"https://steamcommunity.com/profiles/{input}/?xml=1";
 
-                var nameMatch = Regex.Match(xmlContent, @"<steamID><!\[CDATA\[(.*?)\]\]></steamID>", RegexOptions.Singleline);
-                var avatarMatch = Regex.Match(xmlContent, @"<avatarFull><!\[CDATA\[(.*?)\]\]></avatarFull>", RegexOptions.Singleline);
-                // The same XML feed reports trade restrictions: tradeBanState is
-                // "None"/"Probation"/"Banned", and isLimitedAccount is 0/1. Either one means
-                // this user is restricted from trading or using the market.
-                var tradeBanMatch = Regex.Match(xmlContent, @"<tradeBanState>(.*?)</tradeBanState>", RegexOptions.Singleline);
-                var limitedMatch = Regex.Match(xmlContent, @"<isLimitedAccount>(\d+)</isLimitedAccount>", RegexOptions.Singleline);
+            if (!input.Contains("steamcommunity.com"))
+                return $"https://steamcommunity.com/id/{input}/?xml=1";
 
-                var personaName = nameMatch.Success ? nameMatch.Groups[1].Value : null;
-                var avatar = avatarMatch.Success ? avatarMatch.Groups[1].Value : null;
-                var tradeBanState = tradeBanMatch.Success ? tradeBanMatch.Groups[1].Value : null;
-                var limitedAccount = limitedMatch.Success && limitedMatch.Groups[1].Value == "1";
-
-                return (personaName, avatar, tradeBanState, limitedAccount);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error fetching profile info for '{steamId}': {ex.Message}");
-                return (null, null, null, false);
-            }
+            return null;
         }
 
         private static (ulong s, ulong a, ulong d, ulong m, CEconItemPreviewDataBlock? directItem)? ParseInspectUrl(string url)
