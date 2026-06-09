@@ -21,9 +21,11 @@ class InventoryItem extends HTMLElement {
     const template = document.getElementById('inventory-item-template');
     const clone = template.content.cloneNode(true);
     
-    // Apply existing styles by importing the main stylesheet
-    const style = document.createElement('style');
-    style.textContent = `
+    // Build the component stylesheet once and share it across every card via
+    // adoptedStyleSheets, instead of injecting (and re-parsing) this CSS into all
+    // ~200 shadow roots individually.
+    if (!InventoryItem._styleSheet && !InventoryItem._styleText) {
+      const css = `
       :host {
         display: block;
         background-color: var(--dark, #0f1d2a);
@@ -238,8 +240,22 @@ class InventoryItem extends HTMLElement {
         }
       }
     `;
-    
-    this.shadowRoot.appendChild(style);
+      if ('adoptedStyleSheets' in Document.prototype &&
+          typeof CSSStyleSheet !== 'undefined' && 'replaceSync' in CSSStyleSheet.prototype) {
+        InventoryItem._styleSheet = new CSSStyleSheet();
+        InventoryItem._styleSheet.replaceSync(css);
+      } else {
+        InventoryItem._styleText = css; // fallback for browsers without constructable stylesheets
+      }
+    }
+
+    if (InventoryItem._styleSheet) {
+      this.shadowRoot.adoptedStyleSheets = [InventoryItem._styleSheet];
+    } else {
+      const style = document.createElement('style');
+      style.textContent = InventoryItem._styleText;
+      this.shadowRoot.appendChild(style);
+    }
     this.shadowRoot.appendChild(clone);
   }
 
