@@ -565,7 +565,6 @@ inventory-item {
     z-index: 20;
     width: 100%;
     max-height: none;
-    margin-bottom: 20px;
   }
 
   .content-area {
