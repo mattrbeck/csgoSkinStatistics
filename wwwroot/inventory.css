@@ -9,36 +9,13 @@
 
 #cancel-button {
   font-weight: bold;
-  background-color: var(--error) !important;
-  color: var(--text) !important;
+  background-color: var(--error);
+  color: var(--text);
+  transition: background-color 0.5s ease;
 }
 
 #cancel-button:hover {
-  animation: error-light 0.5s forwards !important;
-}
-
-#cancel-button:not(:hover) {
-  animation: light-error 0.5s forwards !important;
-}
-
-@keyframes error-light {
-  from {
-    background-color: var(--error);
-  }
-
-  to {
-    background-color: #e74c3c;
-  }
-}
-
-@keyframes light-error {
-  from {
-    background-color: #e74c3c;
-  }
-
-  to {
-    background-color: var(--error);
-  }
+  background-color: #e74c3c;
 }
 
 #inventory-status {
