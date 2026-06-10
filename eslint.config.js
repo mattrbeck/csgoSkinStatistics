@@ -1,5 +1,22 @@
 module.exports = [
   {
+    files: ["**/*.mjs"],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: "module",
+      globals: {
+        console: "readonly",
+        fetch: "readonly",
+        process: "readonly"
+      }
+    },
+    rules: {
+      "no-unused-vars": "warn",
+      "no-console": "off"
+    }
+  },
+  {
+    files: ["**/*.js"],
     languageOptions: {
       ecmaVersion: 2021,
       sourceType: "script",
