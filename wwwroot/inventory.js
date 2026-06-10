@@ -1242,8 +1242,12 @@ function displayItems(items) {
 // which is invisible offscreen anyway.
 function nameCardsForTransition() {
   const margin = 300;
+  // Read every position first, then write every name: interleaving the rect reads
+  // with style writes would invalidate layout between cards and recompute it per read.
+  const children = [...elements.inventoryGrid.children];
+  const names = [];
   let named = 0;
-  for (const el of elements.inventoryGrid.children) {
+  for (const el of children) {
     let name = 'none';
     if (named < 60) {
       const r = el.getBoundingClientRect();
@@ -1252,8 +1256,9 @@ function nameCardsForTransition() {
         named++;
       }
     }
-    el.style.viewTransitionName = name;
+    names.push(name);
   }
+  children.forEach((el, i) => { el.style.viewTransitionName = names[i]; });
 }
 
 function applySortAndFilter(animate = true) {
@@ -1290,16 +1295,16 @@ function reorderAnalysisQueue() {
   // Get the unanalyzed items
   const unanalyzed = itemsNeedingAnalysis.slice(analyzedCount);
 
-  // Get the current sorted order from filteredItems
-  const sortedIndices = filteredItems.map(item => item.originalIndex);
+  // Map each item's originalIndex to its position in the current sorted view
+  const positionByIndex = new Map(filteredItems.map((item, pos) => [item.originalIndex, pos]));
 
   // Separate items into visible (in current filtered view) and not visible
   const visibleItems = [];
   const notVisibleItems = [];
 
   for (const item of unanalyzed) {
-    const positionInSort = sortedIndices.indexOf(item.index);
-    if (positionInSort !== -1) {
+    const positionInSort = positionByIndex.get(item.index);
+    if (positionInSort !== undefined) {
       visibleItems.push({ item, position: positionInSort });
     } else {
       notVisibleItems.push(item);
@@ -1504,7 +1509,12 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
       }
 
       updateProgress(preloadedCount + i + 1, csgoItems.length);
-      updateSummary(inventoryData, processedItems);
+      // The summary rescans the whole inventory and rebuilds its DOM; every 10th item
+      // (plus the final one) keeps the highlight chips feeling live without doing that
+      // work ten times a second on large inventories.
+      if ((i + 1) % 10 === 0 || i === itemsNeedingAnalysis.length - 1) {
+        updateSummary(inventoryData, processedItems);
+      }
 
       // Small delay to prevent overwhelming the API
       await new Promise(resolve => setTimeout(resolve, 100));
