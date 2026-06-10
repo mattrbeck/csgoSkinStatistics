@@ -928,23 +928,27 @@ function rarityColorOf(rarity) {
   return RARITY_COLORS[rarity] || '#B0C3D9'; // Default to light gray if not found
 }
 
+// Rarity -> sort tier. Tiers follow the Steam rarity colors (see RARITY_COLORS), so a
+// "High Grade" music kit sorts with the blue Mil-Spec weapons, not the light-blue
+// Industrial ones. Knives/gloves (Extraordinary) stay above Contraband on top.
 function getRarityValue(rarity) {
   const rarityOrder = {
-    'Consumer Grade': 1,
+    'Consumer Grade': 1,   // gray
     'Base Grade': 1,
-    'Industrial Grade': 2,
-    'High Grade': 2,
-    'Mil-Spec Grade': 3,
-    'Remarkable': 3,
-    'Distinguished': 4,
-    'Restricted': 4,
-    'Exceptional': 5,
-    'Classified': 5,
-    'Superior': 6,
-    'Covert': 6,
-    'Master': 7,
-    'Contraband': 8,
-    'Extraordinary': 9
+    'Industrial Grade': 2, // light blue
+    'Mil-Spec Grade': 3,   // blue
+    'High Grade': 3,
+    'Distinguished': 3,
+    'Restricted': 4,       // purple
+    'Remarkable': 4,
+    'Exceptional': 4,
+    'Classified': 5,       // pink
+    'Exotic': 5,
+    'Superior': 5,
+    'Covert': 6,           // red
+    'Master': 6,
+    'Contraband': 7,       // gold
+    'Extraordinary': 8     // knives/gloves
   };
   return rarityOrder[rarity] || 0;
 }

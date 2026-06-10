@@ -94,19 +94,19 @@ describe('Inventory Item Sorting', () => {
       'Consumer Grade': 1,
       'Base Grade': 1,
       'Industrial Grade': 2,
-      'High Grade': 2,
       'Mil-Spec Grade': 3,
-      'Mil-Spec': 3,
-      'Remarkable': 3,
-      'Distinguished': 4,
+      'High Grade': 3,
+      'Distinguished': 3,
       'Restricted': 4,
-      'Exceptional': 5,
+      'Remarkable': 4,
+      'Exceptional': 4,
       'Classified': 5,
-      'Superior': 6,
+      'Exotic': 5,
+      'Superior': 5,
       'Covert': 6,
-      'Master': 7,
-      'Contraband': 8,
-      'Extraordinary': 9
+      'Master': 6,
+      'Contraband': 7,
+      'Extraordinary': 8
     };
     return rarityOrder[rarity] || 0;
   }
@@ -151,8 +151,17 @@ describe('Inventory Item Sorting', () => {
     expect(getRarityValue('Consumer Grade')).toBe(1);
     expect(getRarityValue('Restricted')).toBe(4);
     expect(getRarityValue('Covert')).toBe(6);
-    expect(getRarityValue('Extraordinary')).toBe(9);
+    expect(getRarityValue('Extraordinary')).toBe(8);
     expect(getRarityValue('Unknown')).toBe(0);
+  });
+
+  test('getRarityValue should rank sticker/music/agent tiers by their color', () => {
+    // High Grade is the blue tier: above Industrial, equal to Mil-Spec
+    expect(getRarityValue('High Grade')).toBeGreaterThan(getRarityValue('Industrial Grade'));
+    expect(getRarityValue('High Grade')).toBe(getRarityValue('Mil-Spec Grade'));
+    expect(getRarityValue('Remarkable')).toBe(getRarityValue('Restricted'));
+    expect(getRarityValue('Exotic')).toBe(getRarityValue('Classified'));
+    expect(getRarityValue('Master')).toBe(getRarityValue('Covert'));
   });
 
   test('sortItems should sort by rarity correctly', () => {
