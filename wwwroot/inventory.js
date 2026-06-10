@@ -137,6 +137,34 @@ class InventoryItem extends HTMLElement {
         color: var(--selfmade, #70B04A);
       }
       
+      .stattrak-badge {
+        display: inline-flex;
+        align-items: center;
+        vertical-align: middle;
+        margin-left: 8px;
+        padding: 2px 6px;
+        border-radius: 3px;
+        background-color: var(--pop, #2ecc71);
+        color: var(--gray, #1f2d3a);
+        font-size: 10px;
+        font-weight: bold;
+        white-space: nowrap;
+        cursor: default;
+      }
+
+      /* The kill count slides out of the ST badge on hover */
+      .st-detail {
+        display: inline-block;
+        max-width: 0;
+        overflow: hidden;
+        white-space: pre;
+        transition: max-width 0.25s ease;
+      }
+
+      .stattrak-badge:hover .st-detail {
+        max-width: 110px;
+      }
+
       .item-details {
         display: flex;
         flex-direction: column;
@@ -159,6 +187,27 @@ class InventoryItem extends HTMLElement {
       .detail-value {
         color: var(--text, #ecf0f1);
         font-weight: 500;
+      }
+
+      /* Hovering the float swaps in the full-precision value; the bar yields its space */
+      .float-value {
+        white-space: nowrap;
+      }
+
+      .float-value .float-long {
+        display: none;
+      }
+
+      .float-value:hover .float-short {
+        display: none;
+      }
+
+      .float-value:hover .float-long {
+        display: inline;
+      }
+
+      .float-value:hover ~ .float-bar {
+        min-width: 0;
       }
 
       .wear-pill {
@@ -197,6 +246,32 @@ class InventoryItem extends HTMLElement {
         right: 0;
         top: -7px;
         bottom: -7px;
+      }
+
+      /* Instant styled tooltip with the skin's possible wear range (native title
+         tooltips are too slow and small to discover). */
+      .float-bar[data-range]::before {
+        content: attr(data-range);
+        position: absolute;
+        bottom: calc(100% + 7px);
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 3px 8px;
+        border-radius: 4px;
+        border: 1px solid var(--light, #2f3d4a);
+        background-color: var(--gray, #1f2d3a);
+        color: var(--text, #ecf0f1);
+        font-size: 11px;
+        font-weight: 600;
+        white-space: nowrap;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.1s ease;
+        z-index: 3;
+      }
+
+      .float-bar[data-range]:hover::before {
+        opacity: 1;
       }
 
       /* Wear values this skin's paint kit can't roll, dimmed like the float filter
@@ -431,14 +506,9 @@ class InventoryItem extends HTMLElement {
     right.hidden = !(max < 1);
     right.style.width = `${(1 - max) * 100}%`;
 
-    // Hovering the bar shows the item's exact float plus this skin's possible range,
-    // at the data's natural precision (0-0.672, 0.06-0.8, ...). Set on the overlays
-    // too so the tooltip appears no matter which layer is under the cursor. Composed
-    // from the stored exact float so re-running stays idempotent.
-    const title = `${bar.dataset.fullFloat || ''}\nPossible range: ${min}-${max}`.trim();
-    bar.title = title;
-    left.title = title;
-    right.title = title;
+    // Feeds the instant styled tooltip (.float-bar::before shows attr(data-range)) with
+    // the skin's possible wear range at the data's natural precision (0-0.672, 0.06-0.8).
+    bar.dataset.range = `Range: ${min}-${max}`;
   }
 
   // Compact wear badge (FN/MW/FT/WW/BS), colored to match the float bar zones.
@@ -529,11 +599,12 @@ class InventoryItem extends HTMLElement {
         nameText += ` <span class="item-special" style="color: var(--pop, #2ecc71); font-weight: bold; margin-left: 5px;">${itemData.special}</span>`;
       }
       if (itemData.stattrak) {
+        // The kill count slides out of the badge on hover (see .st-detail).
         const kills = this.itemData?.stattrak_kills;
-        const stTitle = (kills != null)
-          ? `StatTrak™ Confirmed Kills: ${kills.toLocaleString()}`
-          : 'StatTrak™';
-        nameText += `<span class="stattrak-badge" title="${stTitle}" style="display: inline-block; cursor: help; background-color: var(--pop, #2ecc71); color: var(--gray, #1f2d3a); font-size: 10px; font-weight: bold; padding: 2px 6px; border-radius: 3px; margin-left: 8px; vertical-align: middle;">ST</span>`;
+        const detail = (kills != null)
+          ? `<span class="st-detail">: ${kills.toLocaleString()} Kills</span>`
+          : '';
+        nameText += `<span class="stattrak-badge">ST${detail}</span>`;
       }
       // Check for knife/glove using defindex (500-600 for knives, 5000+ for gloves)
       // This is more reliable than quality === 3, since StatTrak knives have quality 9
@@ -555,13 +626,16 @@ class InventoryItem extends HTMLElement {
       nameElement.innerHTML = nameText;
     }
 
-    // Update float value - display 6 decimal places for overview, full precision on hover
+    // Update float value - 6 decimal places at rest; hovering swaps in the full
+    // precision inline (the bar shrinks to make room - see .float-value CSS).
     if (floatElement && hasSkin) {
       const paintwearFloat = uint32ToFloat32(itemData.paintwear);
       const fullFloat = paintwearFloat.toString();
-      floatElement.textContent = paintwearFloat.toFixed(6);
-      floatElement.title = `${fullFloat} (click to copy)`;
-      floatElement.dataset.fullFloat = fullFloat;
+      const floatMarkup =
+        `<span class="float-short">${paintwearFloat.toFixed(6)}</span>` +
+        `<span class="float-long">${fullFloat}</span>`;
+      floatElement.innerHTML = floatMarkup;
+      floatElement.classList.add('float-value');
       floatElement.style.cursor = 'copy';
       floatElement.classList.remove('loading-placeholder');
 
@@ -569,8 +643,6 @@ class InventoryItem extends HTMLElement {
       if (floatLabel) floatLabel.style.display = 'none';
       if (floatBar && floatMarker) {
         floatMarker.style.left = `${Math.min(100, Math.max(0, paintwearFloat * 100))}%`;
-        floatBar.dataset.fullFloat = fullFloat;
-        floatBar.title = fullFloat; // applyFloatRange appends the possible range when known
         floatBar.hidden = false;
       }
       this.paintIndex = Number(itemData.paintindex);
@@ -582,7 +654,7 @@ class InventoryItem extends HTMLElement {
         navigator.clipboard.writeText(fullFloat).then(() => {
           floatElement.textContent = 'Copied!';
           setTimeout(() => {
-            floatElement.textContent = paintwearFloat.toFixed(6);
+            floatElement.innerHTML = floatMarkup;
           }, 1000);
         });
       };
