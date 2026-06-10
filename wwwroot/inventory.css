@@ -229,9 +229,8 @@ nav a.current {
   white-space: nowrap;
 }
 
-.highlight-chip.stattrak {
-  background-color: var(--pop);
-  color: var(--gray);
+.highlight-chip.special {
+  border: 1px solid var(--pop);
 }
 
 .float-range span {

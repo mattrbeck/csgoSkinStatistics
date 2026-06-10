@@ -806,8 +806,8 @@ function renderHighlights(processedItems) {
 
   const chips = [`${inventoryItems.length} CS2 items`];
   if (knives) chips.push(`${knives} knives/gloves`);
-  if (stattrak) chips.push({ text: `${stattrak} StatTrak`, cls: 'stattrak' });
-  if (special) chips.push(`${special} special`);
+  if (stattrak) chips.push(`${stattrak} StatTrak`);
+  if (special) chips.push({ text: `${special} special`, cls: 'special' });
 
   elements.summaryHighlights.innerHTML = '';
   for (const chip of chips) {
