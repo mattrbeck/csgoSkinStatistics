@@ -165,13 +165,19 @@
           <div class="sidebar-sections" id="sidebar-sections">
             <div class="sidebar-section">
             <h4>Filter Options</h4>
-            <div class="control-group">
-              <label for="filter-category">Category:</label>
-              <select id="filter-category">
-                <option value="">All Categories</option>
-                <option value="knife">★ Knives &amp; Gloves</option>
-                <option value="stattrak">StatTrak™</option>
-                <option value="souvenir">Souvenir</option>
+            <div class="control-group" role="group" aria-label="Item attributes">
+              <div class="attr-chips">
+                <button type="button" class="attr-chip" data-attr="star" aria-pressed="false" title="★ Knives &amp; Gloves only">★</button>
+                <button type="button" class="attr-chip" data-attr="stattrak" aria-pressed="false" title="StatTrak™ only">ST</button>
+                <button type="button" class="attr-chip" data-attr="souvenir" aria-pressed="false" title="Souvenir only">Souvenir</button>
+                <button type="button" class="attr-chip" data-attr="special" aria-pressed="false" title="Special patterns only (fade %, fire &amp; ice, blue gem, …)">Special</button>
+              </div>
+            </div>
+
+            <div class="control-group" id="filter-type-group">
+              <label for="filter-type">Type:</label>
+              <select id="filter-type">
+                <option value="">All Types</option>
               </select>
             </div>
 
@@ -222,13 +228,6 @@
               <label for="hide-commemorative">
                 <input type="checkbox" id="hide-commemorative" checked>
                 Hide items without a float
-              </label>
-            </div>
-
-            <div class="control-group checkbox-group">
-              <label for="filter-special">
-                <input type="checkbox" id="filter-special">
-                Special patterns only
               </label>
             </div>
 

@@ -237,10 +237,11 @@ namespace CSGOSkinAPI.Controllers
                                 .Replace("%owner_steamid%", steamid)
                                 .Replace("%assetid%", asset.assetid);
 
-                            // Extract wear and rarity from tags
+                            // Extract wear, rarity, and item type from tags
                             var wearTag = description.tags?.FirstOrDefault(t => t.category == "Exterior");
                             var rarityTag = description.tags?.FirstOrDefault(t => t.category == "Rarity");
                             var qualityTag = description.tags?.FirstOrDefault(t => t.category == "Quality");
+                            var typeTag = description.tags?.FirstOrDefault(t => t.category == "Type");
 
                             // StatTrak kill count, when Steam exposes it on the StatTrak score line
                             // (e.g. "StatTrak™ Confirmed Kills: 1234"). Some copies only carry the
@@ -288,6 +289,7 @@ namespace CSGOSkinAPI.Controllers
                                 wear = wearTag?.localized_tag_name,
                                 rarity = rarityTag?.localized_tag_name,
                                 quality = qualityTag?.localized_tag_name,
+                                item_type = typeTag?.localized_tag_name,
                                 stattrak_kills = stattrakKills,
                                 name_color = description.name_color,
                                 icon_url = description.icon_url,

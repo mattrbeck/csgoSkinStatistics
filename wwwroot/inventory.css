@@ -267,6 +267,37 @@ inventory-item {
   display: none;
 }
 
+/* Attribute toggle chips (★ / ST / Souvenir / Special). Independent AND filters - a
+   StatTrak knife matches with both ★ and ST pressed - unlike the single-select
+   dropdown they replaced. */
+.attr-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.attr-chip {
+  padding: 5px 11px;
+  border-radius: 999px;
+  border: 1px solid var(--light);
+  background-color: var(--gray);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.attr-chip:hover {
+  border-color: var(--pop);
+}
+
+.attr-chip[aria-pressed="true"] {
+  background-color: var(--pop);
+  border-color: var(--pop);
+  color: var(--gray);
+}
+
 .float-range {
   display: flex;
   align-items: center;

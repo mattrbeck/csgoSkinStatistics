@@ -234,6 +234,31 @@ describe('Inventory Filtering', () => {
         return false;
       }
 
+      // Attribute chips (independent AND filters)
+      function isStarItem(steamData) {
+        return ((steamData && steamData.name) || '').includes('★') ||
+               ((steamData && steamData.type) || '').includes('★');
+      }
+      if (filters.star && !isStarItem(item.steamData)) {
+        return false;
+      }
+      if (filters.stattrak &&
+          !(item.steamData.name || '').includes('StatTrak™') &&
+          !(item.detailedData && item.detailedData.stattrak)) {
+        return false;
+      }
+      if (filters.souvenir && item.steamData.quality !== 'Souvenir') {
+        return false;
+      }
+      if (filters.special && !(item.detailedData && item.detailedData.special)) {
+        return false;
+      }
+
+      // Item type filter (Steam's "Type" tag)
+      if (filters.type && (item.steamData.item_type || 'Other') !== filters.type) {
+        return false;
+      }
+
       // Rarity filter
       if (filters.rarity && item.steamData.rarity !== filters.rarity) {
         return false;
@@ -327,6 +352,49 @@ describe('Inventory Filtering', () => {
 
     expect(filtered).toHaveLength(1);
     expect(filtered[0].steamData.wear).toBe('Factory New');
+  });
+
+  test('attribute chips should AND together (StatTrak knives match ★ + ST)', () => {
+    const items = [
+      {
+        steamData: { name: '★ StatTrak™ Karambit | Doppler', item_type: 'Knife' },
+        detailedData: null
+      },
+      {
+        steamData: { name: '★ Karambit | Fade', item_type: 'Knife' },
+        detailedData: null
+      },
+      {
+        steamData: { name: 'StatTrak™ AK-47 | Redline', item_type: 'Rifle' },
+        detailedData: null
+      }
+    ];
+
+    const base = { rarity: '', wear: '', floatMin: null, floatMax: null, hideCommemorative: false, type: '' };
+
+    const starAndSt = filterItems(items, { ...base, star: true, stattrak: true });
+    expect(starAndSt).toHaveLength(1);
+    expect(starAndSt[0].steamData.name).toBe('★ StatTrak™ Karambit | Doppler');
+
+    // GC-detected StatTrak counts even when the Steam name lacks the prefix
+    const gcStattrak = filterItems(
+      [{ steamData: { name: 'Music Kit | Some Artist' }, detailedData: { stattrak: true } }],
+      { ...base, stattrak: true });
+    expect(gcStattrak).toHaveLength(1);
+  });
+
+  test('should filter by item type', () => {
+    const items = [
+      { steamData: { name: 'AK-47 | Redline', item_type: 'Rifle' }, detailedData: null },
+      { steamData: { name: 'Sticker | Crown (Foil)', item_type: 'Sticker' }, detailedData: null },
+      { steamData: { name: 'Mystery Item' }, detailedData: null } // no item_type -> Other
+    ];
+
+    const base = { rarity: '', wear: '', floatMin: null, floatMax: null, hideCommemorative: false };
+
+    expect(filterItems(items, { ...base, type: 'Rifle' })).toHaveLength(1);
+    expect(filterItems(items, { ...base, type: 'Other' })).toHaveLength(1);
+    expect(filterItems(items, { ...base, type: '' })).toHaveLength(3);
   });
 
   test('should hide commemorative items correctly', () => {

@@ -718,7 +718,14 @@ let currentOwnerSteamId = null; // Resolved SteamId64 of the inventory being vie
 let inventoryItems = []; // Store all items with their data
 let filteredItems = []; // Store currently filtered/sorted items
 let currentSort = { field: 'rarity', order: 'desc' };
-let currentFilters = { rarity: '', wear: '', floatMin: null, floatMax: null, hideCommemorative: true, search: '', specialOnly: false, category: '' };
+
+function defaultFilters() {
+  return {
+    rarity: '', wear: '', floatMin: null, floatMax: null, hideCommemorative: true,
+    search: '', type: '', star: false, stattrak: false, souvenir: false, special: false
+  };
+}
+let currentFilters = defaultFilters();
 
 // Analysis queue management
 let itemsNeedingAnalysis = []; // Items that need detailed analysis
@@ -1046,26 +1053,28 @@ function filterItems(items) {
       return false;
     }
 
-    // Category filter. Knives/gloves and StatTrak are recognizable from the Steam name
-    // (★ prefix / StatTrak™), so this works before the GC analysis resolves.
-    if (currentFilters.category) {
-      const name = item.steamData.name || '';
-      switch (currentFilters.category) {
-        case 'knife':
-          if (!isStarItem(item.steamData)) return false;
-          break;
-        case 'stattrak':
-          if (!name.includes('StatTrak™') && !(item.detailedData && item.detailedData.stattrak)) return false;
-          break;
-        case 'souvenir':
-          if (item.steamData.quality !== 'Souvenir') return false;
-          break;
-      }
+    // Attribute chips (independent AND filters - a StatTrak knife matches ★ and ST).
+    // ★ and StatTrak are recognizable from the Steam name (★ prefix / StatTrak™), so
+    // they work before the GC analysis resolves; special patterns (fade %, fire & ice,
+    // blue gem, etc.) come only from the GC data, so unanalyzed items stay hidden until
+    // their lookup resolves.
+    if (currentFilters.star && !isStarItem(item.steamData)) {
+      return false;
+    }
+    if (currentFilters.stattrak &&
+        !(item.steamData.name || '').includes('StatTrak™') &&
+        !(item.detailedData && item.detailedData.stattrak)) {
+      return false;
+    }
+    if (currentFilters.souvenir && item.steamData.quality !== 'Souvenir') {
+      return false;
+    }
+    if (currentFilters.special && !(item.detailedData && item.detailedData.special)) {
+      return false;
     }
 
-    // Special patterns only (fade %, fire & ice, blue gem, etc.) - special comes from the
-    // detailed GC data, so unanalyzed items stay hidden until their lookup resolves.
-    if (currentFilters.specialOnly && !(item.detailedData && item.detailedData.special)) {
+    // Item type filter (Steam's "Type" tag: Rifle, Knife, Sticker, Agent, ...)
+    if (currentFilters.type && (item.steamData.item_type || 'Other') !== currentFilters.type) {
       return false;
     }
 
@@ -1093,6 +1102,25 @@ function filterItems(items) {
     
     return true;
   });
+}
+
+// Steam "Type" tag values in display order: weapons first, then ★ items, then
+// collectibles. Types Steam adds later sort after these, alphabetically.
+const TYPE_ORDER = [
+  'Pistol', 'SMG', 'Rifle', 'Sniper Rifle', 'Shotgun', 'Machinegun', 'Equipment',
+  'Knife', 'Gloves', 'Agent', 'Sticker', 'Charm', 'Patch', 'Music Kit', 'Graffiti',
+  'Container', 'Key', 'Pass', 'Gift', 'Collectible', 'Tool'
+];
+
+// Fill the type dropdown with the types present in this inventory, so it never offers
+// an option that matches nothing. Hidden entirely when there is only one type.
+function populateTypeFilter() {
+  const types = new Set(inventoryItems.map(it => it.steamData.item_type || 'Other'));
+  const rank = t => { const i = TYPE_ORDER.indexOf(t); return i === -1 ? TYPE_ORDER.length : i; };
+  const sorted = [...types].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+  elements.filterType.length = 1; // keep "All Types"
+  for (const t of sorted) elements.filterType.add(new Option(t, t));
+  elements.filterTypeGroup.style.display = sorted.length > 1 ? '' : 'none';
 }
 
 function displayItems(items) {
@@ -1328,6 +1356,7 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
 
     // Show sidebar controls immediately after rendering items
     // This allows users to interact with sort/filter while analysis continues
+    populateTypeFilter();
     elements.sidebar.style.display = 'block';
     updateSliderVisual(); // the track has a real width only once the sidebar is visible
 
@@ -1434,6 +1463,23 @@ function updateSliderVisual() {
   }
 }
 
+// Reset every filter control to its default state, matching defaultFilters(). Used by
+// the Clear filters button and when a new analysis starts (resetInterface), so the
+// controls never show stale selections that no longer apply.
+function resetFilterControls() {
+  elements.searchInput.value = '';
+  elements.filterType.value = '';
+  elements.filterRarity.value = '';
+  elements.filterWear.value = '';
+  elements.filterFloatMin.value = '';
+  elements.filterFloatMax.value = '';
+  elements.floatSliderMin.value = 0;
+  elements.floatSliderMax.value = 1;
+  elements.hideCommemorative.checked = true;
+  elements.attrChips.forEach(chip => chip.setAttribute('aria-pressed', 'false'));
+  updateSliderVisual();
+}
+
 function cancelAnalysis() {
   if (analysisController && !isCancelled) {
     isCancelled = true;
@@ -1462,7 +1508,12 @@ function resetInterface() {
   itemsNeedingAnalysis = [];
   analyzedCount = 0;
   currentSort = { field: 'rarity', order: 'desc' };
-  currentFilters = { rarity: '', wear: '', floatMin: null, floatMax: null, hideCommemorative: true, search: '', specialOnly: false, category: '' };
+  currentFilters = defaultFilters();
+
+  // Sync the controls so they don't show selections that no longer apply
+  elements.sortSelect.value = currentSort.field;
+  elements.sortOrder.value = currentSort.order;
+  resetFilterControls();
 
   // Cancel any ongoing analysis
   if (analysisController) {
@@ -1523,13 +1574,14 @@ window.addEventListener("load", function () {
     searchInput: document.getElementById("search-input"),
     sortSelect: document.getElementById("sort-select"),
     sortOrder: document.getElementById("sort-order"),
-    filterCategory: document.getElementById("filter-category"),
+    filterType: document.getElementById("filter-type"),
+    filterTypeGroup: document.getElementById("filter-type-group"),
+    attrChips: Array.from(document.querySelectorAll(".attr-chip")),
     filterRarity: document.getElementById("filter-rarity"),
     filterWear: document.getElementById("filter-wear"),
     filterFloatMin: document.getElementById("filter-float-min"),
     filterFloatMax: document.getElementById("filter-float-max"),
     hideCommemorative: document.getElementById("hide-commemorative"),
-    filterSpecial: document.getElementById("filter-special"),
     clearFilters: document.getElementById("clear-filters"),
     // Float slider elements
     floatSliderMin: document.getElementById("float-slider-min"),
@@ -1747,35 +1799,29 @@ window.addEventListener("load", function () {
     applySortAndFilter(false);
   });
 
-  // Category filter (knives/gloves, StatTrak, Souvenir)
-  elements.filterCategory.addEventListener("change", function() {
-    currentFilters.category = this.value;
+  // Item type filter (options are populated per inventory by populateTypeFilter)
+  elements.filterType.addEventListener("change", function() {
+    currentFilters.type = this.value;
     applySortAndFilter();
+  });
+
+  // Attribute chips (★ / ST / Souvenir / Special) toggle independent boolean filters
+  elements.attrChips.forEach(chip => {
+    chip.addEventListener("click", function() {
+      const pressed = this.getAttribute("aria-pressed") !== "true";
+      this.setAttribute("aria-pressed", String(pressed));
+      currentFilters[this.dataset.attr] = pressed;
+      applySortAndFilter();
+    });
   });
 
   // Keep the slider's gradient aligned with the track when the layout reflows
   window.addEventListener("resize", updateSliderVisual);
 
-  // Special-patterns-only filter
-  elements.filterSpecial.addEventListener("change", function() {
-    currentFilters.specialOnly = this.checked;
-    applySortAndFilter();
-  });
-
   // Clear all filters (keeps the current sort) and reset the filter controls
   elements.clearFilters.addEventListener("click", function() {
-    currentFilters = { rarity: '', wear: '', floatMin: null, floatMax: null, hideCommemorative: true, search: '', specialOnly: false, category: '' };
-    elements.searchInput.value = '';
-    elements.filterCategory.value = '';
-    elements.filterRarity.value = '';
-    elements.filterWear.value = '';
-    elements.filterFloatMin.value = '';
-    elements.filterFloatMax.value = '';
-    elements.floatSliderMin.value = 0;
-    elements.floatSliderMax.value = 1;
-    elements.hideCommemorative.checked = true;
-    elements.filterSpecial.checked = false;
-    updateSliderVisual();
+    currentFilters = defaultFilters();
+    resetFilterControls();
     applySortAndFilter();
   });
 
