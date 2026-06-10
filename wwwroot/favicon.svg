@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="wear" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#2ecc71"/>
+      <stop offset=".07" stop-color="#2ecc71"/>
+      <stop offset=".07" stop-color="#82c91e"/>
+      <stop offset=".15" stop-color="#82c91e"/>
+      <stop offset=".15" stop-color="#f1c40f"/>
+      <stop offset=".38" stop-color="#f1c40f"/>
+      <stop offset=".38" stop-color="#e67e22"/>
+      <stop offset=".45" stop-color="#e67e22"/>
+      <stop offset=".45" stop-color="#e74c3c"/>
+      <stop offset="1" stop-color="#e74c3c"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="13" fill="#1f2d3a"/>
+  <path d="M32 9 L36.4 22.1 L50.2 22.3 L39.1 30.5 L43.2 43.7 L32 35.6 L20.8 43.7 L24.9 30.5 L13.8 22.3 L27.6 22.1 Z" fill="#2ecc71"/>
+  <rect x="9" y="49" width="46" height="6" rx="3" fill="url(#wear)"/>
+  <rect x="25" y="47" width="2.5" height="10" rx="1.25" fill="#ecf0f1"/>
+</svg>
