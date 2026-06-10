@@ -201,16 +201,17 @@ input[type="button"] {
   display: inline-block;
   width: 608px;
   text-align: center;
-  padding: 4px;
+  padding: 5px;
   font-size: 16px;
+  background-color: var(--pop);
+  color: var(--gray);
+  font-weight: bold;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
 }
 
 #button:hover {
-  animation: gray-light 0.5s forwards;
-}
-
-#button:not(:hover) {
-  animation: light-gray 0.5s forwards;
+  background-color: #27ae60;
 }
 
 form * {
@@ -313,26 +314,6 @@ input[type="text"]:not(:hover, :focus) {
 
   to {
     background-color: var(--light);
-  }
-}
-
-@keyframes gray-light {
-  from {
-    background-color: var(--gray);
-  }
-
-  to {
-    background-color: var(--light);
-  }
-}
-
-@keyframes light-gray {
-  from {
-    background-color: var(--light);
-  }
-
-  to {
-    background-color: var(--gray);
   }
 }
 
