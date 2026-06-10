@@ -1434,7 +1434,6 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
     // This allows users to interact with sort/filter while analysis continues
     populateTypeFilter();
     elements.sidebar.style.display = 'block';
-    updateSliderVisual(); // the track has a real width only once the sidebar is visible
 
     // Initialize filtered items with all items and apply initial sort/filter
     filteredItems = [...inventoryItems];
@@ -1523,21 +1522,14 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
   }
 }
 
-// Position the selected-range highlight on the float slider. The track shows a dimmed
-// wear-zone gradient; the range element shows the same gradient at full strength, so its
-// background must be sized to the track and shifted left so the zones line up.
+// Dim the parts of the float slider's wear gradient outside the selected range, the
+// same way the per-card float bars dim the wear values a skin can't roll. Widths are
+// percentages, so the visual needs no layout reads and survives resizes untouched.
 function updateSliderVisual() {
   const minVal = parseFloat(elements.floatSliderMin.value);
   const maxVal = parseFloat(elements.floatSliderMax.value);
-
-  elements.floatSliderRange.style.left = (minVal * 100) + '%';
-  elements.floatSliderRange.style.width = ((maxVal - minVal) * 100) + '%';
-
-  const trackWidth = elements.floatSliderRange.parentElement.clientWidth;
-  if (trackWidth > 0) {
-    elements.floatSliderRange.style.backgroundSize = `${trackWidth}px 100%`;
-    elements.floatSliderRange.style.backgroundPosition = `${-minVal * trackWidth}px 0`;
-  }
+  elements.floatSliderDimLeft.style.width = `${minVal * 100}%`;
+  elements.floatSliderDimRight.style.width = `${(1 - maxVal) * 100}%`;
 }
 
 // Reset every filter control to its default state, matching defaultFilters(). Used by
@@ -1664,7 +1656,8 @@ window.addEventListener("load", function () {
     // Float slider elements
     floatSliderMin: document.getElementById("float-slider-min"),
     floatSliderMax: document.getElementById("float-slider-max"),
-    floatSliderRange: document.getElementById("float-slider-range")
+    floatSliderDimLeft: document.getElementById("float-slider-dim-left"),
+    floatSliderDimRight: document.getElementById("float-slider-dim-right")
   };
 
   elements.textbox.addEventListener("keydown", function (event) {
@@ -1892,9 +1885,6 @@ window.addEventListener("load", function () {
       applySortAndFilter();
     });
   });
-
-  // Keep the slider's gradient aligned with the track when the layout reflows
-  window.addEventListener("resize", updateSliderVisual);
 
   // Clear all filters (keeps the current sort) and reset the filter controls
   elements.clearFilters.addEventListener("click", function() {

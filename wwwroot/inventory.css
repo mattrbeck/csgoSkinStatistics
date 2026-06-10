@@ -711,9 +711,9 @@ inventory-item {
 }
 
 /* Dual-thumb range slider styles. The track shows the same wear-zone gradient as the
-   per-item float bars, dimmed outside the selected range: the range element repeats the
-   gradient at full strength, with its background sized/offset to the track by
-   updateSliderVisual so the zones line up. */
+   per-item float bars; the portions outside the selected range are dimmed by two
+   overlay elements (widths set in % by updateSliderVisual), exactly like the
+   .float-bar-dim overlays on the item cards. */
 .float-slider-container {
   margin-bottom: 10px;
   padding: 10px 0;
@@ -724,18 +724,25 @@ inventory-item {
   height: 6px;
   border-radius: 3px;
   margin: 0 10px;
-  background:
-    linear-gradient(rgb(15 29 42 / 70%), rgb(15 29 42 / 70%)),
-    linear-gradient(90deg, #2ecc71 0 7%, #82c91e 7% 15%, #f1c40f 15% 38%, #e67e22 38% 45%, #e74c3c 45% 100%);
+  background: linear-gradient(90deg, #2ecc71 0 7%, #82c91e 7% 15%, #f1c40f 15% 38%, #e67e22 38% 45%, #e74c3c 45% 100%);
 }
 
-.float-slider-range {
+.float-slider-dim {
   position: absolute;
+  top: 0;
   height: 100%;
-  border-radius: 3px;
+  background-color: rgb(15 29 42 / 70%);
   pointer-events: none;
-  background-image: linear-gradient(90deg, #2ecc71 0 7%, #82c91e 7% 15%, #f1c40f 15% 38%, #e67e22 38% 45%, #e74c3c 45% 100%);
-  background-repeat: no-repeat;
+}
+
+.float-slider-dim:first-child {
+  left: 0;
+  border-radius: 3px 0 0 3px;
+}
+
+.float-slider-dim:nth-child(2) {
+  right: 0;
+  border-radius: 0 3px 3px 0;
 }
 
 .float-slider-track input[type="range"] {
