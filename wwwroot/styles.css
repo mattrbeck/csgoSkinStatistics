@@ -171,9 +171,19 @@ h1 {
   font-size: 32px;
 }
 
+/* Input and submit button share one line. The button used to live on its own row so
+   long s/a/d/m inspect strings had the full width, but that's no longer a concern. */
 form {
-  display: table;
+  display: flex;
+  justify-content: center;
+  align-items: stretch;
+  gap: 8px;
+  width: 608px;
   margin: 0 auto;
+}
+
+form br {
+  display: none;
 }
 
 a,
@@ -198,11 +208,8 @@ input[type="button"] {
 }
 
 #button {
-  display: inline-block;
-  width: 608px;
-  text-align: center;
-  padding: 5px;
-  font-size: 16px;
+  padding: 4px 20px;
+  font-size: 14px;
   background-color: var(--pop);
   color: var(--gray);
   font-weight: bold;
@@ -219,7 +226,8 @@ form * {
 }
 
 input[type="text"] {
-  width: 608px;
+  flex: 1;
+  min-width: 0;
   background: var(--dark);
   text-align: center;
   padding: 4px;
@@ -287,13 +295,18 @@ input[type="text"]:not(:hover, :focus) {
     padding-top: 50px;
   }
 
+  form {
+    width: 100%;
+    padding: 0 12px;
+    box-sizing: border-box;
+  }
+
   input[type="text"] {
-    width: 100vw;
     font-size: 12px;
   }
 
   #button {
-    width: 100vw;
+    padding: 4px 14px;
   }
 }
 

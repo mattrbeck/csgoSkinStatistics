@@ -35,16 +35,17 @@ nav a.current {
 
 #button-container {
   display: flex;
-  justify-content: center;
-  gap: 10px;
-  flex-wrap: wrap;
 }
 
-#button-container input[type="button"] {
-  min-width: 150px;
+/* The profile URL is the page's primary action; give it a bit more presence. */
+#textbox {
+  font-size: 18px;
 }
 
 #cancel-button {
+  padding: 4px 20px;
+  font-weight: bold;
+  cursor: pointer;
   background-color: var(--error) !important;
   color: var(--text) !important;
 }
