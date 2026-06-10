@@ -474,10 +474,12 @@ class InventoryItem extends HTMLElement {
 
     // Set item image
     if (imageElement) {
+      // community.cloudflare.steamstatic.com is the CDN Steam itself serves economy
+      // images from; the old steamcommunity-a.akamaihd.net host is deprecated.
       if (this.itemData.icon_url_large) {
-        imageElement.src = `https://steamcommunity-a.akamaihd.net/economy/image/${this.itemData.icon_url_large}`;
+        imageElement.src = `https://community.cloudflare.steamstatic.com/economy/image/${this.itemData.icon_url_large}`;
       } else if (this.itemData.icon_url) {
-        imageElement.src = `https://steamcommunity-a.akamaihd.net/economy/image/${this.itemData.icon_url}`;
+        imageElement.src = `https://community.cloudflare.steamstatic.com/economy/image/${this.itemData.icon_url}`;
       } else {
         // Fallback placeholder image
         imageElement.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA4MCA2MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjgwIiBoZWlnaHQ9IjYwIiBmaWxsPSIjMkYzRDRBIi8+CjxwYXRoIGQ9Ik0zNSAyNUg0NVYzNUgzNVYyNVoiIGZpbGw9IiM1RTk4RDkiLz4KPHBhdGggZD0iTTQwIDIwVjQwIiBzdHJva2U9IiM1RTk4RDkiIHN0cm9rZS13aWR0aD0iMiIvPgo8cGF0aCBkPSJNMzAgMzBINTAiIHN0cm9rZT0iIzVFOThEOSIgc3Ryb2tlLXdpZHRoPSIyIi8+Cjwvc3ZnPgo=';
