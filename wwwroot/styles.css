@@ -235,13 +235,18 @@ input[type="button"] {
   background: var(--gray);
 }
 
-#button {
+/* Submit buttons match the text input's font and height exactly */
+#button,
+#cancel-button {
   padding: 4px 20px;
-  font-size: 14px;
+  font-size: 18px;
+  cursor: pointer;
+}
+
+#button {
   background-color: var(--pop);
   color: var(--gray);
   font-weight: bold;
-  cursor: pointer;
   transition: background-color 0.3s ease;
 }
 
@@ -259,7 +264,7 @@ input[type="text"] {
   background: var(--dark);
   text-align: center;
   padding: 4px;
-  font-size: 16px;
+  font-size: 18px;
   border: none;
 }
 
@@ -330,11 +335,13 @@ input[type="text"]:not(:hover, :focus) {
   }
 
   input[type="text"] {
-    font-size: 12px;
+    font-size: 14px;
   }
 
-  #button {
+  #button,
+  #cancel-button {
     padding: 4px 14px;
+    font-size: 14px;
   }
 }
 
