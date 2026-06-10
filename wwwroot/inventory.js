@@ -156,7 +156,8 @@ class InventoryItem extends HTMLElement {
         cursor: default;
       }
 
-      /* The kill count slides out of the ST badge on hover */
+      /* The kill count slides out of the ST badge on hover; :focus covers taps
+         (the badge is focusable) and keyboard users. */
       .st-detail {
         display: inline-block;
         max-width: 0;
@@ -165,7 +166,7 @@ class InventoryItem extends HTMLElement {
         transition: max-width 0.25s ease;
       }
 
-      .stattrak-badge:hover .st-detail {
+      .stattrak-badge:is(:hover, :focus) .st-detail {
         max-width: 110px;
       }
 
@@ -193,9 +194,9 @@ class InventoryItem extends HTMLElement {
         font-weight: 500;
       }
 
-      /* Hovering the float slides out the remaining precision digits (the shown value
-         is truncated, not rounded, so the full float is short + rest); the bar yields
-         its space as the digits expand. */
+      /* Hovering (or tapping/focusing) the float slides out the remaining precision
+         digits (the shown value is truncated, not rounded, so the full float is
+         short + rest); the bar yields its space as the digits expand. */
       .float-value {
         display: inline-flex;
         align-items: baseline;
@@ -210,11 +211,11 @@ class InventoryItem extends HTMLElement {
         transition: max-width 0.25s ease;
       }
 
-      .float-value:hover .float-rest {
+      .float-value:is(:hover, :focus) .float-rest {
         max-width: 100px;
       }
 
-      .float-value:hover ~ .float-bar {
+      .float-value:is(:hover, :focus) ~ .float-bar {
         min-width: 0;
       }
 
@@ -257,7 +258,8 @@ class InventoryItem extends HTMLElement {
       }
 
       /* Instant styled tooltip with the skin's possible wear range (native title
-         tooltips are too slow and small to discover). */
+         tooltips are too slow and small to discover). Shown on focus too, so it is
+         reachable by tap and keyboard. */
       .float-bar[data-range]::before {
         content: attr(data-range);
         position: absolute;
@@ -278,7 +280,7 @@ class InventoryItem extends HTMLElement {
         z-index: 3;
       }
 
-      .float-bar[data-range]:hover::before {
+      .float-bar[data-range]:is(:hover, :focus)::before {
         opacity: 1;
       }
 
@@ -518,7 +520,9 @@ class InventoryItem extends HTMLElement {
 
     // Feeds the instant styled tooltip (.float-bar::before shows attr(data-range)) with
     // the skin's possible wear range at the data's natural precision (0-0.672, 0.06-0.8).
+    // Focusable so the tooltip is reachable by tap and keyboard, not just hover.
     bar.dataset.range = `Range: ${min}-${max}`;
+    bar.tabIndex = 0;
   }
 
   // Compact wear badge (FN/MW/FT/WW/BS), colored to match the float bar zones.
@@ -618,13 +622,15 @@ class InventoryItem extends HTMLElement {
         const badge = document.createElement('span');
         badge.className = 'stattrak-badge';
         badge.textContent = 'ST';
-        // The kill count slides out of the badge on hover (see .st-detail).
+        // The kill count slides out of the badge on hover or focus (see .st-detail);
+        // the tabindex makes taps focus the badge, so it works on touch too.
         const kills = this.itemData?.stattrak_kills;
         if (kills != null) {
           const detail = document.createElement('span');
           detail.className = 'st-detail';
           detail.textContent = `: ${kills.toLocaleString()} Kills`;
           badge.appendChild(detail);
+          badge.tabIndex = 0;
         }
         nameElement.appendChild(badge);
       }
@@ -673,14 +679,25 @@ class InventoryItem extends HTMLElement {
       this.applyFloatRange();
       this.updateWearPill(getWearFromFloat(paintwearFloat));
 
-      // Add click-to-copy functionality
-      floatElement.onclick = () => {
+      // Click/Enter/Space to copy. The tabindex also makes taps focus the value,
+      // which slides out the full precision on touch (see .float-value:focus).
+      const copyFloat = () => {
         navigator.clipboard.writeText(fullFloat).then(() => {
           floatElement.textContent = 'Copied!';
           setTimeout(() => {
             floatElement.innerHTML = floatMarkup;
           }, 1000);
         });
+      };
+      floatElement.onclick = copyFloat;
+      floatElement.tabIndex = 0;
+      floatElement.setAttribute('role', 'button');
+      floatElement.setAttribute('aria-label', `Copy float value ${fullFloat}`);
+      floatElement.onkeydown = (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          copyFloat();
+        }
       };
     }
 
