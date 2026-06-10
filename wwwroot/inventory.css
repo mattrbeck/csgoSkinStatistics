@@ -1,36 +1,6 @@
-/* Compact masthead: the item grid is the point of this page, so spend less of the
-   first viewport on the title/nav than the single-item page does. */
-#container {
-  padding-top: 28px;
-}
-
-#container h1 {
-  font-size: 24px;
-  margin: 0;
-}
-
-nav {
-  text-align: center;
-  margin: 12px 0;
-  font-size: 14px;
-}
-
-nav a {
-  padding: 8px 12px;
-  margin: 0 4px;
-  border-radius: 4px;
-  text-decoration: none;
-  transition: background-color 0.3s ease;
-}
-
-nav a:hover {
-  background-color: var(--light);
-}
-
-nav a.current {
-  background-color: var(--pop);
-  color: var(--gray);
-  font-weight: bold;
+/* The item grid is the point of this page; keep the header-to-content gap tight. */
+#site-header {
+  margin-bottom: 20px;
 }
 
 #button-container {
@@ -671,12 +641,6 @@ inventory-item {
     padding: 0;
   }
 
-  /* Safari's wider text metrics push the 24px title into the GitHub corner at phone
-     widths; one step down keeps it clear in both engines. */
-  #container h1 {
-    font-size: 20px;
-  }
-  
   #inventory-grid {
     grid-template-columns: 1fr;
   }

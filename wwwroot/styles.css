@@ -41,8 +41,9 @@ html {
 }
 
 .github-corner svg {
-  fill: var(--dark);
-  color: var(--gray);
+  /* --light reads against both the dark header bar and the gray page body */
+  fill: var(--light);
+  color: var(--dark);
   position: absolute;
   top: 0;
   border: 0;
@@ -151,12 +152,6 @@ html {
   color: var(--selfmade);
 }
 
-#container {
-  width: 100%;
-  padding-top: 100px;
-  margin: 0 auto;
-}
-
 #status-outer {
   margin-bottom: 30px;
 }
@@ -164,11 +159,6 @@ html {
 #status {
   text-align: center;
   padding: 4px;
-}
-
-h1 {
-  text-align: center;
-  font-size: 32px;
 }
 
 /* Input and submit button share one line. The button used to live on its own row so
@@ -193,6 +183,44 @@ a:focus,
 a:active {
   text-decoration: none;
   color: var(--text);
+}
+
+/* Slim site header: wordmark + page tabs. The GitHub corner overlays its right end. */
+#site-header {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 12px 20px;
+  margin-bottom: 36px;
+  background-color: var(--dark);
+}
+
+#site-header .wordmark {
+  font-size: 20px;
+  font-weight: bold;
+}
+
+#site-header nav {
+  display: flex;
+  gap: 18px;
+}
+
+#site-header nav a {
+  padding: 4px 2px;
+  font-size: 14px;
+  border-bottom: 2px solid transparent;
+  opacity: 0.75;
+  transition: opacity 0.2s ease;
+}
+
+#site-header nav a:hover {
+  opacity: 1;
+}
+
+#site-header nav a.current {
+  border-bottom-color: var(--pop);
+  font-weight: bold;
+  opacity: 1;
 }
 
 input {
@@ -291,8 +319,8 @@ input[type="text"]:not(:hover, :focus) {
 }
 
 @media (width <= 608px) {
-  #container {
-    padding-top: 50px;
+  #site-header {
+    margin-bottom: 20px;
   }
 
   form {
