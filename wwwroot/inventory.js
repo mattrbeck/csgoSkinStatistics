@@ -189,21 +189,25 @@ class InventoryItem extends HTMLElement {
         font-weight: 500;
       }
 
-      /* Hovering the float swaps in the full-precision value; the bar yields its space */
+      /* Hovering the float slides out the remaining precision digits (the shown value
+         is truncated, not rounded, so the full float is short + rest); the bar yields
+         its space as the digits expand. */
       .float-value {
+        display: inline-flex;
+        align-items: baseline;
         white-space: nowrap;
       }
 
-      .float-value .float-long {
-        display: none;
+      .float-rest {
+        display: inline-block;
+        max-width: 0;
+        overflow: hidden;
+        white-space: pre;
+        transition: max-width 0.25s ease;
       }
 
-      .float-value:hover .float-short {
-        display: none;
-      }
-
-      .float-value:hover .float-long {
-        display: inline;
+      .float-value:hover .float-rest {
+        max-width: 100px;
       }
 
       .float-value:hover ~ .float-bar {
@@ -626,14 +630,17 @@ class InventoryItem extends HTMLElement {
       nameElement.innerHTML = nameText;
     }
 
-    // Update float value - 6 decimal places at rest; hovering swaps in the full
-    // precision inline (the bar shrinks to make room - see .float-value CSS).
+    // Update float value - 6 decimal places at rest; hovering slides out the remaining
+    // precision digits (the bar shrinks to make room - see .float-value CSS). Truncate
+    // rather than round so the rest of the digits are a pure continuation.
     if (floatElement && hasSkin) {
       const paintwearFloat = uint32ToFloat32(itemData.paintwear);
       const fullFloat = paintwearFloat.toString();
+      const dot = fullFloat.indexOf('.');
+      const splitAt = (dot !== -1 && !fullFloat.includes('e')) ? dot + 7 : fullFloat.length;
       const floatMarkup =
-        `<span class="float-short">${paintwearFloat.toFixed(6)}</span>` +
-        `<span class="float-long">${fullFloat}</span>`;
+        `<span class="float-short">${fullFloat.slice(0, splitAt)}</span>` +
+        `<span class="float-rest">${fullFloat.slice(splitAt)}</span>`;
       floatElement.innerHTML = floatMarkup;
       floatElement.classList.add('float-value');
       floatElement.style.cursor = 'copy';
