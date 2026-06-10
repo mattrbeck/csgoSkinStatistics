@@ -569,6 +569,20 @@ inventory-item {
   .sidebar-content {
     padding: 12px;
     box-shadow: 0 4px 12px rgb(0 0 0 / 35%);
+
+    /* The expanded filter panel can be taller than a phone screen; since the bar is
+       sticky, anything past the viewport would be unreachable without this. */
+    box-sizing: border-box;
+    max-height: 100vh; /* fallback for browsers without dvh */
+    max-height: 100dvh;
+    overflow-y: auto;
+  }
+
+  /* iOS Safari auto-zooms the page when focusing any text control under 16px */
+  .sidebar-bar input[type="text"],
+  .control-group select,
+  .control-group input[type="number"] {
+    font-size: 16px;
   }
 
   .sidebar-bar {
