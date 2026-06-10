@@ -9,7 +9,11 @@ class InventoryItem extends HTMLElement {
   }
 
   connectedCallback() {
-    this.render();
+    // Cards are reused across re-renders (filter/sort moves re-connect them), so only
+    // build the shadow DOM on the first connection.
+    if (!this.shadowRoot.firstChild) {
+      this.render();
+    }
     // If data was set before connection, update display now
     if (this.needsUpdate) {
       this.updateDisplay();
@@ -717,6 +721,11 @@ const conversionView = new DataView(conversionBuffer);
 let currentOwnerSteamId = null; // Resolved SteamId64 of the inventory being viewed
 let inventoryItems = []; // Store all items with their data
 let filteredItems = []; // Store currently filtered/sorted items
+// One card element per item, keyed by originalIndex, built once when the inventory
+// loads and reused (moved, attached, detached) across every re-render. Detached cards
+// keep their shadow DOM state, so analysis results applied while an item is filtered
+// out are still there when it reappears.
+let itemElements = new Map();
 let currentSort = { field: 'rarity', order: 'desc' };
 
 function defaultFilters() {
@@ -830,7 +839,9 @@ function createItemElement(item, index) {
 }
 
 function updateItemWithDetails(itemData, index, inspectLink) {
-  const itemElement = document.getElementById(`item-${index}`);
+  // Look the card up in the element map, not the document: a card filtered out of the
+  // grid is detached but must still receive its analysis results.
+  const itemElement = itemElements.get(index);
   if (itemElement && itemElement.updateWithDetails) {
     itemElement.updateWithDetails(itemData, inspectLink);
     return true;
@@ -1155,17 +1166,37 @@ function populateTypeFilter() {
 
 function displayItems(items) {
   const inventoryGrid = elements.inventoryGrid;
-  inventoryGrid.innerHTML = '';
 
-  // Custom elements upgrade synchronously on append, so details can be applied right
-  // away. Keeping this synchronous matters for view transitions: the DOM must be in
+  // Reconcile the grid against the existing card elements instead of rebuilding it:
+  // drop cards that no longer match, then walk the grid with a cursor, moving each
+  // card into place only if it isn't already there. Reusing nodes keeps their shadow
+  // DOM (no re-clone, no image flash) and makes re-sorting ~free for unmoved cards.
+  // Everything stays synchronous, which view transitions require: the DOM must be in
   // its final state inside the transition callback, before the "new" snapshot.
-  items.forEach((itemData) => {
-    inventoryGrid.appendChild(createItemElement(itemData.steamData, itemData.originalIndex));
-    if (itemData.detailedData) {
+  const wanted = new Set(items.map(itemData => itemData.originalIndex));
+  for (const el of [...inventoryGrid.children]) {
+    if (!wanted.has(el.itemIndex)) {
+      el.remove();
+    }
+  }
+  let cursor = inventoryGrid.firstElementChild;
+  for (const itemData of items) {
+    let el = itemElements.get(itemData.originalIndex);
+    const isNew = !el;
+    if (isNew) {
+      // Normally all cards exist from the initial render; this is just a safety net.
+      el = createItemElement(itemData.steamData, itemData.originalIndex);
+      itemElements.set(itemData.originalIndex, el);
+    }
+    if (el === cursor) {
+      cursor = cursor.nextElementSibling;
+    } else {
+      inventoryGrid.insertBefore(el, cursor);
+    }
+    if (isNew && itemData.detailedData) {
       updateItemWithDetails(itemData.detailedData, itemData.originalIndex, itemData.steamData.inspect_link);
     }
-  });
+  }
 
   // The grid speaks for itself; only surface a message when filters hide everything.
   if (elements.gridStatus) {
@@ -1340,7 +1371,8 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
     
     const inventoryGrid = elements.inventoryGrid;
     inventoryGrid.innerHTML = '';
-    
+    itemElements.clear();
+
     // Create and render all items immediately with basic Steam inventory data
     elements.loadingMessage.textContent = `Found ${csgoItems.length} CS2 items - rendering now...`;
     const processedItems = [];
@@ -1354,6 +1386,7 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
     for (let i = 0; i < csgoItems.length; i++) {
       const item = csgoItems[i];
       const itemElement = createItemElement(item, i);
+      itemElements.set(i, itemElement);
       inventoryGrid.appendChild(itemElement);
 
       // Store item data in our structure
@@ -1525,6 +1558,7 @@ function resetInterface() {
   elements.inventorySummary.style.display = 'none';
   elements.sidebar.style.display = 'none';
   elements.inventoryGrid.innerHTML = '';
+  itemElements.clear();
   elements.status.textContent = '';
 
   // Reset button states
