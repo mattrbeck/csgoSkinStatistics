@@ -1099,26 +1099,14 @@ function displayItems(items) {
   const inventoryGrid = elements.inventoryGrid;
   inventoryGrid.innerHTML = '';
 
-  const itemsWithDetails = [];
-
+  // Custom elements upgrade synchronously on append, so details can be applied right
+  // away. Keeping this synchronous matters for view transitions: the DOM must be in
+  // its final state inside the transition callback, before the "new" snapshot.
   items.forEach((itemData) => {
-    const itemElement = createItemElement(itemData.steamData, itemData.originalIndex);
-    inventoryGrid.appendChild(itemElement);
-
-    // Track items that need their details updated
+    inventoryGrid.appendChild(createItemElement(itemData.steamData, itemData.originalIndex));
     if (itemData.detailedData) {
-      itemsWithDetails.push({ element: itemElement, data: itemData });
+      updateItemWithDetails(itemData.detailedData, itemData.originalIndex, itemData.steamData.inspect_link);
     }
-  });
-
-  // Wait for web components to be fully connected before updating details
-  // Use a double RAF to ensure rendering is complete
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      itemsWithDetails.forEach(({ data }) => {
-        updateItemWithDetails(data.detailedData, data.originalIndex, data.steamData.inspect_link);
-      });
-    });
   });
 
   // The grid speaks for itself; only surface a message when filters hide everything.
@@ -1128,10 +1116,44 @@ function displayItems(items) {
   }
 }
 
-function applySortAndFilter() {
+// Give cards near the viewport stable view-transition names (keyed by their element
+// id, which is the item's original index) so the browser can pair them across a
+// re-render and glide them to their new grid positions. Capped so the per-element
+// snapshot cost stays low on large inventories; unnamed cards simply appear in place,
+// which is invisible offscreen anyway.
+function nameCardsForTransition() {
+  const margin = 300;
+  let named = 0;
+  for (const el of elements.inventoryGrid.children) {
+    let name = 'none';
+    if (named < 60) {
+      const r = el.getBoundingClientRect();
+      if (r.bottom > -margin && r.top < window.innerHeight + margin) {
+        name = `vt-${el.id}`;
+        named++;
+      }
+    }
+    el.style.viewTransitionName = name;
+  }
+}
+
+function applySortAndFilter(animate = true) {
   filteredItems = filterItems(inventoryItems);
   filteredItems = sortItems(filteredItems, currentSort.field, currentSort.order);
-  displayItems(filteredItems);
+
+  // Animated reorder: surviving cards glide to their new spots, removed ones fade out.
+  // Falls back to an instant re-render without browser support, for reduced-motion
+  // users, and for callers that re-render on every keystroke (search).
+  if (animate && document.startViewTransition &&
+      !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    nameCardsForTransition();
+    document.startViewTransition(() => {
+      displayItems(filteredItems);
+      nameCardsForTransition();
+    });
+  } else {
+    displayItems(filteredItems);
+  }
 
   // If analysis is in progress, reorder the remaining items in the queue
   if (itemsNeedingAnalysis.length > 0 && analyzedCount < itemsNeedingAnalysis.length) {
@@ -1311,7 +1333,7 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
 
     // Initialize filtered items with all items and apply initial sort/filter
     filteredItems = [...inventoryItems];
-    applySortAndFilter();
+    applySortAndFilter(false);
 
     if (itemsNeedingAnalysis.length === 0) {
       // Every item came fully resolved from the inventory response - nothing left to do.
@@ -1373,7 +1395,7 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
     elements.status.textContent = `Loaded ${totalItems} items (${analyzedItems} via Game Coordinator)`;
 
     // Re-apply sort and filter now that all items have detailed data
-    applySortAndFilter();
+    applySortAndFilter(false);
     
   } catch (error) {
     console.error('Error analyzing inventory:', error);
@@ -1698,7 +1720,7 @@ window.addEventListener("load", function () {
     updateSliderVisual();
     currentFilters.floatMin = this.value ? parseFloat(this.value) : null;
     syncWearFromFloat();
-    applySortAndFilter();
+    applySortAndFilter(false); // fires per typed character
   });
 
   elements.filterFloatMax.addEventListener("input", function() {
@@ -1707,7 +1729,7 @@ window.addEventListener("load", function () {
     updateSliderVisual();
     currentFilters.floatMax = this.value ? parseFloat(this.value) : null;
     syncWearFromFloat();
-    applySortAndFilter();
+    applySortAndFilter(false); // fires per typed character
   });
 
   // Auto-apply filter when checkbox is toggled
@@ -1719,10 +1741,10 @@ window.addEventListener("load", function () {
   // Initialize slider visual
   updateSliderVisual();
 
-  // Text search filter
+  // Text search filter (no view transition: this re-renders on every keystroke)
   elements.searchInput.addEventListener("input", function() {
     currentFilters.search = normalizeSearchText(this.value);
-    applySortAndFilter();
+    applySortAndFilter(false);
   });
 
   // Category filter (knives/gloves, StatTrak, Souvenir)
