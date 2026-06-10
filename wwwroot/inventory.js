@@ -97,20 +97,12 @@ class InventoryItem extends HTMLElement {
         flex: 1;
         min-width: 0;
       }
-      
-      .item-actions {
-        margin: 0;
-      }
-      
-      .item-header {
-        margin-bottom: 10px;
-      }
-      
+
       .item-name {
         font-weight: bold;
-        font-size: 16px;
+        font-size: 15px;
         color: var(--text, #ecf0f1);
-        margin: 0 0 5px 0;
+        margin: 0 0 8px 0;
         word-wrap: break-word;
       }
       
@@ -146,97 +138,168 @@ class InventoryItem extends HTMLElement {
       }
       
       .item-details {
-        display: grid;
-        grid-template-columns: 2fr 3fr;
-        gap: 8px;
-        font-size: 14px;
-      }
-      
-      .detail-row {
         display: flex;
-        justify-content: space-between;
-        align-items: center;
+        flex-direction: column;
+        gap: 6px;
+        font-size: 13px;
       }
-      
+
+      .detail-line {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-height: 18px;
+      }
+
       .detail-label {
         color: var(--text, #ecf0f1);
-        opacity: 0.8;
+        opacity: 0.7;
       }
-      
+
       .detail-value {
         color: var(--text, #ecf0f1);
         font-weight: 500;
       }
-      
+
+      .wear-pill {
+        font-size: 10px;
+        font-weight: bold;
+        line-height: 1.3;
+        padding: 1px 5px;
+        border-radius: 3px;
+        border: 1px solid currentColor;
+        flex-shrink: 0;
+      }
+      .wear-pill.fn { color: #2ecc71; }
+      .wear-pill.mw { color: #82c91e; }
+      .wear-pill.ft { color: #f1c40f; }
+      .wear-pill.ww { color: #e67e22; }
+      .wear-pill.bs { color: #e74c3c; }
+
+      /* 0-1 float scale with the five wear zones; the marker shows where this item sits. */
+      .float-bar {
+        position: relative;
+        flex: 1;
+        min-width: 36px;
+        height: 5px;
+        border-radius: 3px;
+        opacity: 0.85;
+        background: linear-gradient(90deg,
+          #2ecc71 0 7%, #82c91e 7% 15%, #f1c40f 15% 38%, #e67e22 38% 45%, #e74c3c 45% 100%);
+      }
+
+      /* Invisible halo so the 5px bar doesn't demand pixel-perfect hovering for its
+         tooltip. */
+      .float-bar::after {
+        content: '';
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: -7px;
+        bottom: -7px;
+      }
+
+      /* Wear values this skin's paint kit can't roll, dimmed like the float filter
+         slider's out-of-range portions. */
+      .float-bar-dim {
+        position: absolute;
+        top: 0;
+        height: 100%;
+        background-color: rgb(15 29 42 / 70%);
+      }
+
+      .float-bar-dim:first-child {
+        left: 0;
+        border-radius: 3px 0 0 3px;
+      }
+
+      .float-bar-dim:nth-child(2) {
+        right: 0;
+        border-radius: 0 3px 3px 0;
+      }
+
+      .float-marker {
+        position: absolute;
+        top: -2.5px;
+        width: 2px;
+        height: 10px;
+        margin-left: -1px;
+        border-radius: 1px;
+        background-color: var(--text, #ecf0f1);
+      }
+
+      .rarity-text {
+        margin-left: auto;
+        padding-left: 8px;
+        font-size: 11px;
+        font-weight: 600;
+        white-space: nowrap;
+        opacity: 0.9;
+      }
+
       .loading-placeholder {
         color: var(--text, #ecf0f1);
         opacity: 0.5;
         font-style: italic;
       }
-      
+
       .error-message {
         color: var(--error, #cc492f) !important;
       }
-      
+
       .item-actions {
-        margin-top: 15px;
         display: flex;
-        justify-content: center;
-      }
-      
-      .inspect-link {
-        display: inline-block;
-        padding: 4px 8px;
-        background-color: var(--pop, #2ecc71);
-        color: var(--gray, #1f2d3a);
-        border-radius: 3px;
-        font-size: 10px;
-        font-weight: bold;
-        text-decoration: none;
-        transition: all 0.3s ease;
-        width: 64px;
-        text-align: center;
+        gap: 4px;
+        width: 100%;
         box-sizing: border-box;
       }
-      
-      .inspect-link:hover {
-        background-color: #27ae60;
-        transform: translateY(-1px);
+
+      .icon-btn {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 22px;
+        border-radius: 3px;
+        border: 1px solid var(--light, #2f3d4a);
+        background-color: var(--gray, #1f2d3a);
+        color: var(--pop, #2ecc71);
+        text-decoration: none;
+        transition: background-color 0.2s ease, color 0.2s ease;
       }
-      
+
+      .icon-btn svg {
+        width: 13px;
+        height: 13px;
+      }
+
+      .icon-btn:hover {
+        background-color: var(--pop, #2ecc71);
+        color: var(--gray, #1f2d3a);
+      }
+
       @keyframes shimmer {
         0% { left: -100%; }
         25% { left: -100%; }
         100% { left: 100%; }
       }
-      
+
       @media (max-width: 768px) {
         .item-content {
           gap: 10px;
         }
-        
+
         .item-left {
           gap: 6px;
         }
-        
+
         .item-image-container {
           width: 80px;
           height: 60px;
         }
-        
+
         .item-image {
           max-height: 60px;
-        }
-        
-        .inspect-link {
-          width: 80px;
-          font-size: 10px;
-          padding: 4px 8px;
-        }
-        
-        .item-details {
-          grid-template-columns: 1fr;
-          gap: 4px;
         }
       }
     `;
@@ -278,9 +341,9 @@ class InventoryItem extends HTMLElement {
     }
 
     const nameElement = this.shadowRoot.querySelector('[data-field="name"]');
-    const wearElement = this.shadowRoot.querySelector('[data-field="wear"]');
     const rarityElement = this.shadowRoot.querySelector('[data-field="rarity"]');
     const inspectElement = this.shadowRoot.querySelector('[data-field="inspect-link"]');
+    const steamLinkElement = this.shadowRoot.querySelector('[data-field="steam-link"]');
     const imageElement = this.shadowRoot.querySelector('[data-field="image"]');
 
 
@@ -299,18 +362,31 @@ class InventoryItem extends HTMLElement {
       nameElement.textContent = itemName;
     }
 
-    if (wearElement) {
-      const wear = this.itemData.wear || 'Unknown';
-      wearElement.textContent = wear;
-    }
+    this.updateWearPill(this.itemData.wear);
 
     if (rarityElement) {
-      const rarity = this.itemData.rarity || 'Unknown';
-      rarityElement.textContent = rarity;
+      const rarity = this.itemData.rarity;
+      rarityElement.textContent = (rarity && rarity !== 'Unknown') ? rarity : '';
+      rarityElement.style.color = rarityColorOf(rarity);
     }
 
     if (inspectElement) {
       inspectElement.href = this.itemData.inspect_link || '#';
+    }
+
+    // Deep link to this exact item in the owner's Steam inventory page (730_2 is CS2's
+    // app/context id). The owner id comes from the resolved inventory response; classic
+    // S...A... inspect links carry both ids and serve as a fallback.
+    if (steamLinkElement) {
+      const match = (this.itemData.inspect_link || '').match(/S(\d+)A(\d+)/);
+      const steamid = currentOwnerSteamId || (match && match[1]);
+      const assetid = this.itemData.assetid || (match && match[2]);
+      if (steamid && assetid) {
+        steamLinkElement.href = `https://steamcommunity.com/profiles/${steamid}/inventory#730_2_${assetid}`;
+        steamLinkElement.style.display = '';
+      } else {
+        steamLinkElement.style.display = 'none';
+      }
     }
 
     // Set item image
@@ -336,39 +412,57 @@ class InventoryItem extends HTMLElement {
   }
 
   getRarityColor(rarity) {
-    const rarityColors = {
-      // Standard weapon skin rarities (CS2/CS:GO)
-      'Consumer Grade': '#B0C3D9',       // Light Gray/White
-      'Industrial Grade': '#5E98D9',     // Light Blue
-      'Mil-Spec Grade': '#4B69FF',       // Blue
-      'Restricted': '#8847FF',           // Purple
-      'Classified': '#D32CE6',           // Pink/Magenta
-      'Covert': '#EB4B4B',              // Red (weapons)
-      'Extraordinary': '#EB4B4B',        // Red (knives/gloves) - same tier as Covert; Steam tags it eb4b4b
-      'Contraband': '#E4AE39',           // Gold/Orange (e.g. M4A4 Howl) - the only gold rarity
-      
-      // Agent rarities (based on Operation rewards)
-      'Base Grade': '#B0C3D9',          // Light Gray/White
-      'Distinguished': '#4B69FF',       // Blue (28 stars)
-      'Exceptional': '#8847FF',         // Purple (52 stars)
-      'Superior': '#D32CE6',            // Pink (76 stars)
-      'Master': '#EB4B4B',              // Red (89 stars)
-      
-      // Stickers, charms, graffiti, etc. (same rarity-value colors as above)
-      'High Grade': '#4B69FF',          // Blue (value 3, == Mil-Spec/Distinguished)
-      'Remarkable': '#8847FF',          // Purple (value 4, == Restricted/Exceptional)
-      'Exotic': '#D32CE6',              // Pink (value 5, == Classified/Superior)
+    return rarityColorOf(rarity);
+  }
 
-      // Default weapon (no skin)
-      'Stock': '#DED6CC'                // Off-white/gray (Steam Rarity_Default_Weapon)
-    };
-    
-    return rarityColors[rarity] || '#B0C3D9'; // Default to light gray if not found
+  // Dim the parts of the float bar this skin can't roll. Each paint kit remaps the raw
+  // 0-1 float into its own wear interval (commonly 0.06-0.80); the unreachable ends are
+  // dimmed the same way the float filter slider dims its unselected range.
+  applyFloatRange() {
+    if (!floatRanges || this.paintIndex == null) return;
+    const range = floatRanges[this.paintIndex];
+    const bar = this.shadowRoot.querySelector('[data-field="float-bar"]');
+    const left = this.shadowRoot.querySelector('[data-field="float-dim-left"]');
+    const right = this.shadowRoot.querySelector('[data-field="float-dim-right"]');
+    if (!range || !bar || !left || !right) return;
+    const [min, max] = range;
+    left.hidden = !(min > 0);
+    left.style.width = `${min * 100}%`;
+    right.hidden = !(max < 1);
+    right.style.width = `${(1 - max) * 100}%`;
+
+    // Hovering the bar shows the item's exact float plus this skin's possible range,
+    // at the data's natural precision (0-0.672, 0.06-0.8, ...). Set on the overlays
+    // too so the tooltip appears no matter which layer is under the cursor. Composed
+    // from the stored exact float so re-running stays idempotent.
+    const title = `${bar.dataset.fullFloat || ''}\nPossible range: ${min}-${max}`.trim();
+    bar.title = title;
+    left.title = title;
+    right.title = title;
+  }
+
+  // Compact wear badge (FN/MW/FT/WW/BS), colored to match the float bar zones.
+  updateWearPill(wearName) {
+    const pill = this.shadowRoot.querySelector('[data-field="wear-pill"]');
+    if (!pill) return;
+    const abbrev = WEAR_ABBREVIATIONS[wearName];
+    if (abbrev) {
+      pill.textContent = abbrev;
+      pill.className = `wear-pill ${abbrev.toLowerCase()}`;
+      pill.title = wearName;
+      pill.hidden = false;
+    } else {
+      pill.hidden = true;
+    }
   }
 
   updateWithDetails(itemData, inspectLink) {
     const floatElement = this.shadowRoot.querySelector('[data-field="float"]');
-    const wearElement = this.shadowRoot.querySelector('[data-field="wear"]');
+    const floatLabel = this.shadowRoot.querySelector('[data-field="float-label"]');
+    const floatBar = this.shadowRoot.querySelector('[data-field="float-bar"]');
+    const floatMarker = this.shadowRoot.querySelector('[data-field="float-marker"]');
+    const floatLine = this.shadowRoot.querySelector('[data-field="float-line"]');
+    const patternLine = this.shadowRoot.querySelector('[data-field="pattern-line"]');
     const rarityElement = this.shadowRoot.querySelector('[data-field="rarity"]');
     const patternElement = this.shadowRoot.querySelector('[data-field="pattern"]');
     const nameElement = this.shadowRoot.querySelector('[data-field="name"]');
@@ -411,10 +505,16 @@ class InventoryItem extends HTMLElement {
     // vanilla knives, etc. - have no float, pattern, or skin. "Float: 0", "Pattern: 0",
     // "Factory New" and "| Vanilla" are all meaningless for them, so we drop those rows.
     const hasSkin = Number(itemData.paintindex) > 0;
-    const setRow = (el, show) => {
-      const row = el?.closest('.detail-row');
-      if (row) row.style.display = show ? '' : 'none';
-    };
+    if (floatLine) floatLine.style.display = hasSkin ? '' : 'none';
+    if (patternLine && !hasSkin) {
+      // Keep the line itself when there's a rarity to show; just drop the pattern part.
+      const hasRarity = rarityElement && rarityElement.textContent;
+      patternLine.style.display = hasRarity ? '' : 'none';
+      if (patternElement) patternElement.style.display = 'none';
+      const patternLabel = patternLine.querySelector('.detail-label');
+      if (patternLabel) patternLabel.style.display = 'none';
+    }
+    if (!hasSkin) this.updateWearPill(null);
 
     // Enhance the name with detailed info if we got weapon/skin data
     if (itemData.weapon && itemData.skin && nameElement) {
@@ -456,7 +556,6 @@ class InventoryItem extends HTMLElement {
     }
 
     // Update float value - display 6 decimal places for overview, full precision on hover
-    setRow(floatElement, hasSkin);
     if (floatElement && hasSkin) {
       const paintwearFloat = uint32ToFloat32(itemData.paintwear);
       const fullFloat = paintwearFloat.toString();
@@ -465,6 +564,18 @@ class InventoryItem extends HTMLElement {
       floatElement.dataset.fullFloat = fullFloat;
       floatElement.style.cursor = 'copy';
       floatElement.classList.remove('loading-placeholder');
+
+      // The wear pill + value + position bar say it all; drop the "Float:" label.
+      if (floatLabel) floatLabel.style.display = 'none';
+      if (floatBar && floatMarker) {
+        floatMarker.style.left = `${Math.min(100, Math.max(0, paintwearFloat * 100))}%`;
+        floatBar.dataset.fullFloat = fullFloat;
+        floatBar.title = fullFloat; // applyFloatRange appends the possible range when known
+        floatBar.hidden = false;
+      }
+      this.paintIndex = Number(itemData.paintindex);
+      this.applyFloatRange();
+      this.updateWearPill(getWearFromFloat(paintwearFloat));
 
       // Add click-to-copy functionality
       floatElement.onclick = () => {
@@ -476,31 +587,20 @@ class InventoryItem extends HTMLElement {
         });
       };
     }
-    
-    // Update wear if we got better data, otherwise keep existing
-    setRow(wearElement, hasSkin);
-    if (wearElement && hasSkin) {
-      const detailedWear = getWearFromFloat(uint32ToFloat32(itemData.paintwear));
-      if (detailedWear !== 'Unknown' && detailedWear !== wearElement.textContent) {
-        wearElement.textContent = detailedWear;
-      }
-    }
-    
+
+
     // Keep Steam's rarity (set during the basic render) - it is correct for every item
     // category. Only fall back to the numeric GC rarity when Steam gave us nothing, since
     // getRarityFromNumber is a weapon-only ladder and mislabels medals, stickers, agents, etc.
-    if (rarityElement) {
-      const current = rarityElement.textContent;
-      if (!current || current === 'Unknown') {
-        const detailedRarity = getRarityFromNumber(itemData.rarity);
-        if (detailedRarity !== 'Unknown') {
-          rarityElement.textContent = detailedRarity;
-        }
+    if (rarityElement && !rarityElement.textContent) {
+      const detailedRarity = getRarityFromNumber(itemData.rarity);
+      if (detailedRarity !== 'Unknown') {
+        rarityElement.textContent = detailedRarity;
+        rarityElement.style.color = rarityColorOf(detailedRarity);
       }
     }
-    
+
     // Update pattern seed
-    setRow(patternElement, hasSkin);
     if (patternElement && hasSkin) {
       patternElement.textContent = itemData.paintseed;
       patternElement.classList.remove('loading-placeholder');
@@ -516,6 +616,18 @@ class InventoryItem extends HTMLElement {
 // Register the custom element
 customElements.define('inventory-item', InventoryItem);
 
+// Per-paint-kit wear intervals (paint index -> [min, max]) used to dim the unreachable
+// parts of each card's float bar. Generated by scripts/update-skin-data.mjs. Cards that
+// render before the fetch resolves are back-filled once it lands.
+let floatRanges = null;
+fetch('float-ranges.json')
+  .then(r => (r.ok ? r.json() : null))
+  .then(data => {
+    floatRanges = data;
+    document.querySelectorAll('inventory-item').forEach(el => el.applyFloatRange());
+  })
+  .catch(() => { /* cosmetic enhancement; bars simply stay undimmed */ });
+
 let elements;
 let analysisController = null; // AbortController for canceling requests
 let isCancelled = false;
@@ -523,10 +635,11 @@ const conversionBuffer = new ArrayBuffer(4);
 const conversionView = new DataView(conversionBuffer);
 
 // Inventory data and controls
+let currentOwnerSteamId = null; // Resolved SteamId64 of the inventory being viewed
 let inventoryItems = []; // Store all items with their data
 let filteredItems = []; // Store currently filtered/sorted items
 let currentSort = { field: 'rarity', order: 'desc' };
-let currentFilters = { rarity: '', wear: '', floatMin: null, floatMax: null, hideCommemorative: true };
+let currentFilters = { rarity: '', wear: '', floatMin: null, floatMax: null, hideCommemorative: true, search: '', specialOnly: false, category: '' };
 
 // Analysis queue management
 let itemsNeedingAnalysis = []; // Items that need detailed analysis
@@ -536,6 +649,34 @@ function uint32ToFloat32(uint32Value) {
   conversionView.setUint32(0, uint32Value);
   return conversionView.getFloat32(0);
 }
+
+// Loose name matching: lowercase, fold accents (Mjölnir -> mjolnir), and treat every run
+// of punctuation/whitespace (|, ★, ™, spaces) as one separator, so "gloves crimson"
+// finds "★ Specialist Gloves | Crimson Kimono".
+function normalizeSearchText(text) {
+  return (text || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function matchesSearch(item, normalizedQuery) {
+  if (!normalizedQuery) return true;
+  if (item.searchText === undefined) {
+    item.searchText = normalizeSearchText(item.steamData.name);
+  }
+  return normalizedQuery.split(' ').every(token => item.searchText.includes(token));
+}
+
+const WEAR_ABBREVIATIONS = {
+  'Factory New': 'FN',
+  'Minimal Wear': 'MW',
+  'Field-Tested': 'FT',
+  'Well-Worn': 'WW',
+  'Battle-Scarred': 'BS'
+};
 
 function getWearFromFloat(float) {
   if (float < 0.07) return "Factory New";
@@ -557,6 +698,14 @@ function getRarityFromNumber(rarityNumber) {
     "Contraband",
   ];
   return rarities[rarityNumber] || "Unknown";
+}
+
+// Knives and gloves (and only they) carry the ★ marker in their Steam name/type.
+// Rarity can't tell them apart: knives are Covert and high-tier stickers share the
+// gloves' Extraordinary rarity.
+function isStarItem(steamData) {
+  return ((steamData && steamData.name) || '').includes('★') ||
+         ((steamData && steamData.type) || '').includes('★');
 }
 
 // Check if defindex belongs to knife/glove category (500+ for knives, 5000+ for gloves)
@@ -593,16 +742,80 @@ function updateProgress(completed, total) {
 
 function updateSummary(inventoryData, processedItems) {
   elements.inventorySummary.style.display = 'block';
-  
-  const totalItems = inventoryData.total || 0;
-  const csgoItems = inventoryData.csgo_items ? inventoryData.csgo_items.length : 0;
-  const stattrakItems = processedItems.filter(item => item && item.stattrak).length;
-  
-  elements.totalItems.textContent = totalItems;
-  elements.csgoItems.textContent = csgoItems;
-  elements.stattrakItems.textContent = stattrakItems;
+  renderRarityBar();
+  renderHighlights(processedItems);
   // Profile header (avatar/persona/trade-ban) is populated separately by the parallel
   // /api/profile fetch kicked off in analyzeInventory.
+}
+
+// Stacked bar + legend showing the rarity makeup of the inventory. Rarity comes from the
+// basic Steam data, so this is fully populated from the first render (no GC lookup needed).
+function renderRarityBar() {
+  // Group by Steam color rather than rarity name: players read an inventory by color
+  // tier, and several names share one color (Covert/Extraordinary are both red, etc.).
+  const byColor = new Map(); // color -> { count, value, names }
+  for (const it of inventoryItems) {
+    const rarity = it.steamData && it.steamData.rarity;
+    if (!rarity || rarity === 'Unknown') continue;
+    const color = rarityColorOf(rarity);
+    const group = byColor.get(color) || { count: 0, value: 0, names: new Set() };
+    group.count += 1;
+    group.value = Math.max(group.value, getRarityValue(rarity));
+    group.names.add(rarity);
+    byColor.set(color, group);
+  }
+
+  // Highest tier first so the bar reads rare -> common, left to right.
+  const groups = [...byColor.entries()].sort((a, b) => b[1].value - a[1].value);
+  const total = groups.reduce((sum, [, g]) => sum + g.count, 0);
+
+  elements.rarityBar.innerHTML = '';
+  elements.rarityLegend.innerHTML = '';
+  if (total === 0) return;
+
+  for (const [color, group] of groups) {
+    // Several rarity names can share one Steam color (e.g. Covert + Extraordinary).
+    const tierName = [...group.names].sort((a, b) => getRarityValue(b) - getRarityValue(a)).join(' / ');
+
+    const segment = document.createElement('div');
+    segment.className = 'rarity-segment';
+    segment.style.width = `${(group.count / total) * 100}%`;
+    segment.style.backgroundColor = color;
+    segment.title = `${group.count} ${tierName}`;
+    elements.rarityBar.appendChild(segment);
+
+    const item = document.createElement('span');
+    item.className = 'rarity-legend-item';
+    item.title = tierName;
+    const dot = document.createElement('span');
+    dot.className = 'rarity-dot';
+    dot.style.backgroundColor = color;
+    const label = document.createElement('span');
+    label.innerHTML = `<strong>${group.count}</strong>`;
+    item.append(dot, label);
+    elements.rarityLegend.appendChild(item);
+  }
+}
+
+// Quick "what's notable in here" chips. The item count is known up front; StatTrak and
+// special-pattern counts come from the GC analysis, so they grow as items resolve.
+function renderHighlights(processedItems) {
+  const knives = inventoryItems.filter(it => isStarItem(it.steamData)).length;
+  const stattrak = processedItems.filter(item => item && item.stattrak).length;
+  const special = processedItems.filter(item => item && item.special).length;
+
+  const chips = [`${inventoryItems.length} CS2 items`];
+  if (knives) chips.push(`${knives} knives/gloves`);
+  if (stattrak) chips.push({ text: `${stattrak} StatTrak`, cls: 'stattrak' });
+  if (special) chips.push(`${special} special`);
+
+  elements.summaryHighlights.innerHTML = '';
+  for (const chip of chips) {
+    const el = document.createElement('span');
+    el.className = typeof chip === 'string' ? 'highlight-chip' : `highlight-chip ${chip.cls}`;
+    el.textContent = typeof chip === 'string' ? chip : chip.text;
+    elements.summaryHighlights.appendChild(el);
+  }
 }
 
 function updateProfileSummary(inventoryData) {
@@ -683,6 +896,38 @@ function sortItems(items, field, order) {
   });
 }
 
+// Rarity -> Steam color, shared by the item cards and the inventory summary bar.
+const RARITY_COLORS = {
+  // Standard weapon skin rarities (CS2/CS:GO)
+  'Consumer Grade': '#B0C3D9',       // Light Gray/White
+  'Industrial Grade': '#5E98D9',     // Light Blue
+  'Mil-Spec Grade': '#4B69FF',       // Blue
+  'Restricted': '#8847FF',           // Purple
+  'Classified': '#D32CE6',           // Pink/Magenta
+  'Covert': '#EB4B4B',               // Red (weapons)
+  'Extraordinary': '#EB4B4B',        // Red (knives/gloves) - same tier as Covert; Steam tags it eb4b4b
+  'Contraband': '#E4AE39',           // Gold/Orange (e.g. M4A4 Howl) - the only gold rarity
+
+  // Agent rarities (based on Operation rewards)
+  'Base Grade': '#B0C3D9',           // Light Gray/White
+  'Distinguished': '#4B69FF',        // Blue (28 stars)
+  'Exceptional': '#8847FF',          // Purple (52 stars)
+  'Superior': '#D32CE6',             // Pink (76 stars)
+  'Master': '#EB4B4B',               // Red (89 stars)
+
+  // Stickers, charms, graffiti, etc. (same rarity-value colors as above)
+  'High Grade': '#4B69FF',           // Blue (value 3, == Mil-Spec/Distinguished)
+  'Remarkable': '#8847FF',           // Purple (value 4, == Restricted/Exceptional)
+  'Exotic': '#D32CE6',               // Pink (value 5, == Classified/Superior)
+
+  // Default weapon (no skin)
+  'Stock': '#DED6CC'                 // Off-white/gray (Steam Rarity_Default_Weapon)
+};
+
+function rarityColorOf(rarity) {
+  return RARITY_COLORS[rarity] || '#B0C3D9'; // Default to light gray if not found
+}
+
 function getRarityValue(rarity) {
   const rarityOrder = {
     'Consumer Grade': 1,
@@ -707,12 +952,40 @@ function getRarityValue(rarity) {
 function filterItems(items) {
   return items.filter(item => {
     // Hide commemorative items filter (paintindex 0)
-    if (currentFilters.hideCommemorative && 
-        item.detailedData && 
+    if (currentFilters.hideCommemorative &&
+        item.detailedData &&
         item.detailedData.paintindex === 0) {
       return false;
     }
-    
+
+    // Text search on the item name (normalized, order-independent tokens)
+    if (!matchesSearch(item, currentFilters.search)) {
+      return false;
+    }
+
+    // Category filter. Knives/gloves and StatTrak are recognizable from the Steam name
+    // (★ prefix / StatTrak™), so this works before the GC analysis resolves.
+    if (currentFilters.category) {
+      const name = item.steamData.name || '';
+      switch (currentFilters.category) {
+        case 'knife':
+          if (!isStarItem(item.steamData)) return false;
+          break;
+        case 'stattrak':
+          if (!name.includes('StatTrak™') && !(item.detailedData && item.detailedData.stattrak)) return false;
+          break;
+        case 'souvenir':
+          if (item.steamData.quality !== 'Souvenir') return false;
+          break;
+      }
+    }
+
+    // Special patterns only (fade %, fire & ice, blue gem, etc.) - special comes from the
+    // detailed GC data, so unanalyzed items stay hidden until their lookup resolves.
+    if (currentFilters.specialOnly && !(item.detailedData && item.detailedData.special)) {
+      return false;
+    }
+
     // Rarity filter
     if (currentFilters.rarity && item.steamData.rarity !== currentFilters.rarity) {
       return false;
@@ -765,9 +1038,10 @@ function displayItems(items) {
     });
   });
 
-  // Update filter count
-  if (elements.filterCount) {
-    elements.filterCount.textContent = `Showing ${items.length} of ${inventoryItems.length} items`;
+  // The grid speaks for itself; only surface a message when filters hide everything.
+  if (elements.gridStatus) {
+    elements.gridStatus.textContent =
+      (inventoryItems.length > 0 && items.length === 0) ? 'No items match your filters.' : '';
   }
 }
 
@@ -884,6 +1158,10 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
       }
     }
 
+    // Remember the owner id before rendering items: the cards use it to build their
+    // "view in Steam inventory" links.
+    currentOwnerSteamId = actualSteamId;
+
     // Update the URL hash with the resolved SteamId64 if we have it and it's different from the input
     if (actualSteamId && validateSteamId(actualSteamId)) {
       // Only update hash if it's different from the current hash (to replace the URL-encoded input)
@@ -946,6 +1224,7 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
     // Show sidebar controls immediately after rendering items
     // This allows users to interact with sort/filter while analysis continues
     elements.sidebar.style.display = 'block';
+    updateSliderVisual(); // the track has a real width only once the sidebar is visible
 
     // Initialize filtered items with all items and apply initial sort/filter
     filteredItems = [...inventoryItems];
@@ -1033,6 +1312,23 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
   }
 }
 
+// Position the selected-range highlight on the float slider. The track shows a dimmed
+// wear-zone gradient; the range element shows the same gradient at full strength, so its
+// background must be sized to the track and shifted left so the zones line up.
+function updateSliderVisual() {
+  const minVal = parseFloat(elements.floatSliderMin.value);
+  const maxVal = parseFloat(elements.floatSliderMax.value);
+
+  elements.floatSliderRange.style.left = (minVal * 100) + '%';
+  elements.floatSliderRange.style.width = ((maxVal - minVal) * 100) + '%';
+
+  const trackWidth = elements.floatSliderRange.parentElement.clientWidth;
+  if (trackWidth > 0) {
+    elements.floatSliderRange.style.backgroundSize = `${trackWidth}px 100%`;
+    elements.floatSliderRange.style.backgroundPosition = `${-minVal * trackWidth}px 0`;
+  }
+}
+
 function cancelAnalysis() {
   if (analysisController && !isCancelled) {
     isCancelled = true;
@@ -1055,12 +1351,13 @@ function resetInterface() {
   elements.cancelButton.style.display = 'none';
 
   // Reset data
+  currentOwnerSteamId = null;
   inventoryItems = [];
   filteredItems = [];
   itemsNeedingAnalysis = [];
   analyzedCount = 0;
   currentSort = { field: 'rarity', order: 'desc' };
-  currentFilters = { rarity: '', wear: '', floatMin: null, floatMax: null, hideCommemorative: true };
+  currentFilters = { rarity: '', wear: '', floatMin: null, floatMax: null, hideCommemorative: true, search: '', specialOnly: false, category: '' };
 
   // Cancel any ongoing analysis
   if (analysisController) {
@@ -1106,26 +1403,29 @@ window.addEventListener("load", function () {
     summaryAvatar: document.getElementById("summary-avatar"),
     summaryPersona: document.getElementById("summary-persona"),
     banAlert: document.getElementById("ban-alert"),
-    totalItems: document.getElementById("total-items"),
-    csgoItems: document.getElementById("csgo-items"),
-    stattrakItems: document.getElementById("stattrak-items"),
+    rarityBar: document.getElementById("rarity-bar"),
+    rarityLegend: document.getElementById("rarity-legend"),
+    summaryHighlights: document.getElementById("summary-highlights"),
     inventoryContainer: document.getElementById("inventory-container"),
     sidebar: document.getElementById("sidebar"),
-    sidebarHeader: document.getElementById("sidebar-header"),
-    sidebarArrow: document.getElementById("sidebar-arrow"),
+    filterToggle: document.getElementById("filter-toggle"),
     sidebarSections: document.getElementById("sidebar-sections"),
     inventoryGrid: document.getElementById("inventory-grid"),
     status: document.getElementById("status"),
-    filterCount: document.getElementById("filter-count"),
-    
+    gridStatus: document.getElementById("grid-status"),
+
     // Control elements
+    searchInput: document.getElementById("search-input"),
     sortSelect: document.getElementById("sort-select"),
     sortOrder: document.getElementById("sort-order"),
+    filterCategory: document.getElementById("filter-category"),
     filterRarity: document.getElementById("filter-rarity"),
     filterWear: document.getElementById("filter-wear"),
     filterFloatMin: document.getElementById("filter-float-min"),
     filterFloatMax: document.getElementById("filter-float-max"),
     hideCommemorative: document.getElementById("hide-commemorative"),
+    filterSpecial: document.getElementById("filter-special"),
+    clearFilters: document.getElementById("clear-filters"),
     // Float slider elements
     floatSliderMin: document.getElementById("float-slider-min"),
     floatSliderMax: document.getElementById("float-slider-max"),
@@ -1235,17 +1535,6 @@ window.addEventListener("load", function () {
     applySortAndFilter();
   });
 
-  // Float slider functionality
-  function updateSliderVisual() {
-    const minVal = parseFloat(elements.floatSliderMin.value);
-    const maxVal = parseFloat(elements.floatSliderMax.value);
-    const minPercent = minVal * 100;
-    const maxPercent = maxVal * 100;
-
-    elements.floatSliderRange.style.left = minPercent + '%';
-    elements.floatSliderRange.style.width = (maxPercent - minPercent) + '%';
-  }
-
   // Check if current float range matches a wear level and update dropdown
   function syncWearFromFloat() {
     const minVal = currentFilters.floatMin;
@@ -1347,14 +1636,48 @@ window.addEventListener("load", function () {
   // Initialize slider visual
   updateSliderVisual();
 
-  // Mobile sidebar toggle functionality
-  elements.sidebarHeader.addEventListener("click", function() {
-    const sections = elements.sidebarSections;
-    const arrow = elements.sidebarArrow;
-    
-    // Toggle expanded class
-    sections.classList.toggle("expanded");
-    arrow.classList.toggle("rotated");
+  // Text search filter
+  elements.searchInput.addEventListener("input", function() {
+    currentFilters.search = normalizeSearchText(this.value);
+    applySortAndFilter();
+  });
+
+  // Category filter (knives/gloves, StatTrak, Souvenir)
+  elements.filterCategory.addEventListener("change", function() {
+    currentFilters.category = this.value;
+    applySortAndFilter();
+  });
+
+  // Keep the slider's gradient aligned with the track when the layout reflows
+  window.addEventListener("resize", updateSliderVisual);
+
+  // Special-patterns-only filter
+  elements.filterSpecial.addEventListener("change", function() {
+    currentFilters.specialOnly = this.checked;
+    applySortAndFilter();
+  });
+
+  // Clear all filters (keeps the current sort) and reset the filter controls
+  elements.clearFilters.addEventListener("click", function() {
+    currentFilters = { rarity: '', wear: '', floatMin: null, floatMax: null, hideCommemorative: true, search: '', specialOnly: false, category: '' };
+    elements.searchInput.value = '';
+    elements.filterCategory.value = '';
+    elements.filterRarity.value = '';
+    elements.filterWear.value = '';
+    elements.filterFloatMin.value = '';
+    elements.filterFloatMax.value = '';
+    elements.floatSliderMin.value = 0;
+    elements.floatSliderMax.value = 1;
+    elements.hideCommemorative.checked = true;
+    elements.filterSpecial.checked = false;
+    updateSliderVisual();
+    applySortAndFilter();
+  });
+
+  // Filters toggle (mobile) - expands the collapsible filter panel under the sticky bar
+  elements.filterToggle.addEventListener("click", function() {
+    const expanded = elements.sidebarSections.classList.toggle("expanded");
+    this.setAttribute("aria-expanded", expanded ? "true" : "false");
   });
 
   if (window.location.hash) {

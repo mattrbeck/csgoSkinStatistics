@@ -115,23 +115,16 @@
     </div>
 
     <div id="inventory-summary" style="display: none;">
-      <a id="summary-profile" class="summary-profile" href="#" target="_blank" rel="noopener" style="display: none;">
-        <img id="summary-avatar" class="summary-avatar" src="" alt="" style="display: none;">
-        <span id="summary-persona" class="summary-persona"></span>
-      </a>
-      <div id="summary-stats">
-        <div class="stat-item">
-          <span class="stat-label">Total Items</span>
-          <span id="total-items">0</span>
-        </div>
-        <div class="stat-item">
-          <span class="stat-label">CS2 Items</span>
-          <span id="csgo-items">0</span>
-        </div>
-        <div class="stat-item">
-          <span class="stat-label">StatTrak Items</span>
-          <span id="stattrak-items">0</span>
-        </div>
+      <div class="summary-top">
+        <a id="summary-profile" class="summary-profile" href="#" target="_blank" rel="noopener" style="display: none;">
+          <img id="summary-avatar" class="summary-avatar" src="" alt="" style="display: none;">
+          <span id="summary-persona" class="summary-persona"></span>
+        </a>
+        <div id="summary-highlights" class="summary-highlights"></div>
+      </div>
+      <div class="rarity-bar-container">
+        <div id="rarity-bar" class="rarity-bar"></div>
+        <div id="rarity-legend" class="rarity-legend"></div>
       </div>
       <div id="ban-alert" class="ban-alert" role="alert" style="display: none;"></div>
     </div>
@@ -139,35 +132,50 @@
     <div id="main-layout">
       <div id="sidebar" class="sidebar" style="display: none;">
         <div class="sidebar-content">
-          <div class="sidebar-header" id="sidebar-header">
-            <h3>Sort & Filter</h3>
-            <span class="sidebar-arrow" id="sidebar-arrow">▼</span>
-          </div>
-          
-          <div class="sidebar-sections" id="sidebar-sections">
-            <div class="sidebar-section">
-            <h4>Sort Options</h4>
-            <div class="control-group">
-              <label for="sort-select">Sort by:</label>
-              <select id="sort-select">
-                <option value="date">Date</option>
-                <option value="name">Name</option>
-                <option value="rarity" selected>Rarity</option>
-                <option value="float">Float</option>
-              </select>
+          <div class="sidebar-bar">
+            <div class="control-group search-group">
+              <input type="text" id="search-input" placeholder="Filter by name…" aria-label="Filter items by name" autocomplete="off">
             </div>
-            
-            <div class="control-group">
-              <label for="sort-order">Order:</label>
-              <select id="sort-order">
-                <option value="asc">Ascending</option>
-                <option value="desc" selected>Descending</option>
-              </select>
+            <div class="sidebar-bar-row">
+              <div class="sort-section">
+                <div class="sort-controls">
+                  <div class="control-group">
+                    <label for="sort-select">Sort by:</label>
+                    <select id="sort-select">
+                      <option value="date">Date</option>
+                      <option value="name">Name</option>
+                      <option value="rarity" selected>Rarity</option>
+                      <option value="float">Float</option>
+                    </select>
+                  </div>
+                  <div class="control-group">
+                    <label for="sort-order">Order:</label>
+                    <select id="sort-order">
+                      <option value="asc">Ascending</option>
+                      <option value="desc" selected>Descending</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+              <button type="button" class="filter-toggle" id="filter-toggle" aria-expanded="false" aria-controls="sidebar-sections">
+                Filters <span class="filter-toggle-arrow" id="sidebar-arrow">▾</span>
+              </button>
             </div>
           </div>
 
-          <div class="sidebar-section">
+          <div class="sidebar-sections" id="sidebar-sections">
+            <div class="sidebar-section">
             <h4>Filter Options</h4>
+            <div class="control-group">
+              <label for="filter-category">Category:</label>
+              <select id="filter-category">
+                <option value="">All Categories</option>
+                <option value="knife">★ Knives &amp; Gloves</option>
+                <option value="stattrak">StatTrak™</option>
+                <option value="souvenir">Souvenir</option>
+              </select>
+            </div>
+
             <div class="control-group">
               <label for="filter-rarity">Rarity:</label>
               <select id="filter-rarity">
@@ -217,16 +225,22 @@
                 Hide items without a float
               </label>
             </div>
-            
-            <div class="filter-count-container">
-              <span id="filter-count" class="filter-count"></span>
+
+            <div class="control-group checkbox-group">
+              <label for="filter-special">
+                <input type="checkbox" id="filter-special">
+                Special patterns only
+              </label>
             </div>
+
+            <button type="button" id="clear-filters" class="clear-filters">Clear filters</button>
           </div>
           </div>
         </div>
       </div>
 
       <div id="content-area" class="content-area">
+        <div id="grid-status" class="grid-status" aria-live="polite"></div>
         <div id="inventory-container">
           <div id="inventory-grid"></div>
         </div>
@@ -240,29 +254,38 @@
             <img class="item-image" data-field="image" src="" alt="Item image" loading="lazy">
           </div>
           <div class="item-actions">
-            <a href="#" class="inspect-link" data-field="inspect-link">Inspect</a>
+            <a href="#" class="icon-btn" data-field="inspect-link" title="Inspect in game" aria-label="Inspect in game">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="10.5" cy="10.5" r="5.5" fill="none" stroke="currentColor" stroke-width="2.2"/>
+                <line x1="14.8" y1="14.8" x2="20.5" y2="20.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+              </svg>
+            </a>
+            <a href="#" class="icon-btn" data-field="steam-link" title="View in Steam inventory" aria-label="View in Steam inventory" target="_blank" rel="noopener">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M13.5 4.5h6v6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+                <path d="M19.5 4.5l-8.5 8.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+                <path d="M9.5 6.5h-3a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-3" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+              </svg>
+            </a>
           </div>
         </div>
         <div class="item-info">
-          <div class="item-header">
-            <div class="item-name" data-field="name"></div>
-          </div>
+          <div class="item-name" data-field="name"></div>
           <div class="item-details">
-            <div class="detail-row">
-              <span class="detail-label">Float:</span>
+            <div class="detail-line" data-field="float-line">
+              <span class="wear-pill" data-field="wear-pill" hidden></span>
+              <span class="detail-label" data-field="float-label">Float:</span>
               <span class="detail-value loading-placeholder" data-field="float">Analyzing...</span>
+              <span class="float-bar" data-field="float-bar" hidden>
+                <span class="float-bar-dim" data-field="float-dim-left" hidden></span>
+                <span class="float-bar-dim" data-field="float-dim-right" hidden></span>
+                <span class="float-marker" data-field="float-marker"></span>
+              </span>
             </div>
-            <div class="detail-row">
-              <span class="detail-label">Wear:</span>
-              <span class="detail-value" data-field="wear">Unknown</span>
-            </div>
-            <div class="detail-row">
+            <div class="detail-line" data-field="pattern-line">
               <span class="detail-label">Pattern:</span>
               <span class="detail-value loading-placeholder" data-field="pattern">Analyzing...</span>
-            </div>
-            <div class="detail-row">
-              <span class="detail-label">Rarity:</span>
-              <span class="detail-value" data-field="rarity">Unknown</span>
+              <span class="rarity-text" data-field="rarity"></span>
             </div>
           </div>
         </div>
