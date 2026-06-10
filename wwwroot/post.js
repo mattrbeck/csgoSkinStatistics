@@ -14,7 +14,14 @@ function display(iteminfo, url, loadTime) {
   }
 
   try {
-    elements.itemName.innerHTML = `${iteminfo.weapon} | ${iteminfo.skin} <span class="pop">${iteminfo.special}</span>`;
+    // Built as DOM nodes, never innerHTML: these strings are remote data.
+    elements.itemName.textContent = `${iteminfo.weapon} | ${iteminfo.skin} `;
+    if (iteminfo.special) {
+      const special = document.createElement("span");
+      special.className = "pop";
+      special.textContent = iteminfo.special;
+      elements.itemName.appendChild(special);
+    }
     elements.itemName.classList.remove("knife", "souvenir", "genuine", "vintage", "valve", "selfmade");
     
     if (iteminfo.is_knife_or_glove) {
@@ -33,18 +40,18 @@ function display(iteminfo, url, loadTime) {
       elements.itemName.classList.add("souvenir");
     }
     
-    elements.itemPaintwear.innerHTML = iteminfo.paintwear_float;
-    elements.itemWear.innerHTML = iteminfo.wear_name;
-    elements.itemRarity.innerHTML = iteminfo.rarity_name;
+    elements.itemPaintwear.textContent = iteminfo.paintwear_float;
+    elements.itemWear.textContent = iteminfo.wear_name;
+    elements.itemRarity.textContent = iteminfo.rarity_name;
     if (iteminfo.itemid == 0) {
-      elements.itemItemid.innerHTML = "Unknown";
+      elements.itemItemid.textContent = "Unknown";
     } else {
-      elements.itemItemid.innerHTML = iteminfo.itemid;
+      elements.itemItemid.textContent = iteminfo.itemid;
     }
-    elements.itemPaintseed.innerHTML = iteminfo.paintseed;
-    elements.itemOrigin.innerHTML = iteminfo.origin_name;
-    elements.itemQuality.innerHTML = iteminfo.quality_name;
-    elements.status.innerHTML = `Loaded in ${loadTime} seconds`;
+    elements.itemPaintseed.textContent = iteminfo.paintseed;
+    elements.itemOrigin.textContent = iteminfo.origin_name;
+    elements.itemQuality.textContent = iteminfo.quality_name;
+    elements.status.textContent = `Loaded in ${loadTime} seconds`;
     elements.stattrakIndicator.classList.remove("yes");
     if (iteminfo.stattrak) {
       elements.stattrakIndicator.classList.add("yes");
@@ -57,16 +64,16 @@ function display(iteminfo, url, loadTime) {
 }
 
 function resetFields() {
-  elements.itemName.innerHTML = "-";
+  elements.itemName.textContent = "-";
   elements.itemName.classList.remove("knife", "souvenir", "genuine", "vintage", "valve", "selfmade");
-  elements.itemPaintwear.innerHTML = "-";
-  elements.itemWear.innerHTML = "-";
-  elements.itemRarity.innerHTML = "-";
-  elements.itemItemid.innerHTML = "-";
-  elements.itemPaintseed.innerHTML = "-";
-  elements.itemOrigin.innerHTML = "-";
-  elements.itemQuality.innerHTML = "-";
-  elements.status.innerHTML = "";
+  elements.itemPaintwear.textContent = "-";
+  elements.itemWear.textContent = "-";
+  elements.itemRarity.textContent = "-";
+  elements.itemItemid.textContent = "-";
+  elements.itemPaintseed.textContent = "-";
+  elements.itemOrigin.textContent = "-";
+  elements.itemQuality.textContent = "-";
+  elements.status.textContent = "";
   elements.stattrakIndicator.classList.remove("yes");
   elements.inspectButton.href = "#";
   elements.errorDisplay.style.display = "none";
@@ -96,7 +103,8 @@ function stopLoading() {
 
 function handleError(errorMessage) {
   resetFields();
-  elements.errorDisplay.innerHTML = errorMessage;
+  // textContent, not innerHTML: the message can echo server-provided strings
+  elements.errorDisplay.textContent = errorMessage;
   elements.errorDisplay.style.display = "block";
 }
 

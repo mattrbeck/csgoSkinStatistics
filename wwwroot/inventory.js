@@ -602,19 +602,31 @@ class InventoryItem extends HTMLElement {
       // Skinned weapons show "Weapon | Skin". For skinless items (stickers, music kits,
       // graffiti, etc.) the GC only returns a generic category word, so keep Steam's full
       // name (the ★ is stripped here and re-added via CSS for knives/gloves).
-      let nameText = hasSkin
+      // Built as DOM nodes, never innerHTML: the Steam name is remote data.
+      const nameText = hasSkin
         ? `${itemData.weapon} | ${itemData.skin}`
         : (this.itemData.name || this.itemData.market_name || itemData.weapon || '').replace(/^★\s*/, '');
+      nameElement.textContent = nameText;
       if (itemData.special) {
-        nameText += ` <span class="item-special" style="color: var(--pop, #2ecc71); font-weight: bold; margin-left: 5px;">${itemData.special}</span>`;
+        const special = document.createElement('span');
+        special.className = 'item-special';
+        special.style.cssText = 'color: var(--pop, #2ecc71); font-weight: bold; margin-left: 5px;';
+        special.textContent = itemData.special;
+        nameElement.appendChild(special);
       }
       if (itemData.stattrak) {
+        const badge = document.createElement('span');
+        badge.className = 'stattrak-badge';
+        badge.textContent = 'ST';
         // The kill count slides out of the badge on hover (see .st-detail).
         const kills = this.itemData?.stattrak_kills;
-        const detail = (kills != null)
-          ? `<span class="st-detail">: ${kills.toLocaleString()} Kills</span>`
-          : '';
-        nameText += `<span class="stattrak-badge">ST${detail}</span>`;
+        if (kills != null) {
+          const detail = document.createElement('span');
+          detail.className = 'st-detail';
+          detail.textContent = `: ${kills.toLocaleString()} Kills`;
+          badge.appendChild(detail);
+        }
+        nameElement.appendChild(badge);
       }
       // Check for knife/glove using defindex (500-600 for knives, 5000+ for gloves)
       // This is more reliable than quality === 3, since StatTrak knives have quality 9
@@ -633,7 +645,6 @@ class InventoryItem extends HTMLElement {
       } else if (itemData.quality === 12) {
         nameElement.classList.add('souvenir');
       }
-      nameElement.innerHTML = nameText;
     }
 
     // Update float value - 6 decimal places at rest; hovering slides out the remaining
@@ -1497,10 +1508,11 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
     
     // Handle different types of errors
     if (error.name === 'AbortError' || error.message === 'Analysis was cancelled') {
-      elements.errorDisplay.innerHTML = 'Analysis was cancelled';
+      elements.errorDisplay.textContent = 'Analysis was cancelled';
       elements.status.textContent = 'Analysis cancelled by user';
     } else {
-      elements.errorDisplay.innerHTML = error.message;
+      // textContent, not innerHTML: the message can echo server-provided strings
+      elements.errorDisplay.textContent = error.message;
     }
     elements.errorDisplay.style.display = 'block';
   } finally {
@@ -1668,7 +1680,7 @@ window.addEventListener("load", function () {
     const userInput = elements.textbox.value.trim();
 
     if (!userInput) {
-      elements.errorDisplay.innerHTML = 'Please enter a Steam profile URL';
+      elements.errorDisplay.textContent = 'Please enter a Steam profile URL';
       elements.errorDisplay.style.display = 'block';
       return;
     }
