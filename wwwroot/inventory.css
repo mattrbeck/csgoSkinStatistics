@@ -435,9 +435,18 @@ inventory-item {
   display: none;
 }
 
+/* Expand/collapse animates grid-template-rows (0fr <-> 1fr), which tracks the real
+   content height - no max-height guess that the content must be kept under. Desktop
+   leaves it open; the mobile block below collapses it. */
 .sidebar-sections {
-  transition: max-height 0.3s ease, opacity 0.3s ease;
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 0.3s ease, opacity 0.3s ease, margin-top 0.3s ease;
+}
+
+.sidebar-sections > .sidebar-section {
   overflow: hidden;
+  min-height: 0;
 }
 
 .sidebar-section {
@@ -624,13 +633,13 @@ inventory-item {
 
   /* Collapsed by default on mobile */
   .sidebar-sections {
-    max-height: 0;
+    grid-template-rows: 0fr;
     opacity: 0;
     margin-top: 0;
   }
 
   .sidebar-sections.expanded {
-    max-height: 1200px;
+    grid-template-rows: 1fr;
     opacity: 1;
     margin-top: 15px;
   }
