@@ -111,28 +111,48 @@ describe('Inventory Item Sorting', () => {
     return rarityOrder[rarity] || 0;
   }
 
+  function nameSortKey(steamData) {
+    return (steamData.name || '')
+      .replace(/^★\s*/, '')
+      .replace(/^StatTrak™\s*/, '')
+      .replace(/^Souvenir\s+/, '')
+      .toLowerCase();
+  }
+
+  function getItemFloat(item) {
+    const conversionBuffer = new ArrayBuffer(4);
+    const conversionView = new DataView(conversionBuffer);
+    if (!item.detailedData || item.detailedData.paintwear == null ||
+        Number(item.detailedData.paintindex) === 0) {
+      return null;
+    }
+    conversionView.setUint32(0, item.detailedData.paintwear);
+    return conversionView.getFloat32(0);
+  }
+
   function sortItems(items, field, order) {
     return [...items].sort((a, b) => {
       let valueA, valueB;
 
       switch (field) {
         case 'name':
-          valueA = (a.steamData.name || '').toLowerCase();
-          valueB = (b.steamData.name || '').toLowerCase();
+          if (a.nameSortKey === undefined) a.nameSortKey = nameSortKey(a.steamData);
+          if (b.nameSortKey === undefined) b.nameSortKey = nameSortKey(b.steamData);
+          valueA = a.nameSortKey;
+          valueB = b.nameSortKey;
           break;
         case 'rarity':
           valueA = getRarityValue(a.steamData.rarity || '');
           valueB = getRarityValue(b.steamData.rarity || '');
           break;
         case 'float':
-          const conversionBuffer = new ArrayBuffer(4);
-          const conversionView = new DataView(conversionBuffer);
-          function uint32ToFloat32(uint32Value) {
-            conversionView.setUint32(0, uint32Value);
-            return conversionView.getFloat32(0);
+          valueA = getItemFloat(a);
+          valueB = getItemFloat(b);
+          // Items without a float sink to the end in both directions
+          if (valueA === null || valueB === null) {
+            if (valueA === valueB) return 0;
+            return valueA === null ? 1 : -1;
           }
-          valueA = a.detailedData && a.detailedData.paintwear ? uint32ToFloat32(a.detailedData.paintwear) : 999;
-          valueB = b.detailedData && b.detailedData.paintwear ? uint32ToFloat32(b.detailedData.paintwear) : 999;
           break;
         case 'date':
         default:
@@ -215,6 +235,42 @@ describe('Inventory Item Sorting', () => {
     expect(sorted[1].steamData.name).toBe('Beta Gun');
     expect(sorted[2].steamData.name).toBe('Zebra Gun');
   });
+
+  test('name sort should ignore ★/StatTrak™/Souvenir prefixes', () => {
+    const items = [
+      { originalIndex: 0, steamData: { name: 'StatTrak™ AK-47 | Redline' }, detailedData: null },
+      { originalIndex: 1, steamData: { name: 'M4A1-S | Hyper Beast' }, detailedData: null },
+      { originalIndex: 2, steamData: { name: '★ Bayonet | Fade' }, detailedData: null },
+      { originalIndex: 3, steamData: { name: 'Souvenir AWP | Safari Mesh' }, detailedData: null }
+    ];
+
+    const sorted = sortItems(items, 'name', 'asc');
+
+    expect(sorted.map(i => i.steamData.name)).toEqual([
+      'StatTrak™ AK-47 | Redline', // A
+      'Souvenir AWP | Safari Mesh', // A
+      '★ Bayonet | Fade',           // B
+      'M4A1-S | Hyper Beast'        // M
+    ]);
+  });
+
+  test('float sort should sink items without a float in both directions', () => {
+    const items = [
+      { originalIndex: 0, steamData: { name: 'Mid' }, detailedData: { paintindex: 44, paintwear: 1036831949 } },  // 0.1
+      { originalIndex: 1, steamData: { name: 'Unanalyzed' }, detailedData: null },
+      { originalIndex: 2, steamData: { name: 'High' }, detailedData: { paintindex: 44, paintwear: 1060320051 } }, // 0.7
+      { originalIndex: 3, steamData: { name: 'Medal' }, detailedData: { paintindex: 0, paintwear: 0 } },
+      { originalIndex: 4, steamData: { name: 'Zero' }, detailedData: { paintindex: 44, paintwear: 0 } }           // true 0.0
+    ];
+
+    const asc = sortItems(items, 'float', 'asc').map(i => i.steamData.name);
+    expect(asc.slice(0, 3)).toEqual(['Zero', 'Mid', 'High']);
+    expect(asc.slice(3).sort()).toEqual(['Medal', 'Unanalyzed']);
+
+    const desc = sortItems(items, 'float', 'desc').map(i => i.steamData.name);
+    expect(desc.slice(0, 3)).toEqual(['High', 'Mid', 'Zero']);
+    expect(desc.slice(3).sort()).toEqual(['Medal', 'Unanalyzed']);
+  });
 });
 
 describe('Inventory Filtering', () => {
@@ -269,15 +325,18 @@ describe('Inventory Filtering', () => {
         return false;
       }
 
-      // Float range filter
-      if ((filters.floatMin !== null || filters.floatMax !== null) &&
-          item.detailedData && item.detailedData.paintwear) {
-        const itemFloat = uint32ToFloat32(item.detailedData.paintwear);
-        if (filters.floatMin !== null && itemFloat < filters.floatMin) {
-          return false;
-        }
-        if (filters.floatMax !== null && itemFloat > filters.floatMax) {
-          return false;
+      // Float range filter. Items without a float (unanalyzed, paint-less) pass through.
+      if (filters.floatMin !== null || filters.floatMax !== null) {
+        const hasFloat = item.detailedData && item.detailedData.paintwear != null &&
+                         Number(item.detailedData.paintindex) !== 0;
+        const itemFloat = hasFloat ? uint32ToFloat32(item.detailedData.paintwear) : null;
+        if (itemFloat !== null) {
+          if (filters.floatMin !== null && itemFloat < filters.floatMin) {
+            return false;
+          }
+          if (filters.floatMax !== null && itemFloat > filters.floatMax) {
+            return false;
+          }
         }
       }
 

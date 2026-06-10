@@ -748,6 +748,27 @@ function normalizeSearchText(text) {
     .trim();
 }
 
+// Sort key for name sorting: drop the provenance prefixes (★, StatTrak™, Souvenir) so
+// e.g. a StatTrak™ AK-47 sorts under A with the other AK-47s, not under S.
+function nameSortKey(steamData) {
+  return (steamData.name || '')
+    .replace(/^★\s*/, '')
+    .replace(/^StatTrak™\s*/, '')
+    .replace(/^Souvenir\s+/, '')
+    .toLowerCase();
+}
+
+// The item's float, or null when it doesn't have one: unanalyzed items, and paint-less
+// items (medals, coins, music kits, ...; paintindex 0) whose paintwear of 0 from the GC
+// is not a real float.
+function getItemFloat(item) {
+  if (!item.detailedData || item.detailedData.paintwear == null ||
+      Number(item.detailedData.paintindex) === 0) {
+    return null;
+  }
+  return uint32ToFloat32(item.detailedData.paintwear);
+}
+
 function matchesSearch(item, normalizedQuery) {
   if (!normalizedQuery) return true;
   if (item.searchText === undefined) {
@@ -958,16 +979,24 @@ function sortItems(items, field, order) {
     
     switch (field) {
       case 'name':
-        valueA = (a.steamData.name || '').toLowerCase();
-        valueB = (b.steamData.name || '').toLowerCase();
+        if (a.nameSortKey === undefined) a.nameSortKey = nameSortKey(a.steamData);
+        if (b.nameSortKey === undefined) b.nameSortKey = nameSortKey(b.steamData);
+        valueA = a.nameSortKey;
+        valueB = b.nameSortKey;
         break;
       case 'rarity':
         valueA = getRarityValue(a.steamData.rarity || '');
         valueB = getRarityValue(b.steamData.rarity || '');
         break;
       case 'float':
-        valueA = a.detailedData && a.detailedData.paintwear ? uint32ToFloat32(a.detailedData.paintwear) : 999;
-        valueB = b.detailedData && b.detailedData.paintwear ? uint32ToFloat32(b.detailedData.paintwear) : 999;
+        valueA = getItemFloat(a);
+        valueB = getItemFloat(b);
+        // Items without a float sink to the end in both directions; they'd otherwise
+        // lead the descending sort on a sentinel value.
+        if (valueA === null || valueB === null) {
+          if (valueA === valueB) return 0;
+          return valueA === null ? 1 : -1;
+        }
         break;
       case 'date':
       default:
@@ -1088,15 +1117,16 @@ function filterItems(items) {
       return false;
     }
     
-    // Float range filter
-    if ((currentFilters.floatMin !== null || currentFilters.floatMax !== null) && 
-        item.detailedData && item.detailedData.paintwear) {
-      const itemFloat = uint32ToFloat32(item.detailedData.paintwear);
-      if (currentFilters.floatMin !== null && itemFloat < currentFilters.floatMin) {
-        return false;
-      }
-      if (currentFilters.floatMax !== null && itemFloat > currentFilters.floatMax) {
-        return false;
+    // Float range filter. Items without a float (unanalyzed, paint-less) pass through.
+    if (currentFilters.floatMin !== null || currentFilters.floatMax !== null) {
+      const itemFloat = getItemFloat(item);
+      if (itemFloat !== null) {
+        if (currentFilters.floatMin !== null && itemFloat < currentFilters.floatMin) {
+          return false;
+        }
+        if (currentFilters.floatMax !== null && itemFloat > currentFilters.floatMax) {
+          return false;
+        }
       }
     }
     
