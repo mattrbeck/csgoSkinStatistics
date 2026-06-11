@@ -1564,7 +1564,11 @@ namespace CSGOSkinAPI.Services
 
         public ItemInformation GetItemInformation(CEconItemPreviewDataBlock item)
         {
-            var weaponType = GetWeaponName(item.defindex);
+            // Paint-less items (passes, some medals, ...) reuse this lookup for their
+            // display name, but gaps are expected for types the community data doesn't
+            // cover and the frontend shows Steam's own name for them anyway. Only a
+            // skinned weapon's absence is a signal that const.json needs regenerating.
+            var weaponType = GetWeaponName(item.defindex, warnIfMissing: item.paintindex != 0);
             var pattern = GetPatternName(item.paintindex);
             var paintseed = (int)item.paintseed;
             var paintindex = (int)item.paintindex;
@@ -1641,14 +1645,17 @@ namespace CSGOSkinAPI.Services
             return scaledFadePercent;
         }
 
-        private string GetWeaponName(uint defIndex)
+        private string GetWeaponName(uint defIndex, bool warnIfMissing = true)
         {
             if (_constData.Items?.TryGetValue(defIndex.ToString(), out var weapon) == true)
             {
                 return weapon;
             }
 
-            Console.WriteLine($"Item {defIndex} is missing from constants");
+            if (warnIfMissing)
+            {
+                Console.WriteLine($"Item {defIndex} is missing from constants");
+            }
             return "";
         }
 
