@@ -534,6 +534,10 @@ inventory-item {
 @media (width <= 1024px) {
   #main-layout {
     flex-direction: column;
+    /* The base rule's align-items: flex-start is for the row layout; in a column it
+       would shrink-wrap children to their content width instead of filling the screen
+       (visible on inventories where every item name is short). */
+    align-items: stretch;
     max-width: none;
     padding: 0 15px;
   }
