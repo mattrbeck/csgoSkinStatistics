@@ -284,4 +284,56 @@ public class DatabaseServiceTests : IDisposable
         Assert.Equal(0u, stickers[0].slot);
         Assert.Equal(1u, stickers[1].slot);
     }
+
+    [Fact]
+    public async Task GetLastWarmAsync_UnknownSteamId_ReturnsNull()
+    {
+        await _databaseService.InitializeDatabaseAsync();
+
+        var lastWarmed = await _databaseService.GetLastWarmAsync(76561198000000001);
+
+        Assert.Null(lastWarmed);
+    }
+
+    [Fact]
+    public async Task RecordWarmAsync_RoundTripsUtcTimestamp()
+    {
+        await _databaseService.InitializeDatabaseAsync();
+        const ulong steamid = 76561198000000001;
+
+        var before = DateTime.UtcNow.AddSeconds(-1);
+        await _databaseService.RecordWarmAsync(steamid, 42);
+        var lastWarmed = await _databaseService.GetLastWarmAsync(steamid);
+        var after = DateTime.UtcNow.AddSeconds(1);
+
+        Assert.NotNull(lastWarmed);
+        Assert.Equal(DateTimeKind.Utc, lastWarmed.Value.Kind);
+        Assert.InRange(lastWarmed.Value, before, after);
+    }
+
+    [Fact]
+    public async Task RecordWarmAsync_SecondWarm_ReplacesRow()
+    {
+        await _databaseService.InitializeDatabaseAsync();
+        const ulong steamid = 76561198000000001;
+
+        await _databaseService.RecordWarmAsync(steamid, 0);
+        var firstWarm = await _databaseService.GetLastWarmAsync(steamid);
+        await Task.Delay(20);
+        await _databaseService.RecordWarmAsync(steamid, 196);
+        var secondWarm = await _databaseService.GetLastWarmAsync(steamid);
+
+        Assert.NotNull(firstWarm);
+        Assert.NotNull(secondWarm);
+        Assert.True(secondWarm > firstWarm);
+
+        // One row per steamid, holding the latest count
+        using var connection = new SqliteConnection($"Data Source={_testDbPath};foreign keys=true;");
+        await connection.OpenAsync();
+        var command = new SqliteCommand("SELECT COUNT(*), MAX(items_cached) FROM inventory_warms", connection);
+        using var reader = await command.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        Assert.Equal(1, reader.GetInt32(0));
+        Assert.Equal(196, reader.GetInt32(1));
+    }
 }

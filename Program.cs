@@ -6,6 +6,7 @@ using SteamKit2.GC.CSGO.Internal;
 using SteamKit2.Internal;
 using System.Collections.Concurrent;
 using System.Text.Json;
+using System.Threading.Channels;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using System.Web;
@@ -40,6 +41,10 @@ builder.Services.AddHttpClient("steam")
 builder.Services.AddSingleton<SteamService>();
 builder.Services.AddSingleton<DatabaseService>();
 builder.Services.AddSingleton<ConstDataService>();
+// Registered once and exposed both as itself (controllers enqueue into it) and as the
+// hosted service that drains the queue.
+builder.Services.AddSingleton<InventoryWarmService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<InventoryWarmService>());
 
 var app = builder.Build();
 
@@ -75,8 +80,11 @@ namespace CSGOSkinAPI.Controllers
 {
     [ApiController]
     [Route("api")]
-    public partial class SkinController(SteamService steamService, DatabaseService dbService, ConstDataService constDataService, IHttpClientFactory httpClientFactory) : ControllerBase
+    public partial class SkinController(SteamService steamService, DatabaseService dbService, ConstDataService constDataService, IHttpClientFactory httpClientFactory, InventoryWarmService warmService) : ControllerBase
     {
+        // SteamID64 of the first individual account; anything below is not a profile id.
+        private const ulong MinSteamId64 = 76561197960265729;
+
         // Match on the command itself rather than the prefix, which changed from
         // the legacy "rungame/730/<steamid>/" to "run/730//" in March 2026.
         [GeneratedRegex(@"csgo_econ_action_preview ([SM])(\d+)A(\d+)D(\d+)", RegexOptions.Compiled)]
@@ -119,6 +127,17 @@ namespace CSGOSkinAPI.Controllers
                 if (existingItem != null)
                 {
                     return Ok(CreateResponse(existingItem, constDataService, s, a, d, m));
+                }
+
+                // A classic S-form link that missed the cache still goes through the GC below,
+                // but it also tells us whose inventory the wild link points into. Queue a
+                // background warm of that whole inventory (cert decode, no GC traffic) so
+                // follow-up lookups of the owner's other items become DB hits. M-form market
+                // links carry no owner id, so they can't be warmed.
+                if (s >= MinSteamId64)
+                {
+                    Console.WriteLine($"Cache miss for item {a}; queueing inventory warm for owner {s}");
+                    warmService.Enqueue(s);
                 }
 
                 var itemInfo = await steamService.GetItemInfoAsync(s, a, d, m);
@@ -227,15 +246,7 @@ namespace CSGOSkinAPI.Controllers
                         {
                             // Fill the template placeholders described above.
                             propsByAsset.TryGetValue(asset.assetid, out var assetProps);
-                            var inspectLink = Regex.Replace(inspectAction.link, @"%propid:(\d+)%", m =>
-                            {
-                                var pid = int.Parse(m.Groups[1].Value);
-                                var prop = assetProps?.FirstOrDefault(p => p.propertyid == pid);
-                                return prop?.string_value ?? prop?.int_value ?? prop?.float_value ?? m.Value;
-                            });
-                            inspectLink = inspectLink
-                                .Replace("%owner_steamid%", steamid)
-                                .Replace("%assetid%", asset.assetid);
+                            var inspectLink = BuildInspectLink(inspectAction.link, assetProps, steamid, asset.assetid);
 
                             // Extract wear, rarity, and item type from tags
                             var wearTag = description.tags?.FirstOrDefault(t => t.category == "Exterior");
@@ -502,7 +513,23 @@ namespace CSGOSkinAPI.Controllers
             return null;
         }
 
-        private static (ulong s, ulong a, ulong d, ulong m, CEconItemPreviewDataBlock? directItem)? ParseInspectUrl(string url)
+        // Fill the placeholders Steam leaves in a description-level inspect link template:
+        // %propid:N% with the value of this asset's property N (for skins, propid 6 is the
+        // item certificate), and %owner_steamid%/%assetid% with the copy's identity.
+        internal static string BuildInspectLink(string actionLink, List<SteamAssetProperty>? assetProps, string ownerSteamId, string assetId)
+        {
+            var link = Regex.Replace(actionLink, @"%propid:(\d+)%", m =>
+            {
+                var pid = int.Parse(m.Groups[1].Value);
+                var prop = assetProps?.FirstOrDefault(p => p.propertyid == pid);
+                return prop?.string_value ?? prop?.int_value ?? prop?.float_value ?? m.Value;
+            });
+            return link
+                .Replace("%owner_steamid%", ownerSteamId)
+                .Replace("%assetid%", assetId);
+        }
+
+        internal static (ulong s, ulong a, ulong d, ulong m, CEconItemPreviewDataBlock? directItem)? ParseInspectUrl(string url)
         {
             var decodedUrl = HttpUtility.UrlDecode(url);
             var match = InspectUrlRegex().Match(decodedUrl);
@@ -1169,6 +1196,18 @@ namespace CSGOSkinAPI.Services
                 using var indexCommand = new SqliteCommand(createIndexCommand, connection);
                 await indexCommand.ExecuteNonQueryAsync();
             }
+
+            // Log of background inventory warms (one row per owner steamid, refreshed on
+            // each warm). Doubles as the throttle that keeps a burst of cache misses for
+            // one owner from re-fetching their inventory over and over.
+            var createWarmsTableCommand = @"
+                CREATE TABLE IF NOT EXISTS inventory_warms (
+                    steamid INTEGER PRIMARY KEY NOT NULL,
+                    last_warmed TEXT NOT NULL,
+                    items_cached INTEGER NOT NULL
+                )";
+            using var warmsCommand = new SqliteCommand(createWarmsTableCommand, connection);
+            await warmsCommand.ExecuteNonQueryAsync();
         }
 
         public async Task<List<CEconItemPreviewDataBlock.Sticker>> GetStickersAsync(ulong itemId, bool stickersTable)
@@ -1371,6 +1410,140 @@ namespace CSGOSkinAPI.Services
                 insertCommand.Parameters.AddWithValue("@highlight_reel", item.ShouldSerializehighlight_reel() ? item.highlight_reel : DBNull.Value);
                 await insertCommand.ExecuteNonQueryAsync();
             }
+        }
+
+        public async Task<DateTime?> GetLastWarmAsync(ulong steamid)
+        {
+            using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync();
+
+            using var command = new SqliteCommand("SELECT last_warmed FROM inventory_warms WHERE steamid = @steamid", connection);
+            command.Parameters.AddWithValue("@steamid", (long)steamid);
+
+            var value = await command.ExecuteScalarAsync();
+            return value is string text
+                ? DateTime.Parse(text, null, System.Globalization.DateTimeStyles.RoundtripKind)
+                : null;
+        }
+
+        public async Task RecordWarmAsync(ulong steamid, int itemsCached)
+        {
+            using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync();
+
+            const string upsertQuery = @"INSERT OR REPLACE INTO inventory_warms
+                (steamid, last_warmed, items_cached)
+                VALUES (@steamid, @last_warmed, @items_cached)";
+            using var command = new SqliteCommand(upsertQuery, connection);
+            command.Parameters.AddWithValue("@steamid", (long)steamid);
+            command.Parameters.AddWithValue("@last_warmed", DateTime.UtcNow.ToString("o"));
+            command.Parameters.AddWithValue("@items_cached", itemsCached);
+            await command.ExecuteNonQueryAsync();
+        }
+    }
+
+    // Background cache warmer: when a single-item lookup misses the DB, the owner's whole
+    // inventory becomes interesting - wild inspect links tend to come in clusters from one
+    // inventory (trade threads, showcases). This fetches that inventory once, decodes each
+    // item's embedded certificate locally (see docs/inventory-endpoint-cert.md), and
+    // persists the results, so follow-up lookups become DB hits with zero GC traffic.
+    public class InventoryWarmService(IHttpClientFactory httpClientFactory, DatabaseService dbService) : BackgroundService
+    {
+        // One warm per owner per cooldown: a burst of misses for the same inventory should
+        // cost a single fetch, and a stale link whose item left the inventory will never
+        // become warmable no matter how often we retry.
+        private static readonly TimeSpan WarmCooldown = TimeSpan.FromHours(24);
+
+        // Drop-on-full keeps a flood of misses from queueing unbounded work; a dropped id
+        // re-enqueues naturally the next time one of its items misses the cache.
+        private readonly Channel<ulong> _queue = Channel.CreateBounded<ulong>(
+            new BoundedChannelOptions(256) { FullMode = BoundedChannelFullMode.DropWrite });
+
+        public void Enqueue(ulong steamid) => _queue.Writer.TryWrite(steamid);
+
+        protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+        {
+            // Serial on purpose: one steamcommunity.com fetch at a time stays well inside
+            // its rate limits, and guarantees a burst of misses for one owner resolves as
+            // one fetch (the first warm is recorded before the next dequeue checks the
+            // cooldown).
+            await foreach (var steamid in _queue.Reader.ReadAllAsync(stoppingToken))
+            {
+                try
+                {
+                    await WarmInventoryAsync(steamid, stoppingToken);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    Console.WriteLine($"Inventory warm for {steamid} failed: {ex.Message}");
+                }
+            }
+        }
+
+        private async Task WarmInventoryAsync(ulong steamid, CancellationToken cancellationToken)
+        {
+            var lastWarmed = await dbService.GetLastWarmAsync(steamid);
+            if (lastWarmed != null && DateTime.UtcNow - lastWarmed < WarmCooldown)
+            {
+                return;
+            }
+
+            // Log the attempt before fetching so failures (private inventory, rate limit)
+            // are throttled too instead of being retried on every subsequent miss.
+            await dbService.RecordWarmAsync(steamid, 0);
+
+            using var httpClient = httpClientFactory.CreateClient("steam");
+            httpClient.Timeout = TimeSpan.FromSeconds(10);
+            var response = await httpClient.GetAsync(
+                $"https://steamcommunity.com/inventory/{steamid}/730/2?l=english&count=2000", cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                Console.WriteLine($"Inventory warm for {steamid}: fetch failed with {response.StatusCode}");
+                return;
+            }
+
+            var inventoryData = JsonSerializer.Deserialize<SteamInventoryResponse>(
+                await response.Content.ReadAsStringAsync(cancellationToken));
+            if (inventoryData?.assets == null || inventoryData.descriptions == null)
+            {
+                Console.WriteLine($"Inventory warm for {steamid}: empty or invalid inventory");
+                return;
+            }
+
+            var propsByAsset = inventoryData.asset_properties?
+                .ToDictionary(ap => ap.assetid, ap => ap.asset_properties ?? [])
+                ?? [];
+
+            var cached = 0;
+            foreach (var asset in inventoryData.assets)
+            {
+                var description = inventoryData.descriptions.FirstOrDefault(d =>
+                    d.classid == asset.classid && d.instanceid == asset.instanceid);
+                var actionLink = description?.actions?.FirstOrDefault(a =>
+                    a.link?.Contains("csgo_econ_action_preview") == true)?.link;
+                if (actionLink == null)
+                {
+                    continue;
+                }
+
+                propsByAsset.TryGetValue(asset.assetid, out var assetProps);
+                var inspectLink = Controllers.SkinController.BuildInspectLink(
+                    actionLink, assetProps, steamid.ToString(), asset.assetid);
+
+                // Only certificate-bearing items decode locally (directItem != null);
+                // legacy S/A/D links parse but would need the GC, so they are skipped.
+                // SaveItemWithExtrasAsync additionally guards the itemid==0 non-paint
+                // types that cannot be keyed.
+                var directItem = Controllers.SkinController.ParseInspectUrl(inspectLink)?.directItem;
+                if (directItem != null && directItem.itemid != 0)
+                {
+                    await dbService.SaveItemWithExtrasAsync(directItem);
+                    cached++;
+                }
+            }
+
+            await dbService.RecordWarmAsync(steamid, cached);
+            Console.WriteLine($"Inventory warm for {steamid}: cached {cached} of {inventoryData.assets.Count} items");
         }
     }
 
