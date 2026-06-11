@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Rewrite;
 using Microsoft.Data.Sqlite;
 using SteamKit2;
 using SteamKit2.GC;
@@ -49,6 +50,9 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<InventoryWarmServi
 var app = builder.Build();
 
 app.UseResponseCompression();
+// Serve the inventory page at the clean /inventory URL.
+app.UseRewriter(new RewriteOptions()
+    .AddRewrite("^inventory$", "inventory.html", skipRemainingRules: true));
 app.UseDefaultFiles(); // Must be before UseStaticFiles
 app.UseStaticFiles();
 
