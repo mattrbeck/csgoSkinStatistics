@@ -268,8 +268,7 @@ input[type="text"] {
   border: none;
 }
 
-input[type="text"]:focus,
-input[type="radio"]:checked + label {
+input[type="text"]:focus {
   background: var(--light);
 }
 
