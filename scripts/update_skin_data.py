@@ -3,7 +3,9 @@
 # (community-maintained JSON regenerated from items_game.txt + localization files):
 #
 #   - const.json "skins"  (paint index -> skin name) - adds new paint kits, fixes renames
-#   - const.json "items"  (defindex   -> weapon name) - same, for weapons that have skins
+#   - const.json "items"  (defindex   -> item name) - weapons that have skins, plus
+#     collectibles (medals, coins, pins), crates/capsules, and keys, which all flow
+#     through the same defindex -> name lookup when an inventory is decoded
 #   - wwwroot/float-ranges.json (paint index -> [min_float, max_float]) - the wear range
 #     each paint kit can roll; the inventory page dims the unreachable parts of its
 #     float bars with this.
@@ -17,6 +19,13 @@ import urllib.error
 import urllib.request
 
 SOURCE = 'https://raw.githubusercontent.com/ByMykel/CSGO-API/main/public/api/en/skins.json'
+# Non-weapon items whose names the server also resolves by defindex. Each entry's id
+# has the form "<kind>-<defindex>" (e.g. "collectible-5270", "crate-4001").
+EXTRA_ITEM_SOURCES = [
+    'https://raw.githubusercontent.com/ByMykel/CSGO-API/main/public/api/en/collectibles.json',
+    'https://raw.githubusercontent.com/ByMykel/CSGO-API/main/public/api/en/crates.json',
+    'https://raw.githubusercontent.com/ByMykel/CSGO-API/main/public/api/en/keys.json',
+]
 CONST_PATH = 'const.json'
 RANGES_PATH = 'wwwroot/float-ranges.json'
 
@@ -39,12 +48,16 @@ def numeric_key_order(mapping):
                        key=lambda kv: (0, int(kv[0])) if kv[0].isdigit() else (1, 0)))
 
 
-try:
-    with urllib.request.urlopen(SOURCE) as response:
-        source_skins = json.load(response)
-except urllib.error.HTTPError as error:
-    print(f'Failed to fetch {SOURCE}: HTTP {error.code}', file=sys.stderr)
-    sys.exit(1)
+def fetch_json(url):
+    try:
+        with urllib.request.urlopen(url) as response:
+            return json.load(response)
+    except urllib.error.HTTPError as error:
+        print(f'Failed to fetch {url}: HTTP {error.code}', file=sys.stderr)
+        sys.exit(1)
+
+
+source_skins = fetch_json(SOURCE)
 print(f'Fetched {len(source_skins)} weapon-skin entries')
 
 with open(CONST_PATH, encoding='utf-8') as f:
@@ -78,6 +91,14 @@ if conflicts:
     # Has never happened in practice; a paint kit has one wear range by definition.
     print('WARNING: conflicting float ranges for paint indexes:\n  '
           + '\n  '.join(conflicts), file=sys.stderr)
+
+for source in EXTRA_ITEM_SOURCES:
+    entries = fetch_json(source)
+    print(f'Fetched {len(entries)} entries from {source.rsplit("/", 1)[-1]}')
+    for entry in entries:
+        defindex = (entry.get('id') or '').rsplit('-', 1)[-1]
+        if defindex.isdigit() and entry.get('name'):
+            merge(const_data['items'], defindex, entry['name'], 'item')
 
 const_data['skins'] = numeric_key_order(const_data['skins'])
 const_data['items'] = numeric_key_order(const_data['items'])
