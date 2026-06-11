@@ -44,7 +44,7 @@ jobs:
         fi
 
     - name: Run frontend tests
-      run: npm test -- --coverage --watchAll=false
+      run: npm test -- --watchAll=false
 
     - name: Run linting
       run: |
@@ -59,9 +59,7 @@ jobs:
       if: always()
       with:
         name: test-results
-        path: |
-          TestResults/
-          coverage/
+        path: TestResults/
 
   security-scan:
     runs-on: ubuntu-latest
