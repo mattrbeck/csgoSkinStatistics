@@ -1903,12 +1903,21 @@ window.addEventListener("load", function () {
     applySortAndFilter();
   });
 
-  // Attribute chips (★ / ST / Souvenir / Special) toggle independent boolean filters
+  // Attribute chips (★ / ST / Souvenir / Special) toggle independent boolean filters.
+  // StatTrak and Souvenir can't coexist on one item, so pressing one releases the
+  // other instead of leaving an empty intersection selected.
+  const exclusiveWith = { stattrak: 'souvenir', souvenir: 'stattrak' };
   elements.attrChips.forEach(chip => {
     chip.addEventListener("click", function() {
       const pressed = this.getAttribute("aria-pressed") !== "true";
       this.setAttribute("aria-pressed", String(pressed));
       currentFilters[this.dataset.attr] = pressed;
+      const other = pressed && exclusiveWith[this.dataset.attr];
+      if (other && currentFilters[other]) {
+        currentFilters[other] = false;
+        elements.attrChips.find(c => c.dataset.attr === other)
+          .setAttribute("aria-pressed", "false");
+      }
       applySortAndFilter();
     });
   });
