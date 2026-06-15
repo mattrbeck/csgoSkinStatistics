@@ -395,7 +395,11 @@ namespace CSGOSkinAPI.Controllers
                     avatar = profile.Avatar,
                     trade_ban_state = profile.TradeBanState,
                     limited_account = profile.LimitedAccount,
-                    profile_url = $"https://steamcommunity.com/profiles/{profile.SteamId}"
+                    // Prefer the vanity URL (/id/<vanity>) when the profile exposes one; Steam omits
+                    // customURL for some profiles, so fall back to the /profiles/<id64> form.
+                    profile_url = string.IsNullOrEmpty(profile.CustomUrl)
+                        ? $"https://steamcommunity.com/profiles/{profile.SteamId}"
+                        : $"https://steamcommunity.com/id/{profile.CustomUrl}"
                 });
             }
             catch (Exception ex)
