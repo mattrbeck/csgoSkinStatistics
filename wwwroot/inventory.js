@@ -1345,7 +1345,18 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
     // profile feed; the summary block is hidden until items load, so early/late arrival is fine.
     fetch(`/api/profile?steamid=${encodeURIComponent(userInput)}`, { signal: analysisController.signal })
       .then(r => r.json())
-      .then(profile => { if (profile && profile.success) updateProfileSummary(profile); })
+      .then(profile => {
+        if (!profile || !profile.success) return;
+        updateProfileSummary(profile);
+        // The profile endpoint is authoritative for the share hash: it returns the vanity name
+        // when the user has one, otherwise the SteamId64. This is the only place the hash is set.
+        if (profile.hash) {
+          const desiredHash = encodeURIComponent(profile.hash);
+          if (window.location.hash.substring(1) !== desiredHash) {
+            window.location.hash = desiredHash;
+          }
+        }
+      })
       .catch(() => { /* profile is non-critical; ignore failures and aborts */ });
 
     const response = await fetch(`/api/inventory?steamid=${encodeURIComponent(userInput)}`, {
@@ -1388,17 +1399,9 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
     }
 
     // Remember the owner id before rendering items: the cards use it to build their
-    // "view in Steam inventory" links.
+    // "view in Steam inventory" links. The share hash is set separately by the profile
+    // endpoint response, which is authoritative for it.
     currentOwnerSteamId = actualSteamId;
-
-    // Update the URL hash with the resolved SteamId64 if we have it and it's different from the input
-    if (actualSteamId && validateSteamId(actualSteamId)) {
-      // Only update hash if it's different from the current hash (to replace the URL-encoded input)
-      const currentHash = decodeURIComponent(window.location.hash.substring(1));
-      if (currentHash !== actualSteamId) {
-        window.location.hash = actualSteamId;
-      }
-    }
 
     // Show the inventory container and render all items immediately
     elements.inventoryContainer.style.display = 'block';
@@ -1708,9 +1711,7 @@ window.addEventListener("load", function () {
     // Extract SteamId64 if possible, otherwise let server handle resolution
     const extractedSteamId = extractSteamIdFromInput(userInput);
 
-    // Immediately set the hash to the user's input (URL encoded)
-    window.location.hash = encodeURIComponent(userInput);
-
+    // The hash is set by the profile endpoint response (authoritative), not on input.
     resetInterface();
     analyzeInventory(userInput, extractedSteamId);
   });

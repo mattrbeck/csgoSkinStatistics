@@ -388,6 +388,9 @@ namespace CSGOSkinAPI.Controllers
                 {
                     success = 1,
                     steamid = profile.SteamId.ToString(),
+                    // The canonical value for the location hash: prefer the vanity name when the
+                    // profile has one (friendlier, round-trips back to /id/<vanity>), else the id64.
+                    hash = string.IsNullOrEmpty(profile.CustomUrl) ? profile.SteamId.ToString() : profile.CustomUrl,
                     persona_name = profile.Persona,
                     avatar = profile.Avatar,
                     trade_ban_state = profile.TradeBanState,
@@ -478,6 +481,7 @@ namespace CSGOSkinAPI.Controllers
         private sealed class ProfileInfo
         {
             public ulong? SteamId { get; init; }
+            public string? CustomUrl { get; init; }
             public string? Persona { get; init; }
             public string? Avatar { get; init; }
             public string? TradeBanState { get; init; }
@@ -490,6 +494,8 @@ namespace CSGOSkinAPI.Controllers
         private static ProfileInfo ParseProfileXml(string xml)
         {
             var idMatch = Regex.Match(xml, @"<steamID64>(\d+)</steamID64>");
+            // customURL is the vanity name (e.g. "mattrb"); it's omitted when the user hasn't set one.
+            var customUrlMatch = Regex.Match(xml, @"<customURL><!\[CDATA\[(.*?)\]\]></customURL>", RegexOptions.Singleline);
             var nameMatch = Regex.Match(xml, @"<steamID><!\[CDATA\[(.*?)\]\]></steamID>", RegexOptions.Singleline);
             var avatarMatch = Regex.Match(xml, @"<avatarFull><!\[CDATA\[(.*?)\]\]></avatarFull>", RegexOptions.Singleline);
             // tradeBanState is "None"/"Probation"/"Banned"; isLimitedAccount is 0/1. Either one
@@ -500,6 +506,7 @@ namespace CSGOSkinAPI.Controllers
             return new ProfileInfo
             {
                 SteamId = idMatch.Success && ulong.TryParse(idMatch.Groups[1].Value, out var id) ? id : null,
+                CustomUrl = customUrlMatch.Success ? customUrlMatch.Groups[1].Value : null,
                 Persona = nameMatch.Success ? nameMatch.Groups[1].Value : null,
                 Avatar = avatarMatch.Success ? avatarMatch.Groups[1].Value : null,
                 TradeBanState = tradeBanMatch.Success ? tradeBanMatch.Groups[1].Value : null,
