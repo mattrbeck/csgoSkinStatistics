@@ -9,6 +9,10 @@
 #   - wwwroot/float-ranges.json (paint index -> [min_float, max_float]) - the wear range
 #     each paint kit can roll; the inventory page dims the unreachable parts of its
 #     float bars with this.
+#   - stickers.json (sticker/keychain id -> {name, image}) - the server loads this to
+#     name and illustrate the stickers and charms on each item, attaching the resolved
+#     name + image to every decal in the API response. The decoded item only carries the
+#     numeric sticker_id (and, for Sticker Slabs, a wrapped sticker id); this is the lookup.
 #
 # Run from the repo root: python3 scripts/update_skin_data.py
 # The script prints every change it makes; review the diff before committing.
@@ -28,6 +32,24 @@ EXTRA_ITEM_SOURCES = [
 ]
 CONST_PATH = 'const.json'
 RANGES_PATH = 'wwwroot/float-ranges.json'
+# Lives at the repo root next to const.json (loaded by the server), not under wwwroot:
+# the browser no longer downloads the whole catalog - the server resolves each decal and
+# sends only the handful of names/images an inventory actually uses.
+STICKERS_PATH = 'stickers.json'
+# Applied stickers and charms only carry a numeric kit id in the decoded item; resolve it
+# to a name + thumbnail here. Each entry is keyed by `def_index`, which is exactly the
+# `sticker_id` the Game Coordinator reports. The prefix is stripped because the thumbnail
+# already signals what kind of decal it is ("Sticker | Shooter" -> "Shooter").
+STICKER_SOURCES = [
+    ('stickers', 'Sticker | ',
+     'https://raw.githubusercontent.com/ByMykel/CSGO-API/main/public/api/en/stickers.json'),
+    ('keychains', 'Charm | ',
+     'https://raw.githubusercontent.com/ByMykel/CSGO-API/main/public/api/en/keychains.json'),
+]
+
+
+def strip_prefix(name, prefix):
+    return name[len(prefix):] if name.startswith(prefix) else name
 
 
 # Merge a key -> name map, reporting additions and renames. Game data wins on
@@ -110,3 +132,26 @@ with open(RANGES_PATH, 'w', encoding='utf-8') as f:
                        ensure_ascii=False, separators=(',', ':')) + '\n')
 print(f'Wrote {len(const_data["skins"])} skins / {len(const_data["items"])} items to {CONST_PATH}')
 print(f'Wrote {len(float_ranges)} float ranges to {RANGES_PATH}')
+
+# Rebuilt fresh each run (like the float ranges) rather than merged: the kit -> name/image
+# map is fully derived from the game files, so there is no local data to preserve.
+sticker_data = {}
+for group, prefix, url in STICKER_SOURCES:
+    entries = fetch_json(url)
+    print(f'Fetched {len(entries)} {group}')
+    mapping = {}
+    for entry in entries:
+        def_index = entry.get('def_index')
+        name = entry.get('name')
+        if def_index is None or not name:
+            continue
+        mapping[str(def_index)] = {
+            'name': strip_prefix(name, prefix),
+            'image': entry.get('image') or '',
+        }
+    sticker_data[group] = numeric_key_order(mapping)
+
+with open(STICKERS_PATH, 'w', encoding='utf-8') as f:
+    f.write(json.dumps(sticker_data, ensure_ascii=False, separators=(',', ':')) + '\n')
+print(f'Wrote {len(sticker_data["stickers"])} stickers / '
+      f'{len(sticker_data["keychains"])} keychains to {STICKERS_PATH}')

@@ -363,6 +363,81 @@ class InventoryItem extends HTMLElement {
         color: var(--gray, #1f2d3a);
       }
 
+      /* Applied stickers / charms: a compact thumbnail row that wraps if an item is
+         loaded out (max 5 stickers + a charm). Hidden entirely when the item has none. */
+      .item-stickers {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin-top: 8px;
+      }
+      .item-stickers[hidden] {
+        display: none;
+      }
+
+      .sticker-chip {
+        position: relative;
+        width: 28px;
+        height: 28px;
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 4px;
+        border: 1px solid var(--light, #2f3d4a);
+        background-color: var(--gray, #1f2d3a);
+      }
+
+      /* Charms get the accent border so they read as a different kind of decal even
+         though the prefix is stripped from their name. */
+      .sticker-chip.charm {
+        border-color: var(--pop, #2ecc71);
+      }
+
+      /* A Sticker Slab sits in the charm slot but shows a sealed sticker; its own accent
+         marks it as neither a plain sticker nor a plain charm. */
+      .sticker-chip.charm.slab {
+        border-color: #5e98d9;
+      }
+
+      .sticker-chip img {
+        max-width: 100%;
+        max-height: 100%;
+        display: block;
+      }
+
+      .sticker-chip.placeholder {
+        font-size: 13px;
+        font-weight: 700;
+        color: var(--text, #ecf0f1);
+        opacity: 0.5;
+      }
+
+      /* Name (and scrape level) on hover/focus, mirroring the float-bar tooltip so it is
+         reachable by tap and keyboard, not just mouse. */
+      .sticker-chip[data-label]::after {
+        content: attr(data-label);
+        position: absolute;
+        bottom: calc(100% + 6px);
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 3px 8px;
+        border-radius: 4px;
+        border: 1px solid var(--light, #2f3d4a);
+        background-color: var(--gray, #1f2d3a);
+        color: var(--text, #ecf0f1);
+        font-size: 11px;
+        font-weight: 600;
+        white-space: nowrap;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.1s ease;
+        z-index: 4;
+      }
+      .sticker-chip[data-label]:is(:hover, :focus)::after {
+        opacity: 1;
+      }
+
       @keyframes shimmer {
         0% { left: -100%; }
         25% { left: -100%; }
@@ -723,6 +798,71 @@ class InventoryItem extends HTMLElement {
     if (inspectElement) {
       inspectElement.href = inspectLink || '#';
     }
+
+    this.renderStickers(itemData);
+  }
+
+  // Applied stickers and charms, as a compact row of thumbnails. The server resolves each
+  // decal to {name, image} (and, for charms, a `slab` flag), so we render straight from the
+  // item response. Sort/filter re-creates cards and re-calls updateWithDetails, so this
+  // fully rebuilds the row each time.
+  renderStickers(itemData) {
+    const container = this.shadowRoot.querySelector('[data-field="stickers"]');
+    if (!container) return;
+
+    // `keychains` carries charms; both arrive in the same {sticker_id, wear, name, image}
+    // shape and render identically, just tagged so charms can be styled/labeled apart.
+    const decals = [
+      ...(itemData.stickers || []).map(s => ({ s, charm: false })),
+      ...(itemData.keychains || []).map(s => ({ s, charm: true })),
+    ];
+    if (decals.length === 0) {
+      container.replaceChildren();
+      container.hidden = true;
+      return;
+    }
+
+    const frag = document.createDocumentFragment();
+    for (const { s, charm } of decals) {
+      // A Sticker Slab is a charm that seals a sticker inside it; the server sends the
+      // sealed sticker's name/image and flags it, so we show the sticker but mark it.
+      const slab = !!s.slab;
+      const name = s.name || `${charm && !slab ? 'Charm' : 'Sticker'} #${slab ? s.wrapped_sticker : s.sticker_id}`;
+
+      const chip = document.createElement('span');
+      chip.className = charm ? 'sticker-chip charm' : 'sticker-chip';
+      if (slab) chip.classList.add('slab');
+      chip.tabIndex = 0;
+
+      // Stickers scrape (wear 0 = pristine .. 1 = nearly gone); charms and slabs don't.
+      // Surface the scrape level in the label and fade the thumbnail toward it, but never
+      // below legibility.
+      let label = slab ? `${name} · Slab` : name;
+      const wear = Number(s.wear) || 0;
+      const worn = !charm && wear > 0;
+      if (worn) label += ` · ${Math.round(wear * 100)}% worn`;
+      chip.dataset.label = label;
+      chip.setAttribute('aria-label', label);
+
+      if (s.image) {
+        const img = document.createElement('img');
+        img.src = s.image;
+        img.alt = name;
+        img.loading = 'lazy';
+        // Fade only the thumbnail toward its scraped state - not the chip, or the tooltip
+        // text (rendered via the chip's ::after) would dim along with it.
+        if (worn) img.style.opacity = String(1 - 0.6 * wear);
+        chip.appendChild(img);
+      } else {
+        // Unknown/new id the catalog predates: keep a labeled placeholder so the decal
+        // still shows and its name is reachable via the tooltip.
+        chip.classList.add('placeholder');
+        chip.textContent = '?';
+      }
+      frag.appendChild(chip);
+    }
+    container.replaceChildren(frag);
+    container.hidden = false;
   }
 }
 

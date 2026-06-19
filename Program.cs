@@ -620,36 +620,61 @@ namespace CSGOSkinAPI.Controllers
                 origin_name = itemInfo.OriginName,
                 paintwear_float = itemInfo.PaintWear,
                 is_knife_or_glove = itemInfo.IsKnifeOrGlove,
-                // Ordered array; `slot` is NOT unique — CS2 stacks multiple stickers in one
-                // slot (verified live), so consumers must iterate positionally, never key by slot.
-                stickers = item.stickers.Select(s => new
-                {
-                    s.slot,
-                    s.sticker_id,
-                    s.wear,
-                    s.scale,
-                    s.rotation,
-                    s.offset_x,
-                    s.offset_y,
-                    s.offset_z,
-                    s.pattern,
-                }).ToArray(),
-                keychains = item.keychains.Select(k => new
-                {
-                    k.slot,
-                    k.sticker_id,
-                    k.wear,
-                    k.scale,
-                    k.rotation,
-                    k.offset_x,
-                    k.offset_y,
-                    k.offset_z,
-                    k.pattern,
-                }).ToArray(),
+                // Ordered arrays; `slot` is NOT unique — CS2 stacks multiple stickers in one
+                // slot (verified live), so these stay positional. Each decal is resolved to its
+                // name + image here so the client renders straight from the response and never
+                // downloads the full catalog. Only `wear` (scrape level) travels alongside.
+                stickers = item.stickers.Select(s => MakeStickerDto(s, constDataService)).ToArray(),
+                keychains = item.keychains.Select(k => MakeKeychainDto(k, constDataService)).ToArray(),
                 s,
                 a,
                 d,
                 m
+            };
+        }
+
+        private static object MakeStickerDto(CEconItemPreviewDataBlock.Sticker s, ConstDataService constData)
+        {
+            var kit = constData.ResolveSticker(s.sticker_id);
+            return new
+            {
+                s.sticker_id,
+                s.wear,
+                name = kit?.Name ?? "",
+                image = kit?.Image ?? "",
+            };
+        }
+
+        // A charm, or a Sticker Slab. A slab is a single-use charm that seals a sticker inside
+        // it; the sealed sticker's id rides in proto field 12 (see StickerSlab). When present we
+        // display the sealed sticker (the slab container itself isn't in our keychain catalog)
+        // and flag it, so the client can mark it as a slab.
+        private static object MakeKeychainDto(CEconItemPreviewDataBlock.Sticker k, ConstDataService constData)
+        {
+            var wrapped = StickerSlab.GetWrappedStickerId(k);
+            if (wrapped != 0)
+            {
+                var sealedKit = constData.ResolveSticker(wrapped);
+                return new
+                {
+                    k.sticker_id,
+                    k.wear,
+                    name = sealedKit?.Name ?? "",
+                    image = sealedKit?.Image ?? "",
+                    slab = true,
+                    wrapped_sticker = wrapped,
+                };
+            }
+
+            var kit = constData.ResolveKeychain(k.sticker_id);
+            return new
+            {
+                k.sticker_id,
+                k.wear,
+                name = kit?.Name ?? "",
+                image = kit?.Image ?? "",
+                slab = false,
+                wrapped_sticker = 0u,
             };
         }
     }
@@ -657,6 +682,29 @@ namespace CSGOSkinAPI.Controllers
 
 namespace CSGOSkinAPI.Services
 {
+    // A Sticker Slab is a charm that seals a sticker inside it. The sealed sticker's id
+    // rides in the item proto's `wrapped_sticker` field (tag 12). SteamKit2 3.3.1 does not
+    // model that field, so protobuf-net keeps it as extension data - verified against a real
+    // applied slab (sticker_id=37 slab container, wrapped_sticker=4352 sealed sticker). The
+    // tag and its read/write live here so decode, persistence and cache-reload stay in lockstep.
+    //
+    // TODO: when a SteamKit2 bump models `wrapped_sticker` as a generated property, switch to
+    // it and delete the extension plumbing. Once the field is "known", Extensible.TryGetValue
+    // returns false for it, which would silently blank every slab - so this is a breaking bump
+    // to watch for (the StickerSlabTests pin the current extension behaviour).
+    public static class StickerSlab
+    {
+        private const int WrappedStickerTag = 12;
+
+        // Sealed sticker id for a slab, or 0 for an ordinary charm/sticker.
+        public static uint GetWrappedStickerId(CEconItemPreviewDataBlock.Sticker sticker)
+            => Extensible.TryGetValue<uint>(sticker, WrappedStickerTag, out var id) ? id : 0u;
+
+        // Re-attach a persisted slab id so a cache-reloaded keychain matches a fresh decode.
+        public static void SetWrappedStickerId(CEconItemPreviewDataBlock.Sticker sticker, uint id)
+            => Extensible.AppendValue<uint>(sticker, WrappedStickerTag, id);
+    }
+
     public class SteamAccountManager
     {
         public SteamClient Client { get; }
@@ -1201,11 +1249,26 @@ namespace CSGOSkinAPI.Services
                         offset_z REAL,
                         pattern INTEGER,
                         highlight_reel INTEGER,
+                        wrapped_sticker INTEGER,
                         FOREIGN KEY (itemid) REFERENCES searches(itemid) ON DELETE CASCADE
                 )";
 
                 using var stickersCommand = new SqliteCommand(createStickerTableCommand, connection);
                 await stickersCommand.ExecuteNonQueryAsync();
+
+                // wrapped_sticker (the Sticker Slab's sealed sticker id) was added after these
+                // tables shipped, so back-fill the column on pre-existing cache databases.
+                // SQLite has no "ADD COLUMN IF NOT EXISTS"; a duplicate column just no-ops.
+                try
+                {
+                    using var alterCommand = new SqliteCommand(
+                        $"ALTER TABLE {tableName} ADD COLUMN wrapped_sticker INTEGER", connection);
+                    await alterCommand.ExecuteNonQueryAsync();
+                }
+                catch (SqliteException)
+                {
+                    // Column already exists - nothing to migrate.
+                }
 
                 var createIndexCommand = @$"CREATE INDEX IF NOT EXISTS itemid on {tableName} (itemid)";
                 using var indexCommand = new SqliteCommand(createIndexCommand, connection);
@@ -1251,7 +1314,8 @@ namespace CSGOSkinAPI.Services
             var offsetZOrd = reader.GetOrdinal("offset_z");
             var patternOrd = reader.GetOrdinal("pattern");
             var highlightReelOrd = reader.GetOrdinal("highlight_reel");
-            
+            var wrappedStickerOrd = reader.GetOrdinal("wrapped_sticker");
+
             while (await reader.ReadAsync())
             {
                 var sticker = new CEconItemPreviewDataBlock.Sticker
@@ -1268,6 +1332,12 @@ namespace CSGOSkinAPI.Services
                 if (!reader.IsDBNull(offsetZOrd)) sticker.offset_z = reader.GetFloat(offsetZOrd);
                 if (!reader.IsDBNull(patternOrd)) sticker.pattern = (uint)reader.GetInt32(patternOrd);
                 if (!reader.IsDBNull(highlightReelOrd)) sticker.highlight_reel = (uint)reader.GetInt32(highlightReelOrd);
+                // Re-attach the Sticker Slab's sealed sticker id as proto field 12, so a cached
+                // slab looks identical to a freshly-decoded one and resolves the same way.
+                if (!reader.IsDBNull(wrappedStickerOrd))
+                {
+                    StickerSlab.SetWrappedStickerId(sticker, (uint)reader.GetInt32(wrappedStickerOrd));
+                }
                 stickers.Add(sticker);
             }
 
@@ -1401,8 +1471,8 @@ namespace CSGOSkinAPI.Services
         private static async Task SaveStickersAsync(ulong itemId, List<CEconItemPreviewDataBlock.Sticker> items, bool stickerTable, SqliteConnection connection, SqliteTransaction transaction)
         {
             const string insertSchema = @"
-                (itemid, slot, sticker_id, wear, scale, rotation, tint_id, offset_x, offset_y, offset_z, pattern, highlight_reel) VALUES
-                (@itemid, @slot, @sticker_id, @wear, @scale, @rotation, @tint_id, @offset_x, @offset_y, @offset_z, @pattern, @highlight_reel)";
+                (itemid, slot, sticker_id, wear, scale, rotation, tint_id, offset_x, offset_y, offset_z, pattern, highlight_reel, wrapped_sticker) VALUES
+                (@itemid, @slot, @sticker_id, @wear, @scale, @rotation, @tint_id, @offset_x, @offset_y, @offset_z, @pattern, @highlight_reel, @wrapped_sticker)";
             const string insertStickersQuery = @"INSERT INTO stickers " + insertSchema;
             const string insertKeychainsQuery = @"INSERT INTO keychains " + insertSchema;
 
@@ -1423,6 +1493,9 @@ namespace CSGOSkinAPI.Services
                 insertCommand.Parameters.AddWithValue("@offset_z", item.ShouldSerializeoffset_z() ? item.offset_z : DBNull.Value);
                 insertCommand.Parameters.AddWithValue("@pattern", item.ShouldSerializepattern() ? item.pattern : DBNull.Value);
                 insertCommand.Parameters.AddWithValue("@highlight_reel", item.ShouldSerializehighlight_reel() ? item.highlight_reel : DBNull.Value);
+                // Sticker Slab's sealed sticker id, carried in the unmodeled proto field 12.
+                var wrapped = StickerSlab.GetWrappedStickerId(item);
+                insertCommand.Parameters.AddWithValue("@wrapped_sticker", wrapped != 0 ? wrapped : DBNull.Value);
                 await insertCommand.ExecuteNonQueryAsync();
             }
         }
@@ -1570,12 +1643,26 @@ namespace CSGOSkinAPI.Services
         };
 
         private readonly ConstData _constData;
+        private readonly StickerCatalog _stickers;
 
         public ConstDataService()
         {
             var jsonString = File.ReadAllText("const.json");
             _constData = JsonSerializer.Deserialize<ConstData>(jsonString, JsonOptions) ?? new ConstData();
+
+            // sticker_id/keychain_id -> {name, image}, generated by scripts/update_skin_data.py.
+            // Missing is fine: a brand-new decal the catalog predates resolves to null and the
+            // frontend shows a labeled placeholder instead.
+            var stickerJson = File.ReadAllText("stickers.json");
+            _stickers = JsonSerializer.Deserialize<StickerCatalog>(stickerJson, JsonOptions) ?? new StickerCatalog();
         }
+
+        public StickerKit? ResolveSticker(uint stickerId) => Resolve(_stickers.Stickers, stickerId);
+
+        public StickerKit? ResolveKeychain(uint keychainId) => Resolve(_stickers.Keychains, keychainId);
+
+        private static StickerKit? Resolve(Dictionary<string, StickerKit>? map, uint id)
+            => map != null && map.TryGetValue(id.ToString(), out var kit) ? kit : null;
 
         public ItemInformation GetItemInformation(CEconItemPreviewDataBlock item)
         {
@@ -1784,6 +1871,20 @@ namespace CSGOSkinAPI.Models
         public Dictionary<string, string>? Origins { get; set; }
 
         public static readonly string[] FireIceNames = ["", "1st Max", "2nd Max", "3rd Max", "4th Max", "5th Max", "6th Max", "7th Max", "8th Max", "9th Max", "10th Max", "FFI"];
+    }
+
+    // stickers.json: two id -> {name, image} maps the server uses to resolve applied
+    // stickers and charms. Generated by scripts/update_skin_data.py from the game files.
+    public class StickerCatalog
+    {
+        public Dictionary<string, StickerKit>? Stickers { get; set; }
+        public Dictionary<string, StickerKit>? Keychains { get; set; }
+    }
+
+    public class StickerKit
+    {
+        public string Name { get; set; } = string.Empty;
+        public string Image { get; set; } = string.Empty;
     }
 
     public class SteamInventoryResponse
