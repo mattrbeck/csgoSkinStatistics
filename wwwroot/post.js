@@ -1,169 +1,222 @@
-let elements;
+let controls;
 // We post the full steam:// link: the server matches on the command within it,
 // and the "Inspect In Game" button reuses the same link to hand off to Steam.
 // This is the run/730// form Steam's own site now emits, which drops the old
 // dummy steamid the legacy rungame/<steamid> form required.
 const inspectPrefix = "steam://run/730//+csgo_econ_action_preview%20";
 
-function display(iteminfo, url, loadTime) {
-  stopLoading();
+// Paint-kit wear ranges (paint index -> [min, max]) used to dim the float bar's
+// unreachable ends. Fetched once; buildFloatBar tolerates it being null (no dimming).
+let floatRanges = null;
+fetch("float-ranges.json")
+  .then((r) => (r.ok ? r.json() : null))
+  .then((data) => { floatRanges = data; })
+  .catch(() => { /* cosmetic; the bar simply stays undimmed */ });
 
-  if (iteminfo.error) {
-    handleError(iteminfo.error);
-    return;
+// Session caches so a repeat search resurfaces an existing card instead of re-fetching:
+// by the exact search string (caught before any network call), and by the resolved asset
+// id (catches the same item reached via a different link form).
+const cardsByInput = new Map();
+const cardsByAssetId = new Map();
+
+// Move an already-rendered card back to the top of the stack, with a brief flash.
+function resurface(card) {
+  controls.cardOuter.prepend(card);
+  card.classList.remove("resurfaced");
+  void card.offsetWidth; // restart the flash animation if it's already played
+  card.classList.add("resurfaced");
+}
+
+// Fill a freshly-cloned card with one item's data. All lookups are scoped to the card so
+// many results can coexist on the page. Built as DOM nodes, never innerHTML: the names are
+// remote data.
+function populateCard(card, iteminfo, url, loadTime) {
+  card.classList.remove("loading");
+  const q = (sel) => card.querySelector(sel);
+
+  renderName(q(".card-name"), iteminfo);
+
+  // Color the card's left edge and the rarity label by Steam rarity tier.
+  const rarityColor = rarityColorOf(iteminfo.rarity_name);
+  card.style.borderLeftColor = rarityColor;
+  const rarity = q(".card-rarity");
+  rarity.textContent = iteminfo.rarity_name || "";
+  rarity.style.color = rarityColor;
+
+  // Paint-less items (medals, music kits, vanilla knives, ...) have no meaningful float or
+  // pattern seed, so drop those rows.
+  const hasSkin = Number(iteminfo.paintindex) > 0;
+  if (hasSkin && iteminfo.paintwear_float != null) {
+    const paintwear = Number(iteminfo.paintwear_float);
+    q(".card-float").textContent = iteminfo.paintwear_float;
+    q(".card-wear-pill").appendChild(buildWearPill(paintwear));
+    q(".card-float-bar-slot").appendChild(buildFloatBar(paintwear, Number(iteminfo.paintindex), floatRanges));
+  } else {
+    q(".card-float-line").style.display = "none";
+  }
+  q(".card-seed").style.display = hasSkin ? "" : "none";
+  q(".card-paintseed").textContent = iteminfo.paintseed;
+
+  // Secondary fields, always shown.
+  q(".card-wear").textContent = iteminfo.wear_name || "-";
+  q(".card-quality").textContent = iteminfo.quality_name || "-";
+  q(".card-origin").textContent = iteminfo.origin_name || "-";
+  q(".card-itemid").textContent = iteminfo.itemid == 0 ? "Unknown" : iteminfo.itemid;
+
+  // Skin image (server-resolved; "" for vanilla/unknown combos -> show the empty frame).
+  const img = q(".card-image");
+  if (iteminfo.image) {
+    img.src = iteminfo.image;
+    img.alt = `${iteminfo.weapon} | ${iteminfo.skin}`;
+    img.style.visibility = "";
+  } else {
+    img.removeAttribute("src");
+    img.style.visibility = "hidden";
   }
 
-  try {
-    // Built as DOM nodes, never innerHTML: these strings are remote data.
-    elements.itemName.textContent = `${iteminfo.weapon} | ${iteminfo.skin} `;
-    if (iteminfo.special) {
-      const special = document.createElement("span");
-      special.className = "pop";
-      special.textContent = iteminfo.special;
-      elements.itemName.appendChild(special);
-    }
-    elements.itemName.classList.remove("knife", "souvenir", "genuine", "vintage", "valve", "selfmade");
-    
-    if (iteminfo.is_knife_or_glove) {
-      elements.itemName.classList.add("knife");
-    }
-    // Handle special qualities
-    if (iteminfo.quality === 1) {
-      elements.itemName.classList.add("genuine");
-    } else if (iteminfo.quality === 2) {
-      elements.itemName.classList.add("vintage");
-    } else if (iteminfo.quality === 6) {
-      elements.itemName.classList.add("valve");
-    } else if (iteminfo.quality === 7) {
-      elements.itemName.classList.add("selfmade");
-    } else if (iteminfo.souvenir) {
-      elements.itemName.classList.add("souvenir");
-    }
-    
-    elements.itemPaintwear.textContent = iteminfo.paintwear_float;
-    elements.itemWear.textContent = iteminfo.wear_name;
-    elements.itemRarity.textContent = iteminfo.rarity_name;
-    if (iteminfo.itemid == 0) {
-      elements.itemItemid.textContent = "Unknown";
-    } else {
-      elements.itemItemid.textContent = iteminfo.itemid;
-    }
-    elements.itemPaintseed.textContent = iteminfo.paintseed;
-    elements.itemOrigin.textContent = iteminfo.origin_name;
-    elements.itemQuality.textContent = iteminfo.quality_name;
-    elements.status.textContent = `Loaded in ${loadTime} seconds`;
-    elements.stattrakIndicator.classList.remove("yes");
-    if (iteminfo.stattrak) {
-      elements.stattrakIndicator.classList.add("yes");
-    }
-    elements.inspectButton.href = url;
-  } catch (e) {
-    handleError("An error occurred while displaying the item data");
-    throw e;
+  // Applied stickers / charms / slabs (shared with the inventory card).
+  const hasDecals = (iteminfo.stickers || []).length > 0 || (iteminfo.keychains || []).length > 0;
+  const stickers = q(".item-stickers");
+  stickers.replaceChildren(hasDecals ? buildStickerChips(iteminfo.stickers, iteminfo.keychains) : "");
+  stickers.style.display = hasDecals ? "" : "none";
+
+  q(".card-inspect").href = url;
+  q(".card-loadtime").textContent = `Loaded in ${loadTime} seconds`;
+}
+
+// "Weapon | Skin", with the special-pattern note (fade %, Ruby, tier, ...), a StatTrak
+// badge, and the quality/knife styling.
+function renderName(nameEl, iteminfo) {
+  nameEl.className = "card-name";
+  nameEl.textContent = `${iteminfo.weapon} | ${iteminfo.skin}`;
+
+  if (iteminfo.is_knife_or_glove) {
+    nameEl.classList.add("knife");
+  }
+  if (iteminfo.quality === 1) {
+    nameEl.classList.add("genuine");
+  } else if (iteminfo.quality === 2) {
+    nameEl.classList.add("vintage");
+  } else if (iteminfo.quality === 6) {
+    nameEl.classList.add("valve");
+  } else if (iteminfo.quality === 7) {
+    nameEl.classList.add("selfmade");
+  } else if (iteminfo.souvenir) {
+    nameEl.classList.add("souvenir");
+  }
+
+  if (iteminfo.special) {
+    const special = document.createElement("span");
+    special.className = "item-special";
+    special.textContent = iteminfo.special;
+    nameEl.appendChild(special);
+  }
+  if (iteminfo.stattrak) {
+    const badge = document.createElement("span");
+    badge.className = "stattrak-badge";
+    badge.textContent = "ST";
+    nameEl.appendChild(badge);
   }
 }
 
-function resetFields() {
-  elements.itemName.textContent = "-";
-  elements.itemName.classList.remove("knife", "souvenir", "genuine", "vintage", "valve", "selfmade");
-  elements.itemPaintwear.textContent = "-";
-  elements.itemWear.textContent = "-";
-  elements.itemRarity.textContent = "-";
-  elements.itemItemid.textContent = "-";
-  elements.itemPaintseed.textContent = "-";
-  elements.itemOrigin.textContent = "-";
-  elements.itemQuality.textContent = "-";
-  elements.status.textContent = "";
-  elements.stattrakIndicator.classList.remove("yes");
-  elements.inspectButton.href = "#";
-  elements.errorDisplay.style.display = "none";
-}
-
-function startLoading() {
-  elements.itemName.parentElement.classList.add("loading");
-  elements.itemPaintwear.parentElement.classList.add("loading");
-  elements.itemWear.parentElement.classList.add("loading");
-  elements.itemRarity.parentElement.classList.add("loading");
-  elements.itemItemid.parentElement.classList.add("loading");
-  elements.itemPaintseed.parentElement.classList.add("loading");
-  elements.itemOrigin.parentElement.classList.add("loading");
-  elements.itemQuality.parentElement.classList.add("loading");
-}
-
-function stopLoading() {
-  elements.itemName.parentElement.classList.remove("loading");
-  elements.itemPaintwear.parentElement.classList.remove("loading");
-  elements.itemWear.parentElement.classList.remove("loading");
-  elements.itemRarity.parentElement.classList.remove("loading");
-  elements.itemItemid.parentElement.classList.remove("loading");
-  elements.itemPaintseed.parentElement.classList.remove("loading");
-  elements.itemOrigin.parentElement.classList.remove("loading");
-  elements.itemQuality.parentElement.classList.remove("loading");
-}
-
-function handleError(errorMessage) {
-  resetFields();
+function showError(errorMessage) {
   // textContent, not innerHTML: the message can echo server-provided strings
-  elements.errorDisplay.textContent = errorMessage;
-  elements.errorDisplay.style.display = "block";
+  controls.errorDisplay.textContent = errorMessage;
+  controls.errorDisplay.style.display = "block";
 }
 
 window.addEventListener("load", function () {
-  elements = {
-    itemName: document.getElementById("item_name"),
-    itemPaintwear: document.getElementById("item_paintwear"),
-    itemWear: document.getElementById("item_wear"),
-    itemRarity: document.getElementById("item_rarity"),
-    itemItemid: document.getElementById("item_itemid"),
-    itemPaintseed: document.getElementById("item_paintseed"),
-    itemOrigin: document.getElementById("item_origin"),
-    itemQuality: document.getElementById("item_quality"),
-    status: document.getElementById("status"),
-    stattrakIndicator: document.getElementById("stattrak-indicator"),
-    inspectButton: document.getElementById("inspect-button"),
+  controls = {
+    cardOuter: document.getElementById("item-card-outer"),
+    template: document.getElementById("item-card-template"),
     textbox: document.getElementById("textbox"),
     button: document.getElementById("button"),
     errorDisplay: document.getElementById("error-display"),
   };
 
-  elements.textbox.addEventListener("keydown", function (event) {
+  controls.textbox.addEventListener("keydown", function (event) {
     if (event.code === "Enter") {
       event.preventDefault();
-      elements.button.click();
+      controls.button.click();
     }
   });
 
-  elements.button.addEventListener("click", function (element) {
+  controls.button.addEventListener("click", function (element) {
     element.target.blur();
 
-    const input = elements.textbox.value;
+    const input = controls.textbox.value;
     // Strip either the legacy (rungame/<steamid>) or new (run/730//) prefix.
     const reduced = input
       .replace(/^.*csgo_econ_action_preview(%20|\s+)/i, "")
       .trim();
     if (/^[SM]\d+A\d+D\d+$/.test(reduced) || /^[0-9A-F]+$/.test(reduced)) {
-      elements.textbox.value = reduced;
       window.location.hash = reduced;
-      resetFields();
-      post(inspectPrefix + reduced);
+      post(inspectPrefix + reduced, reduced);
+      controls.textbox.value = ""; // clear on search, like the inventory page
     } else {
-      elements.textbox.value = "Not a valid inspect link";
+      controls.textbox.value = "Not a valid inspect link";
     }
   });
 
   if (window.location.hash) {
     const hashURL = window.location.hash.substring(1);
-    elements.textbox.value = hashURL;
-    elements.button.click();
+    controls.textbox.value = hashURL;
+    controls.button.click();
   }
 });
 
-function post(url) {
-  startLoading();
+// Each search adds a card above the previous results rather than replacing them. A loading
+// card goes up immediately; the response fills it in, or drops it and surfaces the error.
+// Repeat searches resurface the existing card with no network request.
+function post(url, key) {
+  controls.errorDisplay.style.display = "none";
+
+  const seen = cardsByInput.get(key);
+  if (seen && seen.isConnected) {
+    resurface(seen);
+    return;
+  }
+
+  const card = controls.template.content.firstElementChild.cloneNode(true);
+  controls.cardOuter.prepend(card);
+  cardsByInput.set(key, card);
+
   const start = performance.now();
   fetch(`/api?${new URLSearchParams({url})}`)
     .then((response) => response.json())
-    .then((iteminfo) =>
-      display(iteminfo, url, ((performance.now() - start) / 1000).toFixed(2))
-    );
+    .then((iteminfo) => {
+      if (iteminfo.error) {
+        card.remove();
+        cardsByInput.delete(key);
+        showError(iteminfo.error);
+        return;
+      }
+
+      // Same item reached via a different link form: drop the fresh card and resurface the
+      // one already on the page, pointing this search at it too.
+      const assetId = String(iteminfo.a || iteminfo.itemid || "");
+      const twin = assetId && cardsByAssetId.get(assetId);
+      if (twin && twin !== card && twin.isConnected) {
+        card.remove();
+        cardsByInput.set(key, twin);
+        resurface(twin);
+        return;
+      }
+
+      const loadTime = ((performance.now() - start) / 1000).toFixed(2);
+      try {
+        populateCard(card, iteminfo, url, loadTime);
+        if (assetId) cardsByAssetId.set(assetId, card);
+      } catch (e) {
+        card.remove();
+        cardsByInput.delete(key);
+        showError("An error occurred while displaying the item data");
+        throw e;
+      }
+    })
+    .catch(() => {
+      card.remove();
+      cardsByInput.delete(key);
+      showError("Failed to load item details");
+    });
 }

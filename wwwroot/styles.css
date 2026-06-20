@@ -14,10 +14,6 @@
   --selfmade: #70B04A;   /* Self-Made - Bright Green */
 }
 
-.pop {
-  color: var(--pop);
-}
-
 body {
   overflow-x: hidden;
   position: relative;
@@ -51,74 +47,167 @@ html {
 }
 
 
-#info-container-outer {
+/* Item page: each search adds a card (mirroring an inventory grid item, plus the extra
+   wear/quality/origin/id fields) to this stack, newest on top. */
+#item-card-outer {
   display: flex;
   flex-direction: column;
   align-items: center;
+  gap: 14px;
+  padding: 0 12px 24px;
 }
 
-#info-container {
-  max-width: 660px;
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-}
-
-.info_item {
-  text-align: center;
-  width: 300px;
-  margin: 4px;
-}
-
-.item_title {
-  margin: 0 auto;
-  padding: 4px;
-}
-
-.item_desc {
+/* Image top-left, data on the right, inspect button along the bottom (full width so it
+   doesn't strand a gap when the data column is taller than the image). On narrow screens
+   the three areas stack: image, then data, then the inspect button. */
+.item-card {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  grid-template-areas:
+    "media body"
+    "inspect inspect";
+  gap: 12px 18px;
+  align-items: start;
+  width: min(620px, 100%);
+  padding: 18px;
+  border-radius: 8px;
+  border-left: 4px solid var(--light);
   background-color: var(--dark);
-  border-radius: 4px;
-  position: relative;
+  transition: opacity 0.3s ease;
+}
 
-  &:has(> p) {
-    overflow: hidden;
+.item-card.loading {
+  opacity: 0.5;
+}
 
-    &.loading::before {
-      content: "";
-      position: absolute;
-      left: -100%;
-      width: 100%;
-      height: 100%;
-      background: linear-gradient(90deg, transparent, var(--light), transparent);
-      animation: shimmer 2s infinite;
-    }
+/* Brief highlight when a repeat search moves an existing card back to the top. */
+.item-card.resurfaced {
+  animation: resurface-flash 0.7s ease;
+}
+
+@keyframes resurface-flash {
+  from {
+    box-shadow: 0 0 0 2px var(--pop);
+  }
+
+  to {
+    box-shadow: 0 0 0 2px transparent;
   }
 }
 
-.item_desc > p {
-  margin: 0 auto;
-  padding: 4px;
+.card-image-frame {
+  grid-area: media;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 150px;
+  border-radius: 4px;
+  background-color: var(--gray);
 }
 
-.item_desc:hover {
-  animation: text-pop 0.5s forwards;
+.card-image {
+  max-width: 100%;
+  max-height: 100%;
 }
 
-.item_desc:not(:hover) {
-  animation: pop-text 0.5s forwards;
+.card-body {
+  grid-area: body;
+  min-width: 0;
 }
 
-#stattrak-indicator {
-  position: absolute;
-  top: 0;
-  left: -12px;
-  max-height: 0;
-  transition: all 0.5s;
+.card-name {
+  margin-bottom: 12px;
+  color: var(--text);
+  font-size: 18px;
+  font-weight: bold;
+  word-wrap: break-word;
 }
 
-#stattrak-indicator.yes {
-  max-height: 28px;
-  top: -14px;
+.item-special {
+  margin-left: 6px;
+  color: var(--pop);
+  font-weight: bold;
+}
+
+.stattrak-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background-color: var(--pop);
+  color: var(--gray);
+  font-size: 11px;
+  font-weight: bold;
+  vertical-align: middle;
+}
+
+.card-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 22px;
+  margin-bottom: 10px;
+}
+
+.card-float {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.card-muted {
+  opacity: 0.6;
+}
+
+/* "Pattern" matches the inventory page's label; the help cursor + title hint at the
+   technical name (paint seed). */
+.card-help {
+  cursor: help;
+}
+
+.card-pattern-line {
+  font-size: 14px;
+}
+
+.card-rarity {
+  margin-left: auto;
+  font-weight: 600;
+}
+
+.card-meta {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px 16px;
+  margin: 14px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--light);
+  font-size: 13px;
+}
+
+.card-meta > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.card-meta dt {
+  opacity: 0.6;
+}
+
+.card-meta dd {
+  margin: 0;
+  color: var(--text);
+  text-align: right;
+  word-break: break-all;
+}
+
+.card-loadtime {
+  margin-top: 10px;
+  font-size: 11px;
+  opacity: 0.4;
+}
+
+.card-loadtime:empty {
+  display: none;
 }
 
 .knife::before {
@@ -150,6 +239,162 @@ html {
 .selfmade::before {
   content: "Self-Made  ";
   color: var(--selfmade);
+}
+
+/* Float bar, wear pill, and decal chips are shared with the inventory card (decals.js
+   builds the DOM; the inventory component keeps its own copy of this CSS in its shadow
+   root). The bar stretches into the float line via this slot. */
+.card-float-bar-slot {
+  display: flex;
+  flex: 1;
+}
+
+.wear-pill {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border: 1px solid currentcolor;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: bold;
+  line-height: 1.3;
+}
+
+.wear-pill.fn { color: #2ecc71; }
+.wear-pill.mw { color: #82c91e; }
+.wear-pill.ft { color: #f1c40f; }
+.wear-pill.ww { color: #e67e22; }
+.wear-pill.bs { color: #e74c3c; }
+
+/* 0-1 float scale with the five wear zones; the marker shows where this item sits. */
+.float-bar {
+  position: relative;
+  flex: 1;
+  min-width: 36px;
+  height: 6px;
+  border-radius: 3px;
+  opacity: 0.9;
+  background: linear-gradient(90deg,
+    #2ecc71 0 7%, #82c91e 7% 15%, #f1c40f 15% 38%, #e67e22 38% 45%, #e74c3c 45% 100%);
+}
+
+/* Invisible halo so the thin bar doesn't demand pixel-perfect hovering for its tooltip. */
+.float-bar::after {
+  content: "";
+  position: absolute;
+  inset: -7px 0;
+}
+
+/* The skin's possible wear range, shown on hover/focus. */
+.float-bar[data-range]::before {
+  content: attr(data-range);
+  position: absolute;
+  bottom: calc(100% + 7px);
+  left: 50%;
+  padding: 3px 8px;
+  transform: translateX(-50%);
+  border: 1px solid var(--light);
+  border-radius: 4px;
+  background-color: var(--gray);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+  pointer-events: none;
+  z-index: 3;
+}
+
+.float-bar[data-range]:is(:hover, :focus)::before {
+  opacity: 1;
+}
+
+.float-bar-dim {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  background-color: rgb(15 29 42 / 70%);
+}
+
+.float-bar-dim:first-child {
+  left: 0;
+  border-radius: 3px 0 0 3px;
+}
+
+.float-bar-dim:nth-child(2) {
+  right: 0;
+  border-radius: 0 3px 3px 0;
+}
+
+.float-marker {
+  position: absolute;
+  top: -3px;
+  width: 2px;
+  height: 12px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background-color: var(--text);
+}
+
+/* Applied stickers / charms / slabs. */
+.item-stickers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 4px 0 2px;
+}
+
+.sticker-chip {
+  position: relative;
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--light);
+  border-radius: 4px;
+  background-color: var(--gray);
+}
+
+.sticker-chip.charm { border-color: var(--pop); }
+.sticker-chip.charm.slab { border-color: #5e98d9; }
+
+.sticker-chip img {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.sticker-chip.placeholder {
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 700;
+  opacity: 0.5;
+}
+
+.sticker-chip[data-label]::after {
+  content: attr(data-label);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  padding: 3px 8px;
+  transform: translateX(-50%);
+  border: 1px solid var(--light);
+  border-radius: 4px;
+  background-color: var(--gray);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.sticker-chip[data-label]:is(:hover, :focus)::after {
+  opacity: 1;
 }
 
 #status-outer {
@@ -287,34 +532,35 @@ input[type="text"]:not(:hover, :focus) {
   max-width: 608px;
 }
 
-#inspect-button-container {
+/* Spans the bottom of the card. Matches the inventory card's inspect button: outlined with
+   a green icon + label that fills green on hover. */
+.card-inspect {
+  grid-area: inspect;
   display: flex;
+  align-items: center;
   justify-content: center;
-  margin: 20px 0;
-}
-
-#inspect-button {
-  display: inline-block;
-  padding: 12px 24px;
-  background-color: var(--pop);
-  color: var(--gray);
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px solid var(--light);
   border-radius: 4px;
+  background-color: var(--gray);
+  color: var(--pop);
   font-weight: bold;
   text-decoration: none;
-  transition: all 0.3s ease;
   cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease;
 
-  &:active {
-    transform: translateY(0);
+  & svg {
+    width: 16px;
+    height: 16px;
   }
 
   &:hover:not([href="#"]) {
-    background-color: #27ae60;
-    transform: translateY(-1px);
+    background-color: var(--pop);
+    color: var(--gray);
   }
 
   &[href="#"] {
-    background-color: var(--light);
     color: #7f8c8d;
     cursor: not-allowed;
     pointer-events: none;
@@ -345,6 +591,21 @@ input[type="text"]:not(:hover, :focus) {
   }
 }
 
+/* Narrow screens: stack the card top to bottom - image, then data, then inspect button. */
+@media (width <= 520px) {
+  .item-card {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "media"
+      "body"
+      "inspect";
+  }
+
+  .card-image-frame {
+    height: 180px;
+  }
+}
+
 @keyframes light-dark {
   from {
     background-color: var(--light);
@@ -362,40 +623,5 @@ input[type="text"]:not(:hover, :focus) {
 
   to {
     background-color: var(--light);
-  }
-}
-
-@keyframes text-pop {
-  from {
-    color: var(--text);
-  }
-
-  to {
-    color: var(--pop);
-  }
-}
-
-@keyframes pop-text {
-  from {
-    color: var(--pop);
-  }
-
-  to {
-    color: var(--text);
-  }
-}
-
-@keyframes shimmer {
-  0% {
-    left: -100%;
-  }
-
-  /* Delay by 1/4s to give GC time to respond. */
-  25% {
-    left: -100%;
-  }
-
-  100% {
-    left: 100%;
   }
 }

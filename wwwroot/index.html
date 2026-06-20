@@ -22,6 +22,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Lato&display=swap" rel="stylesheet">
     <link type="text/css" rel="stylesheet" href="styles.css" media="screen" />
 
+    <script src="decals.js" type="text/javascript"></script>
     <script src="post.js" type="text/javascript"></script>
 
     <title>Item Analyzer - Skin Stats</title>
@@ -115,90 +116,49 @@
 
     <br />
 
-    <div id="info-container-outer">
-      <div id="info-container">
-        <div class="info_item">
-          <p class="item_title">Name</p>
-          <div class="item_desc">
-            <div class="item_desc"><p id="item_name">-</p></div>
-            <svg
-              id="stattrak-indicator"
-              class="no"
-              version="1.1"
-              xmlns="http://www.w3.org/2000/svg"
-              width="25"
-              height="28"
-              viewbox="0 0 24.24871130596428 28"
-            >
-              <path
-                fill="#2ECC71"
-                d="M10.392304845413264 0.9999999999999999Q12.12435565298214 0 13.856406460551018 0.9999999999999999L22.516660498395403 6Q24.24871130596428 7 24.24871130596428 9L24.24871130596428 19Q24.24871130596428 21 22.516660498395403 22L13.856406460551018 27Q12.12435565298214 28 10.392304845413264 27L1.7320508075688774 22Q0 21 0 19L0 9Q0 7 1.7320508075688774 6Z"
-              ></path>
-              <text
-                x="12"
-                y="14"
-                fill="#ECF0F1"
-                font-weight="bold"
-                font-size="14px"
-                text-anchor="middle"
-                alignment-baseline="central"
-              >
-                ST
-              </text>
-            </svg>
-          </div>
+    <!-- Searched items stack here, newest first; each is a clone of the template below. -->
+    <div id="item-card-outer"></div>
+
+    <template id="item-card-template">
+      <div class="item-card loading">
+        <div class="card-image-frame">
+          <img class="card-image" alt="" />
         </div>
-        <div class="info_item">
-          <p class="item_title">Float</p>
-          <div class="item_desc">
-            <p id="item_paintwear">-</p>
+
+        <div class="card-body">
+          <div class="card-name">Loading…</div>
+
+          <div class="card-line card-float-line">
+            <span class="card-wear-pill"></span>
+            <span class="card-float">-</span>
+            <span class="card-float-bar-slot"></span>
           </div>
-        </div>
-        <div class="info_item">
-          <p class="item_title">Wear</p>
-          <div class="item_desc">
-            <p id="item_wear">-</p>
+
+          <div class="card-line card-pattern-line">
+            <span class="card-seed"><span class="card-muted card-help" title="Paint seed">Pattern</span> <span class="card-paintseed">-</span></span>
+            <span class="card-rarity"></span>
           </div>
+
+          <div class="item-stickers"></div>
+
+          <dl class="card-meta">
+            <div><dt>Wear</dt><dd class="card-wear">-</dd></div>
+            <div><dt>Quality</dt><dd class="card-quality">-</dd></div>
+            <div><dt>Origin</dt><dd class="card-origin">-</dd></div>
+            <div><dt>ID</dt><dd class="card-itemid">-</dd></div>
+          </dl>
+
+          <div class="card-loadtime"></div>
         </div>
-        <div class="info_item">
-          <p class="item_title">Rarity</p>
-          <div class="item_desc">
-            <p id="item_rarity">-</p>
-          </div>
-        </div>
-        <div class="info_item">
-          <p class="item_title">ID</p>
-          <div class="item_desc">
-            <p id="item_itemid">-</p>
-          </div>
-        </div>
-        <div class="info_item">
-          <p class="item_title">Pattern Index</p>
-          <div class="item_desc">
-            <p id="item_paintseed">-</p>
-          </div>
-        </div>
-        <div class="info_item">
-          <p class="item_title">Origin</p>
-          <div class="item_desc">
-            <p id="item_origin">-</p>
-          </div>
-        </div>
-        <div class="info_item">
-          <p class="item_title">Quality</p>
-          <div class="item_desc">
-            <p id="item_quality">-</p>
-          </div>
-        </div>
+
+        <a class="card-inspect" href="#">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="10.5" cy="10.5" r="5.5" fill="none" stroke="currentColor" stroke-width="2.2" />
+            <line x1="14.8" y1="14.8" x2="20.5" y2="20.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" />
+          </svg>
+          Inspect In Game
+        </a>
       </div>
-    </div>
-
-    <div id="inspect-button-container">
-      <a id="inspect-button" href="#">Inspect In Game</a>
-    </div>
-
-    <div id="status-outer">
-      <div id="status"></div>
-    </div>
+    </template>
   </body>
 </html>

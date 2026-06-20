@@ -32,6 +32,10 @@ EXTRA_ITEM_SOURCES = [
 ]
 CONST_PATH = 'const.json'
 RANGES_PATH = 'wwwroot/float-ranges.json'
+# Server-side, repo-root catalog (like stickers.json): the item page's decoded item carries
+# no image, so the server resolves one here. Keyed "<weapon_id>_<paint_index>" because a paint
+# kit (e.g. Case Hardened, idx 44) spans many weapons with a different image on each.
+SKIN_IMAGES_PATH = 'skin-images.json'
 # Lives at the repo root next to const.json (loaded by the server), not under wwwroot:
 # the browser no longer downloads the whole catalog - the server resolves each decal and
 # sends only the handful of names/images an inventory actually uses.
@@ -88,10 +92,13 @@ const_data.setdefault('skins', {})
 const_data.setdefault('items', {})
 
 float_ranges = {}
+skin_images = {}
 conflicts = []
 
 for skin in source_skins:
     paint_index = skin.get('paint_index')
+    weapon = skin.get('weapon') or {}
+    weapon_id = weapon.get('weapon_id')
     if paint_index:
         paint_index = str(paint_index)
         pattern_name = (skin.get('pattern') or {}).get('name')
@@ -105,9 +112,10 @@ for skin in source_skins:
         if existing is not None and existing != range_:
             conflicts.append(f'{paint_index}: {existing} vs {range_}')
         float_ranges[paint_index] = range_
-    weapon = skin.get('weapon') or {}
-    if weapon.get('weapon_id') is not None and weapon.get('name'):
-        merge(const_data['items'], str(weapon['weapon_id']), weapon['name'], 'item')
+        if weapon_id is not None and skin.get('image'):
+            skin_images[f'{weapon_id}_{paint_index}'] = skin['image']
+    if weapon_id is not None and weapon.get('name'):
+        merge(const_data['items'], str(weapon_id), weapon['name'], 'item')
 
 if conflicts:
     # Has never happened in practice; a paint kit has one wear range by definition.
@@ -155,3 +163,7 @@ with open(STICKERS_PATH, 'w', encoding='utf-8') as f:
     f.write(json.dumps(sticker_data, ensure_ascii=False, separators=(',', ':')) + '\n')
 print(f'Wrote {len(sticker_data["stickers"])} stickers / '
       f'{len(sticker_data["keychains"])} keychains to {STICKERS_PATH}')
+
+with open(SKIN_IMAGES_PATH, 'w', encoding='utf-8') as f:
+    f.write(json.dumps(skin_images, ensure_ascii=False, separators=(',', ':')) + '\n')
+print(f'Wrote {len(skin_images)} skin images to {SKIN_IMAGES_PATH}')

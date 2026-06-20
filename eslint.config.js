@@ -30,7 +30,12 @@ module.exports = [
         URLSearchParams: "readonly",
         performance: "readonly",
         customElements: "readonly",
-        HTMLElement: "readonly"
+        HTMLElement: "readonly",
+        // Shared rendering helpers defined in decals.js, loaded before the page scripts.
+        buildStickerChips: "readonly",
+        buildFloatBar: "readonly",
+        buildWearPill: "readonly",
+        rarityColorOf: "readonly"
       }
     },
     rules: {

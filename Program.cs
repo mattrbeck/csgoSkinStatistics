@@ -620,6 +620,7 @@ namespace CSGOSkinAPI.Controllers
                 origin_name = itemInfo.OriginName,
                 paintwear_float = itemInfo.PaintWear,
                 is_knife_or_glove = itemInfo.IsKnifeOrGlove,
+                image = constDataService.ResolveSkinImage(item.defindex, item.paintindex),
                 // Ordered arrays; `slot` is NOT unique — CS2 stacks multiple stickers in one
                 // slot (verified live), so these stay positional. Each decal is resolved to its
                 // name + image here so the client renders straight from the response and never
@@ -1644,6 +1645,7 @@ namespace CSGOSkinAPI.Services
 
         private readonly ConstData _constData;
         private readonly StickerCatalog _stickers;
+        private readonly Dictionary<string, string> _skinImages;
 
         public ConstDataService()
         {
@@ -1655,6 +1657,12 @@ namespace CSGOSkinAPI.Services
             // frontend shows a labeled placeholder instead.
             var stickerJson = File.ReadAllText("stickers.json");
             _stickers = JsonSerializer.Deserialize<StickerCatalog>(stickerJson, JsonOptions) ?? new StickerCatalog();
+
+            // "<defindex>_<paintindex>" -> skin image. The decoded item carries no image, so the
+            // item page relies on this; keyed by weapon too since a paint kit looks different on
+            // each weapon it appears on.
+            var skinImageJson = File.ReadAllText("skin-images.json");
+            _skinImages = JsonSerializer.Deserialize<Dictionary<string, string>>(skinImageJson, JsonOptions) ?? [];
         }
 
         public StickerKit? ResolveSticker(uint stickerId) => Resolve(_stickers.Stickers, stickerId);
@@ -1663,6 +1671,11 @@ namespace CSGOSkinAPI.Services
 
         private static StickerKit? Resolve(Dictionary<string, StickerKit>? map, uint id)
             => map != null && map.TryGetValue(id.ToString(), out var kit) ? kit : null;
+
+        // Representative image for a skin, or "" for vanilla/unknown combos (paintindex 0 and
+        // anything the catalog predates).
+        public string ResolveSkinImage(uint defindex, uint paintindex)
+            => _skinImages.TryGetValue($"{defindex}_{paintindex}", out var image) ? image : "";
 
         public ItemInformation GetItemInformation(CEconItemPreviewDataBlock item)
         {

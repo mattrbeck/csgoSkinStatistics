@@ -802,66 +802,20 @@ class InventoryItem extends HTMLElement {
     this.renderStickers(itemData);
   }
 
-  // Applied stickers and charms, as a compact row of thumbnails. The server resolves each
-  // decal to {name, image} (and, for charms, a `slab` flag), so we render straight from the
-  // item response. Sort/filter re-creates cards and re-calls updateWithDetails, so this
-  // fully rebuilds the row each time.
+  // Applied stickers and charms, as a compact row of thumbnails (shared with the item page
+  // via buildStickerChips). Sort/filter re-creates cards and re-calls updateWithDetails, so
+  // this fully rebuilds the row each time.
   renderStickers(itemData) {
     const container = this.shadowRoot.querySelector('[data-field="stickers"]');
     if (!container) return;
 
-    // `keychains` carries charms; both arrive in the same {sticker_id, wear, name, image}
-    // shape and render identically, just tagged so charms can be styled/labeled apart.
-    const decals = [
-      ...(itemData.stickers || []).map(s => ({ s, charm: false })),
-      ...(itemData.keychains || []).map(s => ({ s, charm: true })),
-    ];
-    if (decals.length === 0) {
+    const hasDecals = (itemData.stickers || []).length > 0 || (itemData.keychains || []).length > 0;
+    if (!hasDecals) {
       container.replaceChildren();
       container.hidden = true;
       return;
     }
-
-    const frag = document.createDocumentFragment();
-    for (const { s, charm } of decals) {
-      // A Sticker Slab is a charm that seals a sticker inside it; the server sends the
-      // sealed sticker's name/image and flags it, so we show the sticker but mark it.
-      const slab = !!s.slab;
-      const name = s.name || `${charm && !slab ? 'Charm' : 'Sticker'} #${slab ? s.wrapped_sticker : s.sticker_id}`;
-
-      const chip = document.createElement('span');
-      chip.className = charm ? 'sticker-chip charm' : 'sticker-chip';
-      if (slab) chip.classList.add('slab');
-      chip.tabIndex = 0;
-
-      // Stickers scrape (wear 0 = pristine .. 1 = nearly gone); charms and slabs don't.
-      // Surface the scrape level in the label and fade the thumbnail toward it, but never
-      // below legibility.
-      let label = slab ? `${name} · Slab` : name;
-      const wear = Number(s.wear) || 0;
-      const worn = !charm && wear > 0;
-      if (worn) label += ` · ${Math.round(wear * 100)}% worn`;
-      chip.dataset.label = label;
-      chip.setAttribute('aria-label', label);
-
-      if (s.image) {
-        const img = document.createElement('img');
-        img.src = s.image;
-        img.alt = name;
-        img.loading = 'lazy';
-        // Fade only the thumbnail toward its scraped state - not the chip, or the tooltip
-        // text (rendered via the chip's ::after) would dim along with it.
-        if (worn) img.style.opacity = String(1 - 0.6 * wear);
-        chip.appendChild(img);
-      } else {
-        // Unknown/new id the catalog predates: keep a labeled placeholder so the decal
-        // still shows and its name is reachable via the tooltip.
-        chip.classList.add('placeholder');
-        chip.textContent = '?';
-      }
-      frag.appendChild(chip);
-    }
-    container.replaceChildren(frag);
+    container.replaceChildren(buildStickerChips(itemData.stickers, itemData.keychains));
     container.hidden = false;
   }
 }
@@ -1193,36 +1147,7 @@ function sortItems(items, field, order) {
 }
 
 // Rarity -> Steam color, shared by the item cards and the inventory summary bar.
-const RARITY_COLORS = {
-  // Standard weapon skin rarities (CS2/CS:GO)
-  'Consumer Grade': '#B0C3D9',       // Light Gray/White
-  'Industrial Grade': '#5E98D9',     // Light Blue
-  'Mil-Spec Grade': '#4B69FF',       // Blue
-  'Restricted': '#8847FF',           // Purple
-  'Classified': '#D32CE6',           // Pink/Magenta
-  'Covert': '#EB4B4B',               // Red (weapons)
-  'Extraordinary': '#EB4B4B',        // Red (knives/gloves) - same tier as Covert; Steam tags it eb4b4b
-  'Contraband': '#E4AE39',           // Gold/Orange (e.g. M4A4 Howl) - the only gold rarity
-
-  // Agent rarities (based on Operation rewards)
-  'Base Grade': '#B0C3D9',           // Light Gray/White
-  'Distinguished': '#4B69FF',        // Blue (28 stars)
-  'Exceptional': '#8847FF',          // Purple (52 stars)
-  'Superior': '#D32CE6',             // Pink (76 stars)
-  'Master': '#EB4B4B',               // Red (89 stars)
-
-  // Stickers, charms, graffiti, etc. (same rarity-value colors as above)
-  'High Grade': '#4B69FF',           // Blue (value 3, == Mil-Spec/Distinguished)
-  'Remarkable': '#8847FF',           // Purple (value 4, == Restricted/Exceptional)
-  'Exotic': '#D32CE6',               // Pink (value 5, == Classified/Superior)
-
-  // Default weapon (no skin)
-  'Stock': '#DED6CC'                 // Off-white/gray (Steam Rarity_Default_Weapon)
-};
-
-function rarityColorOf(rarity) {
-  return RARITY_COLORS[rarity] || '#B0C3D9'; // Default to light gray if not found
-}
+// RARITY_COLORS + rarityColorOf live in decals.js (shared with the item page).
 
 // Rarity -> sort tier. Tiers follow the Steam rarity colors (see RARITY_COLORS), so a
 // "High Grade" music kit sorts with the blue Mil-Spec weapons, not the light-blue
