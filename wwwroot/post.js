@@ -115,6 +115,16 @@ function renderName(nameEl, iteminfo) {
     const badge = document.createElement("span");
     badge.className = "stattrak-badge";
     badge.textContent = "ST";
+    // Kill count slides out of the badge on hover/focus (see .st-detail), matching the
+    // inventory card. The count rides along in the cert/GC response for free.
+    const kills = iteminfo.stattrak_kills;
+    if (kills != null) {
+      const detail = document.createElement("span");
+      detail.className = "st-detail";
+      detail.textContent = `: ${kills.toLocaleString()} Kills`;
+      badge.appendChild(detail);
+      badge.tabIndex = 0;
+    }
     nameEl.appendChild(badge);
   }
 }

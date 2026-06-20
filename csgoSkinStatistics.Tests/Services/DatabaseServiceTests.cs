@@ -92,6 +92,47 @@ public class DatabaseServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task SaveItemAsync_ShouldPreserveStatTrakKillCount()
+    {
+        await _databaseService.InitializeDatabaseAsync();
+
+        // killeatervalue is the live StatTrak kill count; a cache hit must keep the exact
+        // count, not just the StatTrak flag.
+        var item = new CEconItemPreviewDataBlock
+        {
+            itemid = 22222, defindex = 7, paintindex = 282, rarity = 5, quality = 9,
+            paintwear = 1065353216, paintseed = 1, inventory = 1, origin = 8,
+            killeatervalue = 1373
+        };
+
+        await _databaseService.SaveItemAsync(item);
+        var retrieved = await _databaseService.GetItemAsync(22222);
+
+        Assert.NotNull(retrieved);
+        Assert.True(retrieved.ShouldSerializekilleatervalue());
+        Assert.Equal(1373u, retrieved.killeatervalue);
+    }
+
+    [Fact]
+    public async Task SaveItemAsync_NonStatTrak_HasNoKillCount()
+    {
+        await _databaseService.InitializeDatabaseAsync();
+
+        // No killeatervalue set: a non-StatTrak item must come back without one (not 0 kills).
+        var item = new CEconItemPreviewDataBlock
+        {
+            itemid = 33333, defindex = 7, paintindex = 282, rarity = 5, quality = 4,
+            paintwear = 1065353216, paintseed = 1, inventory = 1, origin = 8
+        };
+
+        await _databaseService.SaveItemAsync(item);
+        var retrieved = await _databaseService.GetItemAsync(33333);
+
+        Assert.NotNull(retrieved);
+        Assert.False(retrieved.ShouldSerializekilleatervalue());
+    }
+
+    [Fact]
     public async Task SaveItemWithExtrasAsync_ShouldSaveItemWithStickersAndKeychains()
     {
         await _databaseService.InitializeDatabaseAsync();

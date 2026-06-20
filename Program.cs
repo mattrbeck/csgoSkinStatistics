@@ -609,6 +609,10 @@ namespace CSGOSkinAPI.Controllers
                 item.inventory,
                 item.origin,
                 stattrak = item.ShouldSerializekilleatervalue(),
+                // The decoded cert/GC item carries the live kill count for free (proto field
+                // 10); null for non-StatTrak items. Cached items keep it via the killeatervalue
+                // column (see below) - older cached rows that predate that column report null.
+                stattrak_kills = item.ShouldSerializekilleatervalue() ? item.killeatervalue : (uint?)null,
                 souvenir = itemInfo.IsSouvenir,
                 market_hash_name = itemInfo.MarketHashName,
                 special = itemInfo.Special,
@@ -1227,11 +1231,26 @@ namespace CSGOSkinAPI.Services
                     paintseed INTEGER NOT NULL,
                     inventory INTEGER NOT NULL,
                     origin INTEGER NOT NULL,
-                    stattrak INTEGER NOT NULL
+                    stattrak INTEGER NOT NULL,
+                    killeatervalue INTEGER
                 )";
 
             using var command = new SqliteCommand(createTableCommand, connection);
             await command.ExecuteNonQueryAsync();
+
+            // killeatervalue (the live StatTrak kill count) was added after this table shipped;
+            // back-fill the column on pre-existing databases. SQLite has no "ADD COLUMN IF NOT
+            // EXISTS", so a duplicate-column error just means the migration already ran.
+            try
+            {
+                using var alterCommand = new SqliteCommand(
+                    "ALTER TABLE searches ADD COLUMN killeatervalue INTEGER", connection);
+                await alterCommand.ExecuteNonQueryAsync();
+            }
+            catch (SqliteException)
+            {
+                // Column already exists - nothing to migrate.
+            }
 
 
             foreach (var tableName in new[] { "stickers", "keychains" })
@@ -1367,6 +1386,7 @@ namespace CSGOSkinAPI.Services
                 var inventoryOrd = reader.GetOrdinal("inventory");
                 var originOrd = reader.GetOrdinal("origin");
                 var statTrakOrd = reader.GetOrdinal("stattrak");
+                var killEaterOrd = reader.GetOrdinal("killeatervalue");
 
                 var item = new CEconItemPreviewDataBlock
                 {
@@ -1380,8 +1400,11 @@ namespace CSGOSkinAPI.Services
                     inventory = (uint)reader.GetInt64(inventoryOrd),
                     origin = (uint)reader.GetInt32(originOrd)
                 };
-                // Setting killeatervalue to non-null makes it serializable, which is used as a flag for StatTrak items.
-                if (reader.GetInt32(statTrakOrd) == 1) item.killeatervalue = 0;
+                // killeatervalue non-null is both the StatTrak flag and the live kill count.
+                // Prefer the stored count; fall back to 0 for legacy rows cached before the
+                // column existed (StatTrak presence stays correct, count shows 0 until re-cached).
+                if (!reader.IsDBNull(killEaterOrd)) item.killeatervalue = (uint)reader.GetInt64(killEaterOrd);
+                else if (reader.GetInt32(statTrakOrd) == 1) item.killeatervalue = 0;
                 item.stickers.AddRange(await GetStickersAsync(itemId, true));
                 item.keychains.AddRange(await GetStickersAsync(itemId, false));
 
@@ -1402,8 +1425,8 @@ namespace CSGOSkinAPI.Services
         {
             var insert = @"
                 INSERT OR REPLACE INTO searches
-                (itemid, defindex, paintindex, rarity, quality, paintwear, paintseed, inventory, origin, stattrak)
-                VALUES (@itemid, @defindex, @paintindex, @rarity, @quality, @paintwear, @paintseed, @inventory, @origin, @stattrak)";
+                (itemid, defindex, paintindex, rarity, quality, paintwear, paintseed, inventory, origin, stattrak, killeatervalue)
+                VALUES (@itemid, @defindex, @paintindex, @rarity, @quality, @paintwear, @paintseed, @inventory, @origin, @stattrak, @killeatervalue)";
 
             using var command = new SqliteCommand(insert, connection, transaction);
             command.Parameters.AddWithValue("@itemid", (long)item.itemid);
@@ -1416,6 +1439,9 @@ namespace CSGOSkinAPI.Services
             command.Parameters.AddWithValue("@inventory", item.inventory);
             command.Parameters.AddWithValue("@origin", item.origin);
             command.Parameters.AddWithValue("@stattrak", item.ShouldSerializekilleatervalue() ? 1 : 0);
+            // The live kill count when present, so cache hits keep it (not just the flag).
+            command.Parameters.AddWithValue("@killeatervalue",
+                item.ShouldSerializekilleatervalue() ? item.killeatervalue : DBNull.Value);
 
             await command.ExecuteNonQueryAsync();
         }

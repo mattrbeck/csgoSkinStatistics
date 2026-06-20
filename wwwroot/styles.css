@@ -164,6 +164,21 @@ html {
   vertical-align: middle;
 }
 
+/* The kill count slides out of the ST badge on hover; :focus covers taps (the badge is
+   focusable) and keyboard users. Mirrors the inventory card. */
+.st-detail {
+  display: inline-block;
+  max-width: 0;
+  overflow: hidden;
+  white-space: pre;
+  vertical-align: bottom;
+  transition: max-width 0.25s ease;
+}
+
+.stattrak-badge:is(:hover, :focus) .st-detail {
+  max-width: 110px;
+}
+
 .card-line {
   display: flex;
   align-items: center;
