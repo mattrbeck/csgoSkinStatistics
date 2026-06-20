@@ -76,6 +76,12 @@ html {
   transition: opacity 0.3s ease;
 }
 
+/* Holds its place at the top of the stack but stays invisible until revealed, so a fast
+   lookup fills the card in without ever flashing a loading state. */
+.item-card.pending {
+  display: none;
+}
+
 /* While an item resolves (slow for s/a/d/m links that go through the Game Coordinator), the
    card sits dimmed with a shimmer sweeping across it, so the wait reads as active, not stuck.
    overflow/position are scoped to .loading so they don't clip decal/float tooltips once the

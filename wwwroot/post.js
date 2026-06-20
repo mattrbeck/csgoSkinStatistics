@@ -177,9 +177,15 @@ window.addEventListener("load", function () {
   }
 });
 
-// Each search adds a card above the previous results rather than replacing them. A loading
-// card goes up immediately; the response fills it in, or turns it into an error placeholder.
-// Repeat searches resurface the existing card (result or error) with no network request.
+// Wait this long before revealing the loading shimmer. Cert/cache lookups usually return
+// faster than this, so they fill the card in directly and never flash a loading state; only
+// a genuinely slow lookup (e.g. a Game Coordinator round trip) shows it.
+const LOADING_DELAY_MS = 200;
+
+// Each search adds a card above the previous results rather than replacing them. The card
+// holds its spot at the top but stays invisible until there's something to show - the result,
+// or, if the lookup runs long, a loading state. Repeat searches resurface the existing card
+// (result or error) with no network request.
 function post(url, key) {
   const seen = cardsByInput.get(key);
   if (seen && seen.isConnected) {
@@ -188,6 +194,7 @@ function post(url, key) {
   }
 
   const card = controls.template.content.firstElementChild.cloneNode(true);
+  card.classList.add("pending"); // invisible until revealed below
   // s/a/d/m links can need a Game Coordinator lookup (seconds), while hex cert links decode
   // locally (instant). Set expectations when a slow lookup is possible.
   if (/^[SM]\d+A\d+D\d+$/.test(key)) {
@@ -196,11 +203,22 @@ function post(url, key) {
   controls.cardOuter.prepend(card);
   cardsByInput.set(key, card);
 
+  let settled = false;
+  const loadingTimer = setTimeout(() => {
+    if (!settled) card.classList.remove("pending"); // slow lookup: show the shimmer
+  }, LOADING_DELAY_MS);
+  const reveal = () => {
+    settled = true;
+    clearTimeout(loadingTimer);
+    card.classList.remove("pending");
+  };
+
   const start = performance.now();
   fetch(`/api?${new URLSearchParams({url})}`)
     .then((response) => response.json())
     .then((iteminfo) => {
       if (iteminfo.error) {
+        reveal();
         renderErrorCard(card, iteminfo.error);
         return;
       }
@@ -210,6 +228,8 @@ function post(url, key) {
       const assetId = String(iteminfo.a || iteminfo.itemid || "");
       const twin = assetId && cardsByAssetId.get(assetId);
       if (twin && twin !== card && twin.isConnected) {
+        settled = true;
+        clearTimeout(loadingTimer);
         card.remove();
         cardsByInput.set(key, twin);
         resurface(twin);
@@ -217,6 +237,7 @@ function post(url, key) {
       }
 
       const loadTime = ((performance.now() - start) / 1000).toFixed(2);
+      reveal();
       try {
         populateCard(card, iteminfo, url, loadTime);
         if (assetId) cardsByAssetId.set(assetId, card);
@@ -226,6 +247,7 @@ function post(url, key) {
       }
     })
     .catch(() => {
+      reveal();
       renderErrorCard(card, "Failed to load item details");
     });
 }
