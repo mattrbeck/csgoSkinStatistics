@@ -133,6 +133,24 @@ html {
   max-height: 100%;
 }
 
+/* The decoded item carries no image; some items (medals, music kits, skins the catalog
+   predates) resolve to none, and failed lookups have none either. Show a faint glyph in
+   place of an empty box. The placeholder appears only when the <img> has no src. */
+.card-image:not([src]) {
+  display: none;
+}
+
+.card-image-placeholder {
+  display: none;
+  width: 56px;
+  height: 56px;
+  color: var(--light);
+}
+
+.card-image:not([src]) + .card-image-placeholder {
+  display: block;
+}
+
 .card-body {
   grid-area: body;
   min-width: 0;
@@ -144,6 +162,25 @@ html {
   font-size: 18px;
   font-weight: bold;
   word-wrap: break-word;
+}
+
+/* Subtitle under the name - used for the specific reason on an error card. */
+.card-submessage {
+  margin: -6px 0 12px;
+  color: var(--text);
+  font-size: 13px;
+  opacity: 0.7;
+}
+
+.card-submessage:empty {
+  display: none;
+}
+
+/* Failed lookup: keep a placeholder card in the stack (red edge, glyph, reason) rather than
+   silently dropping it. The rule that hides its empty detail rows lives after those rows'
+   base styles (below), to keep selector specificity in source order. */
+.item-card.error {
+  border-left-color: var(--error);
 }
 
 .item-special {
@@ -604,6 +641,17 @@ input[type="text"]:not(:hover, :focus) {
     pointer-events: none;
     opacity: 0.6;
   }
+}
+
+/* An error card has no float/pattern/stickers/meta/inspect to show. (Placed here, after those
+   selectors' base rules, so the compound selectors don't precede them in source order.) */
+.item-card.error .card-float-line,
+.item-card.error .card-pattern-line,
+.item-card.error .item-stickers,
+.item-card.error .card-meta,
+.item-card.error .card-loadtime,
+.item-card.error .card-inspect {
+  display: none;
 }
 
 @media (width <= 608px) {

@@ -63,15 +63,14 @@ function populateCard(card, iteminfo, url, loadTime) {
   q(".card-origin").textContent = iteminfo.origin_name || "-";
   q(".card-itemid").textContent = iteminfo.itemid == 0 ? "Unknown" : iteminfo.itemid;
 
-  // Skin image (server-resolved; "" for vanilla/unknown combos -> show the empty frame).
+  // Skin image (server-resolved; "" for vanilla/unknown combos). With no src the CSS shows
+  // the placeholder glyph in the frame instead of an empty box.
   const img = q(".card-image");
   if (iteminfo.image) {
     img.src = iteminfo.image;
     img.alt = `${iteminfo.weapon} | ${iteminfo.skin}`;
-    img.style.visibility = "";
   } else {
     img.removeAttribute("src");
-    img.style.visibility = "hidden";
   }
 
   // Applied stickers / charms / slabs (shared with the inventory card).
@@ -129,10 +128,14 @@ function renderName(nameEl, iteminfo) {
   }
 }
 
-function showError(errorMessage) {
-  // textContent, not innerHTML: the message can echo server-provided strings
-  controls.errorDisplay.textContent = errorMessage;
-  controls.errorDisplay.style.display = "block";
+// Turn an in-flight card into a placeholder for an item that couldn't be loaded: red edge,
+// the image-placeholder glyph (no src), and the reason. It stays in the stack like a result.
+function renderErrorCard(card, message) {
+  card.classList.remove("loading");
+  card.classList.add("error");
+  card.querySelector(".card-name").textContent = "Item unavailable";
+  // textContent, not innerHTML: the message can echo server-provided strings.
+  card.querySelector(".card-submessage").textContent = message;
 }
 
 window.addEventListener("load", function () {
@@ -141,7 +144,6 @@ window.addEventListener("load", function () {
     template: document.getElementById("item-card-template"),
     textbox: document.getElementById("textbox"),
     button: document.getElementById("button"),
-    errorDisplay: document.getElementById("error-display"),
   };
 
   controls.textbox.addEventListener("keydown", function (event) {
@@ -176,11 +178,9 @@ window.addEventListener("load", function () {
 });
 
 // Each search adds a card above the previous results rather than replacing them. A loading
-// card goes up immediately; the response fills it in, or drops it and surfaces the error.
-// Repeat searches resurface the existing card with no network request.
+// card goes up immediately; the response fills it in, or turns it into an error placeholder.
+// Repeat searches resurface the existing card (result or error) with no network request.
 function post(url, key) {
-  controls.errorDisplay.style.display = "none";
-
   const seen = cardsByInput.get(key);
   if (seen && seen.isConnected) {
     resurface(seen);
@@ -201,9 +201,7 @@ function post(url, key) {
     .then((response) => response.json())
     .then((iteminfo) => {
       if (iteminfo.error) {
-        card.remove();
-        cardsByInput.delete(key);
-        showError(iteminfo.error);
+        renderErrorCard(card, iteminfo.error);
         return;
       }
 
@@ -223,15 +221,11 @@ function post(url, key) {
         populateCard(card, iteminfo, url, loadTime);
         if (assetId) cardsByAssetId.set(assetId, card);
       } catch (e) {
-        card.remove();
-        cardsByInput.delete(key);
-        showError("An error occurred while displaying the item data");
+        renderErrorCard(card, "An error occurred while displaying the item data");
         throw e;
       }
     })
     .catch(() => {
-      card.remove();
-      cardsByInput.delete(key);
-      showError("Failed to load item details");
+      renderErrorCard(card, "Failed to load item details");
     });
 }

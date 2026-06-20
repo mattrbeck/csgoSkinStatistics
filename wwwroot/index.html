@@ -111,8 +111,6 @@
       <br />
       <input style="cursor: pointer" id="button" type="button" value="Check" />
     </form>
-    
-    <div id="error-display" style="display: none;"></div>
 
     <br />
 
@@ -123,10 +121,16 @@
       <div class="item-card loading">
         <div class="card-image-frame">
           <img class="card-image" alt="" />
+          <svg class="card-image-placeholder" viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="3" y="5" width="18" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="1.6" />
+            <circle cx="8.5" cy="10" r="1.6" fill="currentColor" />
+            <path d="M5 17l4.5-4.5 3 3L16 12l3 3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
         </div>
 
         <div class="card-body">
           <div class="card-name">Loading…</div>
+          <div class="card-submessage"></div>
 
           <div class="card-line card-float-line">
             <span class="card-wear-pill"></span>
