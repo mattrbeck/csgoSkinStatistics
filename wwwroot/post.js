@@ -178,6 +178,11 @@ function post(url, key) {
   }
 
   const card = controls.template.content.firstElementChild.cloneNode(true);
+  // s/a/d/m links can need a Game Coordinator lookup (seconds), while hex cert links decode
+  // locally (instant). Set expectations when a slow lookup is possible.
+  if (/^[SM]\d+A\d+D\d+$/.test(key)) {
+    card.querySelector(".card-name").textContent = "Looking up in-game…";
+  }
   controls.cardOuter.prepend(card);
   cardsByInput.set(key, card);
 
