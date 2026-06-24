@@ -120,13 +120,14 @@ namespace CSGOSkinAPI.Controllers
                     }
                 }
 
-                // Cache hit is authoritative, never stale: an itemid encodes an immutable
-                // item config. Any mutation (sticker/keychain applied or removed, name tag,
-                // etc.) mints a brand-new itemid in the GC, so the row we stored for this id
-                // can never disagree with the live item. (Only the StatTrak kill count and
-                // inventory slot drift under a fixed itemid, and we persist neither — stattrak
-                // is a bool. See docs/inventory-endpoint-cert.md, "applying a sticker mints a
-                // new itemid".) That is why we can return the cached copy without re-querying.
+                // Cache hit is authoritative for the item's config: an itemid encodes an
+                // immutable config. Any mutation (sticker/keychain applied or removed, name tag,
+                // etc.) mints a brand-new itemid in the GC, so the row we stored for this id can
+                // never disagree with the live item's config. (The StatTrak kill count and
+                // inventory slot do drift under a fixed itemid; we persist the kill count, so a
+                // cache hit may report a count slightly behind the live one - acceptable, and far
+                // better than none. A hex cert link decodes fresh and is always current. See
+                // docs/inventory-endpoint-cert.md, "applying a sticker mints a new itemid".)
                 var existingItem = await dbService.GetItemAsync(a);
                 if (existingItem != null)
                 {
