@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Rewrite;
 using Microsoft.Data.Sqlite;
 using SteamKit2;
+using SteamKit2.Authentication;
 using SteamKit2.GC;
 using SteamKit2.GC.CSGO.Internal;
 using SteamKit2.Internal;
@@ -1056,13 +1057,39 @@ namespace CSGOSkinAPI.Services
         {
             Console.WriteLine($"[{accountManager.Account.Username}] Steam client connected");
             accountManager.IsConnected = true;
+            _ = LogOnAsync(accountManager); // async auth; don't block the callback thread
+        }
 
-            Console.WriteLine($"[{accountManager.Account.Username}] Logging on");
-            accountManager.User.LogOn(new SteamUser.LogOnDetails
+        // Steam no longer accepts the legacy username+password logon (it returns InvalidPassword).
+        // Credentials must first be exchanged for a refresh token through the authentication
+        // service, and the logon then uses that token. No authenticator is supplied, so this
+        // covers accounts without Steam Guard; an account that requires a Guard code will throw.
+        private static async Task LogOnAsync(SteamAccountManager accountManager)
+        {
+            var username = accountManager.Account.Username;
+            try
             {
-                Username = accountManager.Account.Username,
-                Password = accountManager.Account.Password
-            });
+                Console.WriteLine($"[{username}] Authenticating");
+                var session = await accountManager.Client.Authentication.BeginAuthSessionViaCredentialsAsync(new AuthSessionDetails
+                {
+                    Username = username,
+                    Password = accountManager.Account.Password,
+                });
+
+                var poll = await session.PollingWaitForResultAsync();
+
+                Console.WriteLine($"[{username}] Logging on");
+                accountManager.User.LogOn(new SteamUser.LogOnDetails
+                {
+                    Username = poll.AccountName,
+                    AccessToken = poll.RefreshToken,
+                });
+            }
+            catch (Exception ex)
+            {
+                // Bad credentials, or an account that needs a Steam Guard code we don't supply.
+                Console.WriteLine($"[{username}] Authentication failed: {ex.Message}");
+            }
         }
 
         private void OnDisconnected(SteamClient.DisconnectedCallback callback, SteamAccountManager accountManager)
