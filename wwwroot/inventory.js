@@ -265,7 +265,8 @@ class InventoryItem extends HTMLElement {
         position: absolute;
         bottom: calc(100% + 7px);
         left: 50%;
-        transform: translateX(-50%);
+        /* --tt-shift nudges the tooltip back on-screen near a viewport edge (set by enableTooltip). */
+        transform: translateX(calc(-50% + var(--tt-shift, 0px)));
         padding: 3px 8px;
         border-radius: 4px;
         border: 1px solid var(--light, #2f3d4a);
@@ -420,7 +421,8 @@ class InventoryItem extends HTMLElement {
         position: absolute;
         bottom: calc(100% + 6px);
         left: 50%;
-        transform: translateX(-50%);
+        /* --tt-shift nudges the tooltip back on-screen near a viewport edge (set by enableTooltip). */
+        transform: translateX(calc(-50% + var(--tt-shift, 0px)));
         padding: 3px 8px;
         border-radius: 4px;
         border: 1px solid var(--light, #2f3d4a);
@@ -598,6 +600,7 @@ class InventoryItem extends HTMLElement {
     // Focusable so the tooltip is reachable by tap and keyboard, not just hover.
     bar.dataset.range = `Range: ${min}-${max}`;
     bar.tabIndex = 0;
+    enableTooltip(bar); // keep the tooltip on-screen near a grid edge (shared with decals.js)
   }
 
   // Compact wear badge (FN/MW/FT/WW/BS), colored to match the float bar zones.

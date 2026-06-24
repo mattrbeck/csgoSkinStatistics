@@ -8,6 +8,39 @@
 // The server resolves each decal to {name, image} (and, for charms, a `slab` flag and the
 // sealed sticker id), so these builders render straight from the item response.
 
+// The hover/focus tooltip on a chip or float bar is a CSS pseudo-element centered over the
+// element, so one near a screen edge would overflow. On hover/focus we measure where the
+// centered tooltip would land and set --tt-shift to nudge it back inside the viewport; the
+// CSS transform reads that variable. Works in light DOM and shadow DOM (we use viewport
+// coordinates and set the variable on the element itself).
+let tooltipMeasureCtx;
+function measureTooltipWidth(text) {
+  if (!tooltipMeasureCtx) {
+    tooltipMeasureCtx = document.createElement('canvas').getContext('2d');
+  }
+  // Match the tooltip font; add horizontal padding (8px each side) and border (1px each).
+  tooltipMeasureCtx.font = '600 11px Lato, sans-serif';
+  return tooltipMeasureCtx.measureText(text).width + 18;
+}
+
+function enableTooltip(el) {
+  if (el.dataset.ttEnabled) return; // applyFloatRange can re-run on the same bar
+  el.dataset.ttEnabled = '1';
+  const clamp = () => {
+    const text = el.dataset.label || el.dataset.range || '';
+    const rect = el.getBoundingClientRect();
+    const half = measureTooltipWidth(text) / 2;
+    const center = rect.left + rect.width / 2;
+    const margin = 8;
+    let shift = 0;
+    if (center - half < margin) shift = margin - (center - half);
+    else if (center + half > window.innerWidth - margin) shift = (window.innerWidth - margin) - (center + half);
+    el.style.setProperty('--tt-shift', `${Math.round(shift)}px`);
+  };
+  el.addEventListener('pointerenter', clamp);
+  el.addEventListener('focus', clamp);
+}
+
 // A Sticker Slab is a charm that seals a sticker inside it; the server sends the sealed
 // sticker's name/image and flags it, so we show the sticker but mark it.
 function buildStickerChips(stickers, keychains) {
@@ -35,6 +68,7 @@ function buildStickerChips(stickers, keychains) {
     if (worn) label += ` · ${Math.round(wear * 100)}% worn`;
     chip.dataset.label = label;
     chip.setAttribute('aria-label', label);
+    enableTooltip(chip);
 
     if (s.image) {
       const img = document.createElement('img');
@@ -82,6 +116,7 @@ function buildFloatBar(paintwearFloat, paintIndex, floatRanges) {
     // Focusable so the tooltip is reachable by tap and keyboard, not just hover.
     bar.dataset.range = `Range: ${min}-${max}`;
     bar.tabIndex = 0;
+    enableTooltip(bar);
   } else {
     left.hidden = true;
     right.hidden = true;

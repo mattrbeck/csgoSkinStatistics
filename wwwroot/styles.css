@@ -372,7 +372,9 @@ html {
   bottom: calc(100% + 7px);
   left: 50%;
   padding: 3px 8px;
-  transform: translateX(-50%);
+
+  /* --tt-shift nudges the tooltip back on-screen near a viewport edge (set by enableTooltip). */
+  transform: translateX(calc(-50% + var(--tt-shift, 0px)));
   border: 1px solid var(--light);
   border-radius: 4px;
   background-color: var(--gray);
@@ -460,7 +462,9 @@ html {
   bottom: calc(100% + 6px);
   left: 50%;
   padding: 3px 8px;
-  transform: translateX(-50%);
+
+  /* --tt-shift nudges the tooltip back on-screen near a viewport edge (set by enableTooltip). */
+  transform: translateX(calc(-50% + var(--tt-shift, 0px)));
   border: 1px solid var(--light);
   border-radius: 4px;
   background-color: var(--gray);

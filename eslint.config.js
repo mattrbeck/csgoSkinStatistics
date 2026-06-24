@@ -35,7 +35,8 @@ module.exports = [
         buildStickerChips: "readonly",
         buildFloatBar: "readonly",
         buildWearPill: "readonly",
-        rarityColorOf: "readonly"
+        rarityColorOf: "readonly",
+        enableTooltip: "readonly"
       }
     },
     rules: {
