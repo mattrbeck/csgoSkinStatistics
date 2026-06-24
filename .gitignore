@@ -1,5 +1,6 @@
 searches.db
 steam-accounts.json
+steam-tokens.json
 bin/
 obj/
 .claude/

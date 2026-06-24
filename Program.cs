@@ -721,6 +721,9 @@ namespace CSGOSkinAPI.Services
         public SteamAccount Account { get; }
         public bool IsConnected { get; set; }
         public bool IsLoggedIn { get; set; }
+        // Whether the in-flight logon used a cached refresh token, so a rejection can fall back
+        // to a fresh credential auth (see SteamService.OnLoggedOn).
+        public bool UsedCachedToken { get; set; }
         public DateTime LastRequestTime { get; set; } = DateTime.MinValue;
         public SemaphoreSlim RateLimitSemaphore { get; } = new(1, 1);
 
@@ -740,9 +743,83 @@ namespace CSGOSkinAPI.Services
         }
     }
 
+    // Persists the long-lived refresh token Steam hands back after a credential login, keyed by
+    // configured username, so restarts can log on with the token instead of re-sending the
+    // password (and re-prompting for any Steam Guard). A plain JSON file, gitignored like
+    // steam-accounts.json - a refresh token is itself a credential. All access is locked since
+    // each account logs on from its own thread.
+    public class SteamTokenStore
+    {
+        private readonly string _path;
+        private readonly object _lock = new();
+
+        public SteamTokenStore(string path) => _path = path;
+
+        public string? Get(string username)
+        {
+            lock (_lock)
+            {
+                return Read().GetValueOrDefault(username);
+            }
+        }
+
+        public void Set(string username, string token)
+        {
+            lock (_lock)
+            {
+                var tokens = Read();
+                tokens[username] = token;
+                Write(tokens);
+            }
+        }
+
+        public void Remove(string username)
+        {
+            lock (_lock)
+            {
+                var tokens = Read();
+                if (tokens.Remove(username))
+                {
+                    Write(tokens);
+                }
+            }
+        }
+
+        private Dictionary<string, string> Read()
+        {
+            try
+            {
+                if (File.Exists(_path))
+                {
+                    return JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(_path)) ?? [];
+                }
+            }
+            catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
+            {
+                // Missing/corrupt/unreadable: start empty. The next successful login rewrites it.
+                Console.WriteLine($"Could not read {_path}: {ex.Message}");
+            }
+            return [];
+        }
+
+        private void Write(Dictionary<string, string> tokens)
+        {
+            try
+            {
+                File.WriteAllText(_path, JsonSerializer.Serialize(tokens));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // A non-writable token store just means we re-auth with credentials next time.
+                Console.WriteLine($"Could not write {_path}: {ex.Message}");
+            }
+        }
+    }
+
     public class SteamService
     {
         private readonly List<SteamAccountManager> _accountManagers = [];
+        private readonly SteamTokenStore _tokenStore = new("steam-tokens.json");
         private bool _isRunning = false;
         private readonly ConcurrentDictionary<ulong, List<TaskCompletionSource<CEconItemPreviewDataBlock?>>> _pendingRequests = new();
         private int _currentAccountIndex = 0;
@@ -1053,7 +1130,7 @@ namespace CSGOSkinAPI.Services
             }
         }
 
-        private static void OnConnected(SteamClient.ConnectedCallback callback, SteamAccountManager accountManager)
+        private void OnConnected(SteamClient.ConnectedCallback callback, SteamAccountManager accountManager)
         {
             Console.WriteLine($"[{accountManager.Account.Username}] Steam client connected");
             accountManager.IsConnected = true;
@@ -1061,22 +1138,44 @@ namespace CSGOSkinAPI.Services
         }
 
         // Steam no longer accepts the legacy username+password logon (it returns InvalidPassword).
-        // Credentials must first be exchanged for a refresh token through the authentication
-        // service, and the logon then uses that token. No authenticator is supplied, so this
-        // covers accounts without Steam Guard; an account that requires a Guard code will throw.
-        private static async Task LogOnAsync(SteamAccountManager accountManager)
+        // A cached refresh token logs on directly; otherwise we exchange the credentials for a new
+        // token through the authentication service, cache it, and log on with that. No
+        // authenticator is supplied, so this covers accounts without Steam Guard; an account that
+        // requires a Guard code will throw during the credential exchange.
+        private async Task LogOnAsync(SteamAccountManager accountManager)
         {
             var username = accountManager.Account.Username;
+
+            // A token Steam later rejects is dropped in OnLoggedOn, which calls back here; with no
+            // cached token this then falls through to a fresh credential auth.
+            var cachedToken = _tokenStore.Get(username);
+            if (cachedToken != null)
+            {
+                Console.WriteLine($"[{username}] Logging on with cached token");
+                accountManager.UsedCachedToken = true;
+                accountManager.User.LogOn(new SteamUser.LogOnDetails
+                {
+                    Username = username,
+                    AccessToken = cachedToken,
+                });
+                return;
+            }
+
             try
             {
                 Console.WriteLine($"[{username}] Authenticating");
+                accountManager.UsedCachedToken = false;
                 var session = await accountManager.Client.Authentication.BeginAuthSessionViaCredentialsAsync(new AuthSessionDetails
                 {
                     Username = username,
                     Password = accountManager.Account.Password,
+                    IsPersistentSession = true, // long-lived refresh token we can reuse across restarts
                 });
 
                 var poll = await session.PollingWaitForResultAsync();
+
+                // Key by the configured username so the next lookup (also by it) hits.
+                _tokenStore.Set(username, poll.RefreshToken);
 
                 Console.WriteLine($"[{username}] Logging on");
                 accountManager.User.LogOn(new SteamUser.LogOnDetails
@@ -1113,12 +1212,24 @@ namespace CSGOSkinAPI.Services
             }
         }
 
-        private static void OnLoggedOn(SteamUser.LoggedOnCallback callback, SteamAccountManager accountManager)
+        private void OnLoggedOn(SteamUser.LoggedOnCallback callback, SteamAccountManager accountManager)
         {
-            Console.WriteLine($"[{accountManager.Account.Username}] Steam logon result: {callback.Result}");
+            var username = accountManager.Account.Username;
+            Console.WriteLine($"[{username}] Steam logon result: {callback.Result}");
             if (callback.Result != EResult.OK)
             {
-                Console.WriteLine($"[{accountManager.Account.Username}] Failed to log on to Steam: {callback.Result}");
+                Console.WriteLine($"[{username}] Failed to log on to Steam: {callback.Result}");
+
+                // A cached token Steam rejected (expired, revoked, password changed, ...): drop it
+                // and re-authenticate with credentials. The credential path sets UsedCachedToken
+                // false, so a failure there just logs and never loops back here.
+                if (accountManager.UsedCachedToken)
+                {
+                    Console.WriteLine($"[{username}] Cached token rejected; re-authenticating with credentials");
+                    accountManager.UsedCachedToken = false;
+                    _tokenStore.Remove(username);
+                    _ = LogOnAsync(accountManager);
+                }
                 return;
             }
 
