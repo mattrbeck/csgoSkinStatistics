@@ -1049,8 +1049,8 @@ function renderRarityBar() {
   const groups = [...byColor.entries()].sort((a, b) => b[1].value - a[1].value);
   const total = groups.reduce((sum, [, g]) => sum + g.count, 0);
 
-  elements.rarityBar.innerHTML = '';
-  elements.rarityLegend.innerHTML = '';
+  elements.rarityBar.replaceChildren();
+  elements.rarityLegend.replaceChildren();
   if (total === 0) return;
 
   for (const [color, group] of groups) {
@@ -1089,7 +1089,7 @@ function renderHighlights(processedItems) {
   if (stattrak) chips.push(`${stattrak} StatTrak`);
   if (special) chips.push({ text: `${special} special`, cls: 'special' });
 
-  elements.summaryHighlights.innerHTML = '';
+  elements.summaryHighlights.replaceChildren();
   for (const chip of chips) {
     const el = document.createElement('span');
     el.className = typeof chip === 'string' ? 'highlight-chip' : `highlight-chip ${chip.cls}`;
@@ -1520,7 +1520,7 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
     elements.inventorySummary.style.display = 'block';
     
     const inventoryGrid = elements.inventoryGrid;
-    inventoryGrid.innerHTML = '';
+    inventoryGrid.replaceChildren();
     itemElements.clear();
 
     // Create and render all items immediately with basic Steam inventory data
@@ -1700,7 +1700,7 @@ function resetInterface() {
   elements.inventoryContainer.style.display = 'none';
   elements.inventorySummary.style.display = 'none';
   elements.sidebar.style.display = 'none';
-  elements.inventoryGrid.innerHTML = '';
+  elements.inventoryGrid.replaceChildren();
   itemElements.clear();
   elements.status.textContent = '';
 
