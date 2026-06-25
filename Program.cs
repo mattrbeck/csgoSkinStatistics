@@ -839,7 +839,9 @@ namespace CSGOSkinAPI.Services
     {
         private readonly List<SteamAccountManager> _accountManagers = [];
         private readonly SteamTokenStore _tokenStore = new("steam-tokens.json");
-        private bool _isRunning = false;
+        // Written on the HTTP thread (ConnectAsync/Disconnect), read on the per-account callback
+        // loop threads, so it must be volatile for those loops to observe a shutdown promptly.
+        private volatile bool _isRunning = false;
         private readonly ConcurrentDictionary<ulong, List<TaskCompletionSource<CEconItemPreviewDataBlock?>>> _pendingRequests = new();
         private int _currentAccountIndex = 0;
 
