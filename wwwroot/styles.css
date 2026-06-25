@@ -26,6 +26,7 @@ body {
 
 ::selection {
   background: var(--text);
+  color: var(--dark); /* dark text on the light highlight; without it selected text is invisible */
 }
 
 html {
