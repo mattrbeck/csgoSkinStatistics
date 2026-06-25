@@ -1878,9 +1878,14 @@ namespace CSGOSkinAPI.Services
 
             var special = "";
 
-            if (pattern == "Marble Fade" && _constData.Fireice?.Contains(weaponType) == true)
+            if (pattern == "Marble Fade" && _constData.Fireice?.Contains(weaponType) == true
+                && paintseed >= 0 && paintseed < _constData.FireiceOrder!.Length)
             {
-                special = ConstData.FireIceNames[_constData.FireiceOrder![paintseed]];
+                var fireiceIndex = _constData.FireiceOrder[paintseed];
+                if (fireiceIndex >= 0 && fireiceIndex < ConstData.FireIceNames.Length)
+                {
+                    special = ConstData.FireIceNames[fireiceIndex];
+                }
             }
             else if (pattern == "Fade" && _constData.Fades?.ContainsKey(weaponType) == true)
             {
@@ -1934,7 +1939,13 @@ namespace CSGOSkinAPI.Services
         private double GetFadePercent(int paintseed, bool reversed)
         {
             const int minimumFadePercent = 80;
-            var fadeIndex = _constData.FadeOrder![paintseed];
+            // paintseed comes from the (attacker-controllable) item cert; a value outside the
+            // pattern table would otherwise throw IndexOutOfRange.
+            if (paintseed < 0 || paintseed >= _constData.FadeOrder!.Length)
+            {
+                return 0;
+            }
+            var fadeIndex = _constData.FadeOrder[paintseed];
             if (reversed)
             {
                 fadeIndex = 1000 - fadeIndex;

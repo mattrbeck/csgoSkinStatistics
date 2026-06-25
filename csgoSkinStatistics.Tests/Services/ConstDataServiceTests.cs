@@ -169,6 +169,53 @@ public class ConstDataServiceTests : IDisposable
     }
 
     [Fact]
+    public void GetItemInformation_FadeWithOutOfRangePaintseed_DoesNotThrow()
+    {
+        // A crafted item cert can carry a paintseed beyond the fade table; it must not throw.
+        var testData = new ConstData
+        {
+            Items = new Dictionary<string, string> { { "42", "Karambit" } },
+            Skins = new Dictionary<string, string> { { "38", "Fade" } },
+            Fades = new Dictionary<string, bool> { { "Karambit", false } },
+            FadeOrder = Enumerable.Range(0, 1001).ToArray()
+        };
+        File.WriteAllText("const.json", JsonSerializer.Serialize(testData));
+
+        var service = new ConstDataService();
+        var item = new CEconItemPreviewDataBlock { defindex = 42, paintindex = 38, paintseed = 999999 };
+
+        var result = service.GetItemInformation(item);
+
+        Assert.Equal("Fade", result.Name);
+        Assert.Equal("0%", result.Special);
+
+        File.Delete("const.json");
+    }
+
+    [Fact]
+    public void GetItemInformation_MarbleFadeWithOutOfRangePaintseed_DoesNotThrow()
+    {
+        var testData = new ConstData
+        {
+            Items = new Dictionary<string, string> { { "42", "Karambit" } },
+            Skins = new Dictionary<string, string> { { "413", "Marble Fade" } },
+            Fireice = new[] { "Karambit" },
+            FireiceOrder = new[] { 0, 1, 2, 3 }
+        };
+        File.WriteAllText("const.json", JsonSerializer.Serialize(testData));
+
+        var service = new ConstDataService();
+        var item = new CEconItemPreviewDataBlock { defindex = 42, paintindex = 413, paintseed = 999999 };
+
+        var result = service.GetItemInformation(item);
+
+        Assert.Equal("Marble Fade", result.Name);
+        Assert.Equal("", result.Special); // Out of range -> no special label, no throw
+
+        File.Delete("const.json");
+    }
+
+    [Fact]
     public void GetItemInformation_ShouldHandleDopplerPhase()
     {
         var testData = new ConstData
