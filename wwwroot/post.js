@@ -79,7 +79,9 @@ function populateCard(card, iteminfo, url, loadTime) {
   stickers.replaceChildren(hasDecals ? buildStickerChips(iteminfo.stickers, iteminfo.keychains) : "");
   stickers.style.display = hasDecals ? "" : "none";
 
-  q(".card-inspect").href = url;
+  const inspect = q(".card-inspect");
+  inspect.href = url;
+  enableLongPressCopy(inspect); // long-press to copy the steam:// link (iOS Safari)
   q(".card-loadtime").textContent = `Loaded in ${loadTime} seconds`;
 }
 

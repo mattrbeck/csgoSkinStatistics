@@ -41,6 +41,54 @@ function enableTooltip(el) {
   el.addEventListener('focus', clamp);
 }
 
+// Long-press a link to copy its href to the clipboard, with a brief "copied" state on the
+// element. iOS Safari's native long-press menu doesn't offer "Copy" for custom-scheme links
+// (steam://...), so the inspect buttons aren't copyable there; this provides it consistently.
+// Pair with `-webkit-touch-callout: none` on the element so Safari's own menu doesn't fight it.
+// A normal tap still follows the link; only a completed hold is intercepted. Touch-only, so
+// desktop mouse clicks and right-click "Copy Link" are untouched.
+function enableLongPressCopy(el) {
+  if (el.dataset.copyBound) return;
+  el.dataset.copyBound = '1';
+
+  let timer = null;
+  let copied = false; // a hold completed; the click it precedes must not navigate
+  const HOLD_MS = 450;
+
+  const cancel = () => {
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
+  };
+
+  el.addEventListener('touchstart', () => {
+    copied = false;
+    cancel();
+    timer = setTimeout(() => {
+      timer = null;
+      const link = el.getAttribute('href');
+      if (!link || link === '#' || !navigator.clipboard) return; // no link / no API: stay a link
+      copied = true; // set synchronously so the following click is suppressed without a race
+      navigator.clipboard.writeText(link).then(() => {
+        el.classList.add('copied');
+        if (navigator.vibrate) navigator.vibrate(10);
+        setTimeout(() => el.classList.remove('copied'), 1200);
+      }).catch(() => { /* clipboard blocked; nothing copied, navigation already suppressed */ });
+    }, HOLD_MS);
+  }, { passive: true });
+
+  el.addEventListener('touchmove', cancel, { passive: true }); // a scroll isn't a hold
+  el.addEventListener('touchend', cancel);
+  el.addEventListener('touchcancel', cancel);
+  el.addEventListener('click', (e) => {
+    if (copied) {
+      e.preventDefault(); // don't launch Steam right after copying
+      copied = false;
+    }
+  });
+}
+
 // A Sticker Slab is a charm that seals a sticker inside it; the server sends the sealed
 // sticker's name/image and flags it, so we show the sticker but mark it.
 function buildStickerChips(stickers, keychains) {

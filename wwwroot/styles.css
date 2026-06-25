@@ -635,6 +635,10 @@ input[type="text"]:not(:hover, :focus) {
   cursor: pointer;
   transition: background-color 0.2s ease, color 0.2s ease;
 
+  /* The href is a steam:// URL; suppress iOS Safari's native long-press menu (which can't copy
+     a custom-scheme link) so enableLongPressCopy handles the hold instead. */
+  -webkit-touch-callout: none;
+
   & svg {
     width: 16px;
     height: 16px;
@@ -650,6 +654,31 @@ input[type="text"]:not(:hover, :focus) {
     cursor: not-allowed;
     pointer-events: none;
     opacity: 0.6;
+  }
+
+  /* Brief confirmation after a long-press copy. */
+  &.copied {
+    position: relative;
+    background-color: var(--pop);
+    color: var(--gray);
+  }
+
+  &.copied::after {
+    content: 'Copied';
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 50%;
+    padding: 3px 8px;
+    transform: translateX(-50%);
+    border: 1px solid var(--light);
+    border-radius: 4px;
+    background-color: var(--gray);
+    color: var(--text);
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+    pointer-events: none;
+    z-index: 4;
   }
 }
 

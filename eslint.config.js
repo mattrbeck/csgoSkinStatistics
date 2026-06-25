@@ -36,7 +36,8 @@ module.exports = [
         buildFloatBar: "readonly",
         buildWearPill: "readonly",
         rarityColorOf: "readonly",
-        enableTooltip: "readonly"
+        enableTooltip: "readonly",
+        enableLongPressCopy: "readonly"
       }
     },
     rules: {

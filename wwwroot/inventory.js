@@ -364,6 +364,37 @@ class InventoryItem extends HTMLElement {
         color: var(--gray, #1f2d3a);
       }
 
+      /* The inspect link is a steam:// URL; suppress iOS Safari's native long-press menu (which
+         can't copy a custom-scheme link) so enableLongPressCopy can handle the hold instead. */
+      .icon-btn[data-field="inspect-link"] {
+        -webkit-touch-callout: none;
+      }
+
+      /* Brief confirmation after a long-press copy (mobile has no hover state to borrow). */
+      .icon-btn.copied {
+        position: relative;
+        background-color: var(--pop, #2ecc71);
+        color: var(--gray, #1f2d3a);
+      }
+
+      .icon-btn.copied::after {
+        content: 'Copied';
+        position: absolute;
+        bottom: calc(100% + 6px);
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 3px 8px;
+        border-radius: 4px;
+        border: 1px solid var(--light, #2f3d4a);
+        background-color: var(--gray, #1f2d3a);
+        color: var(--text, #ecf0f1);
+        font-size: 11px;
+        font-weight: 600;
+        white-space: nowrap;
+        pointer-events: none;
+        z-index: 4;
+      }
+
       /* Applied stickers / charms: a compact thumbnail row that wraps if an item is
          loaded out (max 5 stickers + a charm). Hidden entirely when the item has none. */
       .item-stickers {
@@ -534,6 +565,7 @@ class InventoryItem extends HTMLElement {
 
     if (inspectElement) {
       inspectElement.href = this.itemData.inspect_link || '#';
+      enableLongPressCopy(inspectElement); // long-press to copy the steam:// link (iOS Safari)
     }
 
     // Deep link to this exact item in the owner's Steam inventory page (730_2 is CS2's
