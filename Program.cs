@@ -414,10 +414,10 @@ namespace CSGOSkinAPI.Controllers
             }
         }
 
-        private static bool IsValidSteamId64(ulong steamId)
-        {
-            return steamId.ToString().StartsWith("76561") && steamId.ToString().Length == 17;
-        }
+        // A 17-digit id64 in the "76561…" individual-account block. Checked numerically rather
+        // than by formatting the value to a string twice.
+        private static bool IsValidSteamId64(ulong steamId) =>
+            steamId is >= 76561000000000000UL and <= 76561999999999999UL;
 
         // Steam vanity names are letters, digits, underscores and hyphens. Validating before the
         // name is interpolated into a steamcommunity.com URL keeps an attacker from injecting path
