@@ -1509,8 +1509,7 @@ namespace CSGOSkinAPI.Services
 
             var stickers = new List<CEconItemPreviewDataBlock.Sticker>();
             using var reader = await command.ExecuteReaderAsync();
-            
-            var itemIdOrd = reader.GetOrdinal("itemid");
+
             var slotOrd = reader.GetOrdinal("slot");
             var stickerIdOrd = reader.GetOrdinal("sticker_id");
             var wearOrd = reader.GetOrdinal("wear");
