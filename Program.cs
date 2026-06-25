@@ -15,6 +15,9 @@ using System.Web;
 using CSGOSkinAPI.Services;
 using CSGOSkinAPI.Models;
 using ProtoBuf;
+using System.Runtime.CompilerServices;
+
+[assembly: InternalsVisibleTo("csgoSkinStatistics.Tests")]
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -416,10 +419,16 @@ namespace CSGOSkinAPI.Controllers
             return steamId.ToString().StartsWith("76561") && steamId.ToString().Length == 17;
         }
 
+        // Steam vanity names are letters, digits, underscores and hyphens. Validating before the
+        // name is interpolated into a steamcommunity.com URL keeps an attacker from injecting path
+        // segments, a different host, or query parameters into our server-side fetch (SSRF).
+        internal static bool IsValidVanity(string vanity) =>
+            Regex.IsMatch(vanity, @"^[A-Za-z0-9_-]{2,32}$");
+
         // Classifies a user input - a raw SteamId64, a profiles/<id64> URL, an id/<vanity> URL,
         // or a bare vanity name - into either a known SteamId64 or a vanity that still needs a
         // lookup. Centralizes the parsing so every caller (resolve + profile XML) stays in sync.
-        private static (ulong? steamId64, string? vanity) ParseSteamInput(string input)
+        internal static (ulong? steamId64, string? vanity) ParseSteamInput(string input)
         {
             // Already a valid SteamId64
             if (ulong.TryParse(input, out var id) && IsValidSteamId64(id))
@@ -432,11 +441,11 @@ namespace CSGOSkinAPI.Controllers
 
             // id/<vanity> URL
             var customUrlMatch = Regex.Match(input, @"steamcommunity\.com/id/([^/?]+)");
-            if (customUrlMatch.Success)
+            if (customUrlMatch.Success && IsValidVanity(customUrlMatch.Groups[1].Value))
                 return (null, customUrlMatch.Groups[1].Value);
 
             // Bare vanity name (not a steamcommunity URL, not an all-digit id)
-            if (!input.Contains("steamcommunity.com") && !input.All(char.IsDigit))
+            if (!input.Contains("steamcommunity.com") && !input.All(char.IsDigit) && IsValidVanity(input))
                 return (null, input);
 
             return (null, null);
