@@ -1,6 +1,7 @@
 // Project-wide usings, shared by Program.cs and the extracted controller/service/model files.
 // (System.*, System.Linq, Microsoft.AspNetCore.*, Microsoft.Extensions.* etc. come from the
 // SDK's implicit usings.)
+global using Microsoft.AspNetCore.Diagnostics;
 global using Microsoft.AspNetCore.Mvc;
 global using Microsoft.AspNetCore.Rewrite;
 global using Microsoft.Data.Sqlite;

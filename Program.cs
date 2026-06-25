@@ -34,6 +34,21 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<InventoryWarmServi
 
 var app = builder.Build();
 
+// Any unhandled exception from an endpoint becomes a generic 500 here, logged server-side. This
+// keeps internal detail (paths, SQL, library internals) out of the response and means individual
+// actions don't each need a copy-pasted catch-all.
+app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
+{
+    var error = context.Features.Get<IExceptionHandlerFeature>()?.Error;
+    if (error != null)
+    {
+        Console.WriteLine($"Unhandled exception on {context.Request.Path}: {error.Message}");
+        Console.WriteLine(error.StackTrace);
+    }
+    context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+    await context.Response.WriteAsJsonAsync(new { error = "Internal server error" });
+}));
+
 app.UseResponseCompression();
 // Serve the inventory page at the clean /inventory URL.
 app.UseRewriter(new RewriteOptions()

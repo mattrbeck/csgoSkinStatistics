@@ -19,66 +19,58 @@ namespace CSGOSkinAPI.Controllers
             [FromQuery] ulong s = 0, [FromQuery] ulong a = 0,
             [FromQuery] ulong d = 0, [FromQuery] ulong m = 0)
         {
-            try
+            // Unhandled exceptions bubble to the global handler in Program.cs (generic 500).
+            if (!string.IsNullOrEmpty(url))
             {
-                if (!string.IsNullOrEmpty(url))
+                var parsed = ParseInspectUrl(url);
+                if (parsed == null)
                 {
-                    var parsed = ParseInspectUrl(url);
-                    if (parsed == null)
-                    {
-                        Console.WriteLine("Failed to parse inspect URL");
-                        return BadRequest(new { error = "Invalid inspect URL format" });
-                    }
-
-                    (s, a, d, m, var directItem) = parsed.Value;
-
-                    if (directItem != null)
-                    {
-                        return Ok(CreateResponse(directItem, constDataService, s, a, d, m));
-                    }
+                    Console.WriteLine("Failed to parse inspect URL");
+                    return BadRequest(new { error = "Invalid inspect URL format" });
                 }
 
-                // Cache hit is authoritative for the item's config: an itemid encodes an
-                // immutable config. Any mutation (sticker/keychain applied or removed, name tag,
-                // etc.) mints a brand-new itemid in the GC, so the row we stored for this id can
-                // never disagree with the live item's config. (The StatTrak kill count and
-                // inventory slot do drift under a fixed itemid; we persist the kill count, so a
-                // cache hit may report a count slightly behind the live one - acceptable, and far
-                // better than none. A hex cert link decodes fresh and is always current. See
-                // docs/inventory-endpoint-cert.md, "applying a sticker mints a new itemid".)
-                var existingItem = await dbService.GetItemAsync(a);
-                if (existingItem != null)
-                {
-                    return Ok(CreateResponse(existingItem, constDataService, s, a, d, m));
-                }
+                (s, a, d, m, var directItem) = parsed.Value;
 
-                // A classic S-form link that missed the cache still goes through the GC below,
-                // but it also tells us whose inventory the wild link points into. Queue a
-                // background warm of that whole inventory (cert decode, no GC traffic) so
-                // follow-up lookups of the owner's other items become DB hits. M-form market
-                // links carry no owner id, so they can't be warmed.
-                if (s >= MinSteamId64)
+                if (directItem != null)
                 {
-                    Console.WriteLine($"Cache miss for item {a}; queueing inventory warm for owner {s}");
-                    warmService.Enqueue(s);
+                    return Ok(CreateResponse(directItem, constDataService, s, a, d, m));
                 }
-
-                var itemInfo = await steamService.GetItemInfoAsync(s, a, d, m);
-                if (itemInfo == null)
-                {
-                    Console.WriteLine("Item not found in Steam GC");
-                    return NotFound(new { error = "Steam GC did not return an item" });
-                }
-
-                await dbService.SaveItemWithExtrasAsync(itemInfo);
-                return Ok(CreateResponse(itemInfo, constDataService, s, a, d, m));
             }
-            catch (Exception ex)
+
+            // Cache hit is authoritative for the item's config: an itemid encodes an
+            // immutable config. Any mutation (sticker/keychain applied or removed, name tag,
+            // etc.) mints a brand-new itemid in the GC, so the row we stored for this id can
+            // never disagree with the live item's config. (The StatTrak kill count and
+            // inventory slot do drift under a fixed itemid; we persist the kill count, so a
+            // cache hit may report a count slightly behind the live one - acceptable, and far
+            // better than none. A hex cert link decodes fresh and is always current. See
+            // docs/inventory-endpoint-cert.md, "applying a sticker mints a new itemid".)
+            var existingItem = await dbService.GetItemAsync(a);
+            if (existingItem != null)
             {
-                Console.WriteLine($"Error in GetSkinData: {ex.Message}");
-                Console.WriteLine(ex.StackTrace);
-                return StatusCode(500, new { error = "Internal server error" });
+                return Ok(CreateResponse(existingItem, constDataService, s, a, d, m));
             }
+
+            // A classic S-form link that missed the cache still goes through the GC below,
+            // but it also tells us whose inventory the wild link points into. Queue a
+            // background warm of that whole inventory (cert decode, no GC traffic) so
+            // follow-up lookups of the owner's other items become DB hits. M-form market
+            // links carry no owner id, so they can't be warmed.
+            if (s >= MinSteamId64)
+            {
+                Console.WriteLine($"Cache miss for item {a}; queueing inventory warm for owner {s}");
+                warmService.Enqueue(s);
+            }
+
+            var itemInfo = await steamService.GetItemInfoAsync(s, a, d, m);
+            if (itemInfo == null)
+            {
+                Console.WriteLine("Item not found in Steam GC");
+                return NotFound(new { error = "Steam GC did not return an item" });
+            }
+
+            await dbService.SaveItemWithExtrasAsync(itemInfo);
+            return Ok(CreateResponse(itemInfo, constDataService, s, a, d, m));
         }
 
         [HttpGet("inventory")]
@@ -264,12 +256,7 @@ namespace CSGOSkinAPI.Controllers
                 Console.WriteLine($"JSON parsing error: {ex.Message}");
                 return BadRequest(new { error = "Invalid response from Steam API" });
             }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error in GetInventoryData: {ex.Message}");
-                Console.WriteLine(ex.StackTrace);
-                return StatusCode(500, new { error = "Internal server error" });
-            }
+            // Anything else bubbles to the global handler in Program.cs (generic 500).
         }
 
         [HttpGet("profile")]
@@ -286,46 +273,39 @@ namespace CSGOSkinAPI.Controllers
                 return BadRequest(new { error = "Unable to determine profile for the given Steam ID" });
             }
 
-            try
+            // Unhandled exceptions bubble to the global handler in Program.cs (generic 500).
+            using var httpClient = httpClientFactory.CreateClient("steam");
+            httpClient.Timeout = TimeSpan.FromSeconds(5);
+
+            var response = await httpClient.GetAsync(xmlUrl);
+            if (!response.IsSuccessStatusCode)
             {
-                using var httpClient = httpClientFactory.CreateClient("steam");
-                httpClient.Timeout = TimeSpan.FromSeconds(5);
-
-                var response = await httpClient.GetAsync(xmlUrl);
-                if (!response.IsSuccessStatusCode)
-                {
-                    return BadRequest(new { error = $"Failed to fetch profile: {response.StatusCode}" });
-                }
-
-                var profile = ParseProfileXml(await response.Content.ReadAsStringAsync());
-                if (profile.SteamId == null)
-                {
-                    return BadRequest(new { error = "Unable to resolve Steam profile" });
-                }
-
-                return Ok(new
-                {
-                    success = 1,
-                    steamid = profile.SteamId.ToString(),
-                    // The canonical value for the location hash: prefer the vanity name when the
-                    // profile has one (friendlier, round-trips back to /id/<vanity>), else the id64.
-                    hash = string.IsNullOrEmpty(profile.CustomUrl) ? profile.SteamId.ToString() : profile.CustomUrl,
-                    persona_name = profile.Persona,
-                    avatar = profile.Avatar,
-                    trade_ban_state = profile.TradeBanState,
-                    limited_account = profile.LimitedAccount,
-                    // Prefer the vanity URL (/id/<vanity>) when the profile exposes one; Steam omits
-                    // customURL for some profiles, so fall back to the /profiles/<id64> form.
-                    profile_url = string.IsNullOrEmpty(profile.CustomUrl)
-                        ? $"https://steamcommunity.com/profiles/{profile.SteamId}"
-                        : $"https://steamcommunity.com/id/{profile.CustomUrl}"
-                });
+                return BadRequest(new { error = $"Failed to fetch profile: {response.StatusCode}" });
             }
-            catch (Exception ex)
+
+            var profile = ParseProfileXml(await response.Content.ReadAsStringAsync());
+            if (profile.SteamId == null)
             {
-                Console.WriteLine($"Error fetching profile for '{steamid}': {ex.Message}");
-                return StatusCode(500, new { error = "Failed to fetch profile" });
+                return BadRequest(new { error = "Unable to resolve Steam profile" });
             }
+
+            return Ok(new
+            {
+                success = 1,
+                steamid = profile.SteamId.ToString(),
+                // The canonical value for the location hash: prefer the vanity name when the
+                // profile has one (friendlier, round-trips back to /id/<vanity>), else the id64.
+                hash = string.IsNullOrEmpty(profile.CustomUrl) ? profile.SteamId.ToString() : profile.CustomUrl,
+                persona_name = profile.Persona,
+                avatar = profile.Avatar,
+                trade_ban_state = profile.TradeBanState,
+                limited_account = profile.LimitedAccount,
+                // Prefer the vanity URL (/id/<vanity>) when the profile exposes one; Steam omits
+                // customURL for some profiles, so fall back to the /profiles/<id64> form.
+                profile_url = string.IsNullOrEmpty(profile.CustomUrl)
+                    ? $"https://steamcommunity.com/profiles/{profile.SteamId}"
+                    : $"https://steamcommunity.com/id/{profile.CustomUrl}"
+            });
         }
 
         // A 17-digit id64 in the "76561…" individual-account block. Checked numerically rather
