@@ -1553,8 +1553,6 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
 
       inventoryItems.push(itemData);
     }
-    
-    console.log(`Resolved ${preloadedCount} items from the inventory response, ${itemsNeedingAnalysis.length} need a Game Coordinator lookup`);
 
     // Update summary with initial data including pre-loaded items
     updateSummary(inventoryData, processedItems);
@@ -1564,8 +1562,7 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
     populateTypeFilter();
     elements.sidebar.style.display = 'block';
 
-    // Initialize filtered items with all items and apply initial sort/filter
-    filteredItems = [...inventoryItems];
+    // Apply the initial sort/filter (it populates filteredItems from inventoryItems).
     applySortAndFilter(false);
 
     if (itemsNeedingAnalysis.length === 0) {
