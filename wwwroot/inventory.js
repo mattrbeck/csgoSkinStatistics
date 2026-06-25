@@ -1466,8 +1466,16 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
     const response = await fetch(`/api/inventory?steamid=${encodeURIComponent(userInput)}`, {
       signal: analysisController.signal
     });
-    const inventoryData = await response.json();
-    
+    // The API reports its own failures as a JSON { error } body (even with a 4xx/5xx status), so
+    // parse first. Only fall back to a status-based message when the body isn't JSON at all
+    // (e.g. a proxy error page), which would otherwise surface as an opaque SyntaxError.
+    let inventoryData;
+    try {
+      inventoryData = await response.json();
+    } catch {
+      throw new Error(response.ok ? 'Invalid response from server' : `Request failed (${response.status})`);
+    }
+
     if (inventoryData.error) {
       throw new Error(inventoryData.error);
     }
