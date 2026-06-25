@@ -1,22 +1,3 @@
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Rewrite;
-using Microsoft.Data.Sqlite;
-using SteamKit2;
-using SteamKit2.Authentication;
-using SteamKit2.GC;
-using SteamKit2.GC.CSGO.Internal;
-using SteamKit2.Internal;
-using System.Collections.Concurrent;
-using System.Text.Json;
-using System.Threading.Channels;
-using System.Text.Json.Serialization;
-using System.Text.RegularExpressions;
-using System.Web;
-using CSGOSkinAPI.Services;
-using CSGOSkinAPI.Models;
-using ProtoBuf;
-using System.Runtime.CompilerServices;
-
 [assembly: InternalsVisibleTo("csgoSkinStatistics.Tests")]
 
 var builder = WebApplication.CreateBuilder(args);
