@@ -196,7 +196,9 @@ inventory-item {
   background-color: var(--dark);
   border-radius: 8px;
   padding: 15px;
-  transition: all 0.3s ease;
+
+  /* Match the shadow :host: only animate the properties that actually change, not 'all'. */
+  transition: transform 0.3s ease, box-shadow 0.3s ease, border-left-color 0.3s ease, opacity 0.3s ease;
   border-left: 4px solid var(--gray);
   position: relative;
 }

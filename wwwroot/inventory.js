@@ -35,7 +35,9 @@ class InventoryItem extends HTMLElement {
         background-color: var(--dark, #0f1d2a);
         border-radius: 8px;
         padding: 15px;
-        transition: all 0.3s ease;
+        /* Only the properties that actually animate: hover lift/shadow, the rarity edge color,
+           and the loading fade. (Avoids 'all', which would also watch layout properties.) */
+        transition: transform 0.3s ease, box-shadow 0.3s ease, border-left-color 0.3s ease, opacity 0.3s ease;
         border-left: 4px solid var(--gray, #1f2d3a);
         position: relative;
       }
