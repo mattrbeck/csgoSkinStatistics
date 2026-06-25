@@ -945,20 +945,23 @@ function matchesSearch(item, normalizedQuery) {
   return normalizedQuery.split(' ').every(token => item.searchText.includes(token));
 }
 
-const WEAR_ABBREVIATIONS = {
-  'Factory New': 'FN',
-  'Minimal Wear': 'MW',
-  'Field-Tested': 'FT',
-  'Well-Worn': 'WW',
-  'Battle-Scarred': 'BS'
-};
+// Single source for the five wear tiers: display name, abbreviation, and the exclusive upper
+// float bound of each. getWearFromFloat, the wear-pill abbreviations, and the wear-filter
+// ranges all derive from this, so the 0.07/0.15/0.38/0.45 boundaries live in one place.
+// (decals.js keeps its own copy for the builders shared with the item page, which load as a
+// separate global script.)
+const WEAR_TIERS = [
+  { name: 'Factory New', abbr: 'FN', max: 0.07 },
+  { name: 'Minimal Wear', abbr: 'MW', max: 0.15 },
+  { name: 'Field-Tested', abbr: 'FT', max: 0.38 },
+  { name: 'Well-Worn', abbr: 'WW', max: 0.45 },
+  { name: 'Battle-Scarred', abbr: 'BS', max: 1.00 }
+];
+
+const WEAR_ABBREVIATIONS = Object.fromEntries(WEAR_TIERS.map(t => [t.name, t.abbr]));
 
 function getWearFromFloat(float) {
-  if (float < 0.07) return "Factory New";
-  if (float < 0.15) return "Minimal Wear";
-  if (float < 0.38) return "Field-Tested";
-  if (float < 0.45) return "Well-Worn";
-  return "Battle-Scarred";
+  return (WEAR_TIERS.find(t => float < t.max) ?? WEAR_TIERS[WEAR_TIERS.length - 1]).name;
 }
 
 function getRarityFromNumber(rarityNumber) {
@@ -1856,14 +1859,11 @@ window.addEventListener("load", function () {
     applySortAndFilter();
   });
 
-  // Wear ranges for each condition
-  const wearRanges = {
-    'Factory New': { min: 0.00, max: 0.07 },
-    'Minimal Wear': { min: 0.07, max: 0.15 },
-    'Field-Tested': { min: 0.15, max: 0.38 },
-    'Well-Worn': { min: 0.38, max: 0.45 },
-    'Battle-Scarred': { min: 0.45, max: 1.00 }
-  };
+  // Float bounds per wear condition, derived from WEAR_TIERS: each tier runs from the previous
+  // tier's upper bound to its own.
+  const wearRanges = Object.fromEntries(WEAR_TIERS.map((t, i) => [
+    t.name, { min: i === 0 ? 0 : WEAR_TIERS[i - 1].max, max: t.max }
+  ]));
 
   // Auto-apply filters when wear changes and update float controls
   elements.filterWear.addEventListener("change", function() {
