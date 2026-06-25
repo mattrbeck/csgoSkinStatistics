@@ -1,4 +1,6 @@
 *.db
+*.db-wal
+*.db-shm
 steam-accounts.json
 steam-tokens.json
 bin/

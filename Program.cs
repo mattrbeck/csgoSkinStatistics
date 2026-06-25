@@ -1368,10 +1368,31 @@ namespace CSGOSkinAPI.Services
             _connectionString = $"Data Source={dbPath};foreign keys=true;";
         }
 
+        // Opens a connection with a busy timeout so a read that lands during a write waits for the
+        // lock instead of failing immediately with SQLITE_BUSY. The warm service writes
+        // concurrently with cache-hit reads, so this matters under load.
+        private async Task<SqliteConnection> OpenConnectionAsync()
+        {
+            var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync();
+            await using var pragma = connection.CreateCommand();
+            pragma.CommandText = "PRAGMA busy_timeout=5000;";
+            await pragma.ExecuteNonQueryAsync();
+            return connection;
+        }
+
         public async Task InitializeDatabaseAsync()
         {
-            using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync();
+            using var connection = await OpenConnectionAsync();
+
+            // WAL lets readers and a writer proceed concurrently (the default rollback journal
+            // blocks readers during a write). It is a persistent property of the database file,
+            // so setting it once at startup is enough.
+            await using (var walCommand = connection.CreateCommand())
+            {
+                walCommand.CommandText = "PRAGMA journal_mode=WAL;";
+                await walCommand.ExecuteNonQueryAsync();
+            }
 
             // `itemid` is a sound PRIMARY KEY because it is immutable identity: the GC mints
             // a new itemid whenever an item's config changes (stickers, name tag, ...), so a
@@ -1468,8 +1489,7 @@ namespace CSGOSkinAPI.Services
 
         public async Task<List<CEconItemPreviewDataBlock.Sticker>> GetStickersAsync(ulong itemId, bool stickersTable)
         {
-            using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync();
+            using var connection = await OpenConnectionAsync();
 
             const string stickersQuery = "SELECT * FROM stickers WHERE itemid = @itemid ORDER BY slot";
             const string keychainsQuery = "SELECT * FROM keychains WHERE itemid = @itemid ORDER BY slot";
@@ -1524,8 +1544,7 @@ namespace CSGOSkinAPI.Services
 
         public async Task<CEconItemPreviewDataBlock?> GetItemAsync(ulong itemId)
         {
-            using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync();
+            using var connection = await OpenConnectionAsync();
 
             var query = "SELECT * FROM searches WHERE itemid = @itemid";
             using var command = new SqliteCommand(query, connection);
@@ -1574,8 +1593,7 @@ namespace CSGOSkinAPI.Services
 
         public async Task SaveItemAsync(CEconItemPreviewDataBlock item)
         {
-            using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync();
+            using var connection = await OpenConnectionAsync();
             await InsertSearchRowAsync(item, connection, null);
         }
 
@@ -1623,8 +1641,7 @@ namespace CSGOSkinAPI.Services
             // unique constraint on (itemid, slot) — slots are deliberately non-unique so
             // stacked stickers can share a slot — so we clear and rewrite the whole set
             // rather than relying on an upsert. (See docs/inventory-endpoint-cert.md 3b.)
-            using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync();
+            using var connection = await OpenConnectionAsync();
             using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync();
 
             await InsertSearchRowAsync(itemInfo, connection, transaction);
@@ -1687,8 +1704,7 @@ namespace CSGOSkinAPI.Services
 
         public async Task<DateTime?> GetLastWarmAsync(ulong steamid)
         {
-            using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync();
+            using var connection = await OpenConnectionAsync();
 
             using var command = new SqliteCommand("SELECT last_warmed FROM inventory_warms WHERE steamid = @steamid", connection);
             command.Parameters.AddWithValue("@steamid", (long)steamid);
@@ -1701,8 +1717,7 @@ namespace CSGOSkinAPI.Services
 
         public async Task RecordWarmAsync(ulong steamid, int itemsCached)
         {
-            using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync();
+            using var connection = await OpenConnectionAsync();
 
             const string upsertQuery = @"INSERT OR REPLACE INTO inventory_warms
                 (steamid, last_warmed, items_cached)
