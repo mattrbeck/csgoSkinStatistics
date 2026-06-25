@@ -797,7 +797,7 @@ class InventoryItem extends HTMLElement {
           setTimeout(() => {
             floatElement.innerHTML = floatMarkup;
           }, 1000);
-        });
+        }).catch(() => { /* clipboard blocked (insecure context / denied); leave the value as-is */ });
       };
       floatElement.onclick = copyFloat;
       floatElement.tabIndex = 0;
