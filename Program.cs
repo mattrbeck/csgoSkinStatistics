@@ -163,7 +163,7 @@ namespace CSGOSkinAPI.Controllers
             {
                 Console.WriteLine($"Error in GetSkinData: {ex.Message}");
                 Console.WriteLine(ex.StackTrace);
-                return StatusCode(500, new { error = ex.Message });
+                return StatusCode(500, new { error = "Internal server error" });
             }
         }
 
@@ -354,7 +354,7 @@ namespace CSGOSkinAPI.Controllers
             {
                 Console.WriteLine($"Error in GetInventoryData: {ex.Message}");
                 Console.WriteLine(ex.StackTrace);
-                return StatusCode(500, new { error = ex.Message });
+                return StatusCode(500, new { error = "Internal server error" });
             }
         }
 
