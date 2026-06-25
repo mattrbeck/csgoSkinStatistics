@@ -676,33 +676,39 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
     // Initialize inventory data structure
     inventoryItems = [];
 
+    // First pass: build the data model in original Steam order, so originalIndex - used by the
+    // "date" sort and as each card's stable key - stays correct.
     for (let i = 0; i < csgoItems.length; i++) {
       const item = csgoItems[i];
-      const itemElement = createItemElement(item, i);
-      itemElements.set(i, itemElement);
-      inventoryGrid.appendChild(itemElement);
+      const itemData = { originalIndex: i, steamData: item, detailedData: null };
 
-      // Store item data in our structure
-      const itemData = {
-        originalIndex: i,
-        steamData: item,
-        detailedData: null
-      };
-
-      // Check if we have existing data for this item
       if (item.existing_data) {
-        // Item already exists in database - update it immediately
         itemData.detailedData = item.existing_data;
         processedItems[i] = item.existing_data;
-        updateItemWithDetails(item.existing_data, i, item.inspect_link);
         preloadedCount++;
       } else {
-        // Item needs analysis - add to queue
         processedItems[i] = null;
         itemsNeedingAnalysis.push({ item, index: i });
       }
 
       inventoryItems.push(itemData);
+    }
+
+    // Second pass: create and append the cards in the order they'll actually be shown. The whole
+    // inventory arrives in one /inventory response and the default sort (rarity) needs only the
+    // basic Steam data, so we can sort up front - this renders items directly in their final
+    // order instead of appending in Steam order and reshuffling on the next applySortAndFilter,
+    // which removes a full-grid relayout and the visible reorder flash on load.
+    const renderOrder = sortItems([...inventoryItems], currentSort.field, currentSort.order);
+    for (const itemData of renderOrder) {
+      const i = itemData.originalIndex;
+      const itemElement = createItemElement(itemData.steamData, i);
+      itemElements.set(i, itemElement);
+      inventoryGrid.appendChild(itemElement); // connects the card, building its shadow DOM
+      if (itemData.detailedData) {
+        // updateWithDetails reads the shadow DOM, so it must run after the append above.
+        updateItemWithDetails(itemData.detailedData, i, itemData.steamData.inspect_link);
+      }
     }
 
     // Update summary with initial data including pre-loaded items
