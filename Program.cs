@@ -936,6 +936,17 @@ namespace CSGOSkinAPI.Services
                         }
                         return existingList;
                     });
+
+                // Bound the wait: if the leader request never completes - or a race left this
+                // waiter on a list nobody is driving - return null instead of hanging forever.
+                // The window covers the leader's own 2s-per-account retry budget plus slack.
+                var coalescedTimeout = Task.Delay(TimeSpan.FromSeconds(10));
+                if (await Task.WhenAny(tcs.Task, coalescedTimeout) == coalescedTimeout)
+                {
+                    RemovePendingRequest(jobId, tcs);
+                    Console.WriteLine($"Coalesced wait for itemid {jobId} timed out");
+                    return null;
+                }
                 return await tcs.Task;
             }
 
@@ -973,6 +984,22 @@ namespace CSGOSkinAPI.Services
             return null;
         }
 
+        // Removes one waiter from a job's pending list, dropping the job entry when it was the last.
+        private void RemovePendingRequest(ulong jobId, TaskCompletionSource<CEconItemPreviewDataBlock?> tcs)
+        {
+            if (_pendingRequests.TryGetValue(jobId, out var list))
+            {
+                lock (list)
+                {
+                    list.Remove(tcs);
+                    if (list.Count == 0)
+                    {
+                        _pendingRequests.TryRemove(jobId, out _);
+                    }
+                }
+            }
+        }
+
         private async Task<CEconItemPreviewDataBlock?> TryGCRequestWithAccount(SteamAccountManager accountManager, ulong s, ulong a, ulong d, ulong m, ulong jobId)
         {
             var tcs = new TaskCompletionSource<CEconItemPreviewDataBlock?>();
@@ -997,19 +1024,7 @@ namespace CSGOSkinAPI.Services
 
                 if (completedTask == timeoutTask)
                 {
-                    // Clean up this request from pending list
-                    if (_pendingRequests.TryGetValue(jobId, out var timedOutList))
-                    {
-                        lock (timedOutList)
-                        {
-                            timedOutList.Remove(tcs);
-                            if (timedOutList.Count == 0)
-                            {
-                                _pendingRequests.TryRemove(jobId, out _);
-                            }
-                        }
-                    }
-
+                    RemovePendingRequest(jobId, tcs);
                     return null; // Timeout - will try next account
                 }
 
@@ -1018,20 +1033,7 @@ namespace CSGOSkinAPI.Services
             catch (Exception ex)
             {
                 Console.WriteLine($"[{accountManager.Account.Username}] Failed to send GC request: {ex.Message}");
-
-                // Clean up this request from pending list
-                if (_pendingRequests.TryGetValue(jobId, out var failedList))
-                {
-                    lock (failedList)
-                    {
-                        failedList.Remove(tcs);
-                        if (failedList.Count == 0)
-                        {
-                            _pendingRequests.TryRemove(jobId, out _);
-                        }
-                    }
-                }
-
+                RemovePendingRequest(jobId, tcs);
                 return null; // Exception - will try next account
             }
         }
