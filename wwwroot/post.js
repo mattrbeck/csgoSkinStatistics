@@ -253,3 +253,9 @@ function post(url, key) {
       renderErrorCard(card, "Failed to load item details");
     });
 }
+
+// Exposed for unit tests under Node/CommonJS. The browser has no `module`, so this is skipped
+// there and the functions stay ordinary globals loaded via <script>.
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { renderName, renderErrorCard };
+}

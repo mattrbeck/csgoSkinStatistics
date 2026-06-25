@@ -219,3 +219,12 @@ function buildWearPill(paintwearFloat) {
   pill.textContent = abbr;
   return pill;
 }
+
+// Exposed for unit tests under Node/CommonJS. The browser has no `module`, so this is skipped
+// there and the functions stay ordinary globals loaded via <script>.
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    rarityColorOf, buildWearPill, buildStickerChips, buildFloatBar, RARITY_COLORS,
+    DECAL_WEAR_ABBREVIATIONS
+  };
+}
