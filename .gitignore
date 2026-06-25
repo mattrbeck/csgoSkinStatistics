@@ -1,4 +1,4 @@
-searches.db
+*.db
 steam-accounts.json
 steam-tokens.json
 bin/
@@ -14,8 +14,6 @@ TestResults/
 *.trx
 *.coverage
 junit.xml
-*_test.db
-*.test.db
 
 # Jest
 __snapshots__/
