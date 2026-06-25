@@ -34,7 +34,7 @@ function Invoke-TestCommand {
 Write-Host "`nChecking dependencies..." -ForegroundColor Yellow
 
 if (-not (Get-Command "dotnet" -ErrorAction SilentlyContinue)) {
-    Write-Host "ERROR: .NET CLI not found. Please install .NET 9.0 SDK" -ForegroundColor Red
+    Write-Host "ERROR: .NET CLI not found. Please install .NET 10.0 SDK" -ForegroundColor Red
     exit 1
 }
 

@@ -173,7 +173,7 @@ start coverage/lcov-report/index.html # Windows
 The project includes a GitHub Actions workflow (`.github/workflows/ci.yml`) that:
 
 1. **Runs on**: Push to main branches, pull requests
-2. **Test Environment**: Ubuntu latest with .NET 9.0 and Node.js 20.x
+2. **Test Environment**: Ubuntu latest with .NET 10.0 and Node.js 20.x
 3. **Steps**:
    - Checkout code
    - Setup .NET and Node.js
@@ -264,7 +264,7 @@ While not included in the current setup, consider adding:
 4. **Permission denied**: Make test-runner.sh executable (`chmod +x test-runner.sh`)
 
 ### Environment Issues
-- Ensure .NET 9.0 SDK is installed
+- Ensure .NET 10.0 SDK is installed
 - Ensure Node.js 20+ is installed
 - Check that all npm dependencies are installed
 

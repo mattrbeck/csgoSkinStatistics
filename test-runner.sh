@@ -37,7 +37,7 @@ run_test() {
 echo -e "\n${YELLOW}Checking dependencies...${NC}"
 
 if ! command -v dotnet &> /dev/null; then
-    echo -e "${RED}ERROR: .NET CLI not found. Please install .NET 9.0 SDK${NC}"
+    echo -e "${RED}ERROR: .NET CLI not found. Please install .NET 10.0 SDK${NC}"
     exit 1
 fi
 
