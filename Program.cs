@@ -567,7 +567,16 @@ namespace CSGOSkinAPI.Controllers
                     Console.WriteLine($"Failed to decode URL: {url}");
                     return null;
                 }
-                var rawBytes = Convert.FromHexString(hexMatch.Groups[1].Value);
+                var hexValue = hexMatch.Groups[1].Value;
+                // Real inspect certs are a few hundred hex chars; cap the length so a crafted
+                // multi-megabyte payload can't force a huge allocation and protobuf parse on the
+                // request thread.
+                if (hexValue.Length > 2048)
+                {
+                    Console.WriteLine($"Hex payload too long: {url}");
+                    return null;
+                }
+                var rawBytes = Convert.FromHexString(hexValue);
                 // Need at least the leading byte, one protobuf byte, and the 4-byte checksum.
                 if (rawBytes.Length < 6)
                 {
@@ -584,7 +593,8 @@ namespace CSGOSkinAPI.Controllers
                 }
                 // Drop the leading xor byte and the trailing 4 checksum bytes
                 var hexBytes = rawBytes[1..^4];
-                var itemInfoProto = Serializer.Deserialize<CEconItemPreviewDataBlock>(new MemoryStream(hexBytes));
+                using var hexStream = new MemoryStream(hexBytes);
+                var itemInfoProto = Serializer.Deserialize<CEconItemPreviewDataBlock>(hexStream);
                 return (0, itemInfoProto.itemid, 0, 0, itemInfoProto);
             }
 

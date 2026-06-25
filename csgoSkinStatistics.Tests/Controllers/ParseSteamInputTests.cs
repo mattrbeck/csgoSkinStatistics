@@ -48,6 +48,15 @@ public class ParseSteamInputTests
         Assert.Null(vanity);
     }
 
+    [Fact]
+    public void ParseInspectUrl_OverlongHexPayload_ReturnsNull()
+    {
+        // A multi-megabyte hex payload must be rejected before it is hex-decoded and protobuf-parsed.
+        var hugeHex = new string('A', 5000);
+        var url = "steam://rungame/730/0/+csgo_econ_action_preview " + hugeHex;
+        Assert.Null(SkinController.ParseInspectUrl(url));
+    }
+
     [Theory]
     [InlineData("mattrb", true)]
     [InlineData("a-b_c123", true)]
