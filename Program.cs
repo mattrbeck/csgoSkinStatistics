@@ -844,6 +844,7 @@ namespace CSGOSkinAPI.Services
         private volatile bool _isRunning = false;
         private readonly ConcurrentDictionary<ulong, List<TaskCompletionSource<CEconItemPreviewDataBlock?>>> _pendingRequests = new();
         private int _currentAccountIndex = 0;
+        private readonly object _accountSelectionLock = new();
 
 
         public SteamService()
@@ -1037,17 +1038,22 @@ namespace CSGOSkinAPI.Services
 
         private SteamAccountManager? GetNextAvailableAccount(HashSet<int> attemptedAccounts)
         {
-            // Round-robin selection, but skip already attempted accounts
-            for (int i = 0; i < _accountManagers.Count; i++)
+            // Round-robin selection, but skip already attempted accounts. Concurrent callers read
+            // and advance _currentAccountIndex, so the read-modify-write is locked - otherwise two
+            // requests can pick the same account and defeat the rotation and per-account throttle.
+            lock (_accountSelectionLock)
             {
-                var index = (_currentAccountIndex + i) % _accountManagers.Count;
-                if (!attemptedAccounts.Contains(index))
+                for (int i = 0; i < _accountManagers.Count; i++)
                 {
-                    _currentAccountIndex = (index + 1) % _accountManagers.Count;
-                    return _accountManagers[index];
+                    var index = (_currentAccountIndex + i) % _accountManagers.Count;
+                    if (!attemptedAccounts.Contains(index))
+                    {
+                        _currentAccountIndex = (index + 1) % _accountManagers.Count;
+                        return _accountManagers[index];
+                    }
                 }
+                return null;
             }
-            return null;
         }
 
         private static async Task SendGCRequest(SteamAccountManager accountManager, ulong s, ulong a, ulong d, ulong m, ulong jobId)
