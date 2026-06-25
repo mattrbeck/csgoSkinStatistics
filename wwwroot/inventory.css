@@ -77,7 +77,7 @@
   margin-top: 18px;
   padding: 12px 16px;
   border-radius: 6px;
-  background-color: rgba(204, 73, 47, 0.15);
+  background-color: rgb(204 73 47 / 15%);
   border: 1px solid var(--error, #cc492f);
   color: var(--error, #cc492f);
   font-weight: bold;
@@ -92,6 +92,12 @@
   color: var(--text);
 }
 
+.summary-persona {
+  font-size: 15px;
+  font-weight: bold;
+  color: var(--text);
+}
+
 .summary-profile:hover .summary-persona {
   color: var(--pop);
 }
@@ -102,12 +108,6 @@
   border-radius: 6px;
   object-fit: cover;
   flex-shrink: 0;
-}
-
-.summary-persona {
-  font-size: 15px;
-  font-weight: bold;
-  color: var(--text);
 }
 
 .rarity-bar {
@@ -444,13 +444,13 @@ inventory-item {
   transition: grid-template-rows 0.3s ease, opacity 0.3s ease, margin-top 0.3s ease;
 }
 
+.sidebar-section {
+  margin-bottom: 25px;
+}
+
 .sidebar-sections > .sidebar-section {
   overflow: hidden;
   min-height: 0;
-}
-
-.sidebar-section {
-  margin-bottom: 25px;
 }
 
 .sidebar-section:last-child {
@@ -521,6 +521,7 @@ inventory-item {
 @media (width <= 1024px) {
   #main-layout {
     flex-direction: column;
+
     /* The base rule's align-items: flex-start is for the row layout; in a column it
        would shrink-wrap children to their content width instead of filling the screen
        (visible on inventories where every item name is short). */
