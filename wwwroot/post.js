@@ -164,6 +164,7 @@ window.addEventListener("load", function () {
       .replace(/^.*csgo_econ_action_preview(%20|\s+)/i, "")
       .trim();
     if (/^[SM]\d+A\d+D\d+$/.test(reduced) || /^[0-9A-F]+$/.test(reduced)) {
+      document.body.classList.remove("pre-search"); // glide the search up out of its centered landing
       window.location.hash = reduced;
       post(inspectPrefix + reduced, reduced);
       controls.textbox.value = ""; // clear on search, like the inventory page

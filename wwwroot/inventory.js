@@ -571,6 +571,8 @@ function reorderAnalysisQueue() {
 
 async function analyzeInventory(userInput, resolvedSteamId = null) {
   try {
+    document.body.classList.remove('pre-search'); // glide the search up out of its centered landing
+
     // A fresh controller starts un-aborted, so it resets the cancellation state too.
     analysisController = new AbortController();
     

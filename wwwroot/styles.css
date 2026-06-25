@@ -43,6 +43,52 @@ body {
   border: 0;
 }
 
+/* Pre-search "hero": on an empty page the search form floats to the vertical middle with a
+   one-line hint; the first search glides it up to the top and the results appear below. Driven
+   purely by transform/opacity (a cheap GPU transition, no reflow). JS removes body.pre-search
+   on the first search; it never returns, so the centered state is only ever the empty landing. */
+#input,
+.search-hint {
+  transition: transform 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.search-hint {
+  margin-top: 12px;
+  max-height: 40px;
+  color: var(--text);
+  opacity: 0.5;
+  font-size: 14px;
+  text-align: center;
+  transition: transform 0.55s cubic-bezier(0.22, 1, 0.36, 1),
+              opacity 0.3s ease, max-height 0.45s ease, margin 0.45s ease;
+}
+
+body.pre-search #input,
+body.pre-search .search-hint {
+  transform: translateY(min(38vh, 360px));
+}
+
+/* After a search the hint fades and collapses so it doesn't sit above the results. */
+body:not(.pre-search) .search-hint {
+  opacity: 0;
+  max-height: 0;
+  margin: 0;
+  pointer-events: none;
+}
+
+/* Respect reduced-motion: skip the hero entirely - the search just stays at the top. */
+@media (prefers-reduced-motion: reduce) {
+  #input,
+  .search-hint {
+    transition: none;
+  }
+
+  body.pre-search #input,
+  body.pre-search .search-hint {
+    transform: none;
+  }
+}
+
 html {
   height: 100%;
   font-size: 16px;
