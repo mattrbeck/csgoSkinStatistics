@@ -29,6 +29,12 @@
   </head>
 
   <body class="pre-search">
+    <script>
+      // A #hash deep-links straight to an item, so the page loads into content: skip the
+      // empty-state hero (no centered search, no glide). Focus is skipped in post.js for the
+      // same reason. Runs before the form is parsed, so there's no flash.
+      if (location.hash) document.body.classList.remove("pre-search");
+    </script>
     <noscript>
       <div style="height: 100vh; width: 100%; position: fixed">
         <p
@@ -109,7 +115,6 @@
         name="id"
         placeholder="Inspect Link"
         onClick="this.select();"
-        autofocus
         accesskey="n"
         title="Enter inspect link to search. Use Alt-N on Windows or Ctrl-Alt-N on Mac to focus on input."
       />

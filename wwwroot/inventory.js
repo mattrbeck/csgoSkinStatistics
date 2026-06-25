@@ -1204,6 +1204,10 @@ window.addEventListener("load", function () {
       elements.textbox.value = hashValue;
       elements.button.click();
     }
+  } else {
+    // Empty landing: put the cursor in the search box. (Skipped above when deep-linking, since
+    // that loads straight into content.)
+    elements.textbox.focus({ preventScroll: true });
   }
 });
 

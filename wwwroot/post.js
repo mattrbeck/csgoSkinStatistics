@@ -177,6 +177,10 @@ window.addEventListener("load", function () {
     const hashURL = window.location.hash.substring(1);
     controls.textbox.value = hashURL;
     controls.button.click();
+  } else {
+    // Empty landing: put the cursor in the search box. (Skipped above when deep-linking, since
+    // that loads straight into content.)
+    controls.textbox.focus({ preventScroll: true });
   }
 });
 
