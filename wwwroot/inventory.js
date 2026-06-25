@@ -1209,17 +1209,19 @@ function getRarityValue(rarity) {
   return rarityOrder[rarity] || 0;
 }
 
-function filterItems(items) {
+// filters defaults to the module-level currentFilters in the browser; tests pass an explicit
+// filters object so they can exercise this against the real implementation.
+function filterItems(items, filters = currentFilters) {
   return items.filter(item => {
     // Hide commemorative items filter (paintindex 0)
-    if (currentFilters.hideCommemorative &&
+    if (filters.hideCommemorative &&
         item.detailedData &&
         item.detailedData.paintindex === 0) {
       return false;
     }
 
     // Text search on the item name (normalized, order-independent tokens)
-    if (!matchesSearch(item, currentFilters.search)) {
+    if (!matchesSearch(item, filters.search)) {
       return false;
     }
 
@@ -1228,44 +1230,44 @@ function filterItems(items) {
     // they work before the GC analysis resolves; special patterns (fade %, fire & ice,
     // blue gem, etc.) come only from the GC data, so unanalyzed items stay hidden until
     // their lookup resolves.
-    if (currentFilters.star && !isStarItem(item.steamData)) {
+    if (filters.star && !isStarItem(item.steamData)) {
       return false;
     }
-    if (currentFilters.stattrak &&
+    if (filters.stattrak &&
         !(item.steamData.name || '').includes('StatTrak™') &&
         !(item.detailedData && item.detailedData.stattrak)) {
       return false;
     }
-    if (currentFilters.souvenir && item.steamData.quality !== 'Souvenir') {
+    if (filters.souvenir && item.steamData.quality !== 'Souvenir') {
       return false;
     }
-    if (currentFilters.special && !(item.detailedData && item.detailedData.special)) {
+    if (filters.special && !(item.detailedData && item.detailedData.special)) {
       return false;
     }
 
     // Item type filter (Steam's "Type" tag: Rifle, Knife, Sticker, Agent, ...)
-    if (currentFilters.type && (item.steamData.item_type || 'Other') !== currentFilters.type) {
+    if (filters.type && (item.steamData.item_type || 'Other') !== filters.type) {
       return false;
     }
 
     // Rarity filter
-    if (currentFilters.rarity && item.steamData.rarity !== currentFilters.rarity) {
+    if (filters.rarity && item.steamData.rarity !== filters.rarity) {
       return false;
     }
-    
+
     // Wear filter
-    if (currentFilters.wear && item.steamData.wear !== currentFilters.wear) {
+    if (filters.wear && item.steamData.wear !== filters.wear) {
       return false;
     }
-    
+
     // Float range filter. Items without a float (unanalyzed, paint-less) pass through.
-    if (currentFilters.floatMin !== null || currentFilters.floatMax !== null) {
+    if (filters.floatMin !== null || filters.floatMax !== null) {
       const itemFloat = getItemFloat(item);
       if (itemFloat !== null) {
-        if (currentFilters.floatMin !== null && itemFloat < currentFilters.floatMin) {
+        if (filters.floatMin !== null && itemFloat < filters.floatMin) {
           return false;
         }
-        if (currentFilters.floatMax !== null && itemFloat > currentFilters.floatMax) {
+        if (filters.floatMax !== null && itemFloat > filters.floatMax) {
           return false;
         }
       }
@@ -2051,3 +2053,13 @@ window.addEventListener("load", function () {
     }
   }
 });
+
+// Exposed for unit tests under Node/CommonJS. The browser has no `module`, so this is skipped
+// there and the functions stay ordinary globals loaded via <script>.
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    uint32ToFloat32, normalizeSearchText, nameSortKey, getItemFloat, matchesSearch,
+    getWearFromFloat, getRarityFromNumber, isStarItem, isKnifeOrGlove,
+    sortItems, getRarityValue, filterItems, validateSteamId, extractSteamIdFromInput
+  };
+}
