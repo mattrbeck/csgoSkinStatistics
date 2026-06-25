@@ -871,8 +871,8 @@ fetch('float-ranges.json')
   .catch(() => { /* cosmetic enhancement; bars simply stay undimmed */ });
 
 let elements;
-let analysisController = null; // AbortController for canceling requests
-let isCancelled = false;
+let analysisController = null; // AbortController for canceling requests; its signal.aborted is the
+                              // single source of truth for whether the current run was cancelled
 const conversionBuffer = new ArrayBuffer(4);
 const conversionView = new DataView(conversionBuffer);
 
@@ -1428,8 +1428,7 @@ function reorderAnalysisQueue() {
 
 async function analyzeInventory(userInput, resolvedSteamId = null) {
   try {
-    // Reset cancellation state and create new AbortController
-    isCancelled = false;
+    // A fresh controller starts un-aborted, so it resets the cancellation state too.
     analysisController = new AbortController();
     
     // Show cancel button, hide analyze button
@@ -1474,7 +1473,7 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
     }
 
     // Check if cancelled after fetching inventory
-    if (isCancelled) {
+    if (analysisController.signal.aborted) {
       throw new Error('Analysis was cancelled');
     }
 
@@ -1586,7 +1585,7 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
     // Process remaining items asynchronously for detailed analysis
     for (let i = 0; i < itemsNeedingAnalysis.length; i++) {
       // Check for cancellation before processing each item
-      if (isCancelled) {
+      if (analysisController.signal.aborted) {
         throw new Error('Analysis was cancelled');
       }
 
@@ -1685,10 +1684,8 @@ function resetFilterControls() {
 }
 
 function cancelAnalysis() {
-  if (analysisController && !isCancelled) {
-    isCancelled = true;
+  if (analysisController && !analysisController.signal.aborted) {
     analysisController.abort();
-    console.log('Analysis cancelled by user');
   }
 }
 
