@@ -2,6 +2,9 @@
   "name": "csgo-skin-statistics",
   "version": "1.0.0",
   "description": "CS:GO Skin Statistics Application",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "test": "jest",
     "test:watch": "jest --watch",
