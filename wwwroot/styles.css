@@ -592,7 +592,10 @@ a:active {
   align-items: center;
   gap: 24px;
   padding: 12px 20px;
-  margin-bottom: 36px;
+
+  /* Same on both pages so the centered empty-state search lands at the same height (and so the
+     margin doesn't change between the hero and results states, which would jump the glide). */
+  margin-bottom: 20px;
   background-color: var(--dark);
 }
 
