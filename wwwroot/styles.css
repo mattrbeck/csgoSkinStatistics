@@ -639,8 +639,8 @@ input[type="text"] {
   min-width: 0;
   background: transparent;
   border: none;
-  text-align: center;
-  padding: 0 10px;
+  text-align: left;
+  padding: 0 16px;
   font-size: 17px;
 }
 
@@ -665,11 +665,14 @@ input[type="text"]:focus {
   background: var(--light);
   color: var(--pop);
   cursor: pointer;
-  transition: background-color 0.2s ease;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
+/* Invert on hover, matching the card-inspect button: the circle fills with the accent and the
+   icon flips to the background color. */
 #button:hover {
-  background: rgb(46 204 113 / 18%);
+  background: var(--pop);
+  color: var(--gray);
 }
 
 #cancel-button {
@@ -677,7 +680,8 @@ input[type="text"]:focus {
 }
 
 #cancel-button:hover {
-  background: rgb(204 73 47 / 18%);
+  background: var(--error);
+  color: var(--gray);
 }
 
 #error-display {
