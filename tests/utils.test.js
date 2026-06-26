@@ -234,13 +234,20 @@ describe('Timing and Performance', () => {
     expect(typeof duration).toBe('number');
   });
 
-  test('should handle delays and timeouts', (done) => {
-    const start = Date.now();
-    setTimeout(() => {
-      const elapsed = Date.now() - start;
-      expect(elapsed).toBeGreaterThanOrEqual(10);
-      done();
-    }, 10);
+  test('should handle delays and timeouts', () => {
+    // Fake timers keep this deterministic - asserting wall-clock elapsed >= 10 against a real
+    // setTimeout can false-fail when the timer fires a hair early or Date.now is coarse under load.
+    jest.useFakeTimers();
+    try {
+      const cb = jest.fn();
+      setTimeout(cb, 10);
+      jest.advanceTimersByTime(9);
+      expect(cb).not.toHaveBeenCalled();
+      jest.advanceTimersByTime(1);
+      expect(cb).toHaveBeenCalledTimes(1);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });
 
