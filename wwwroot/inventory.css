@@ -3,21 +3,6 @@
   margin-bottom: 20px;
 }
 
-#button-container {
-  display: flex;
-}
-
-#cancel-button {
-  font-weight: bold;
-  background-color: var(--error);
-  color: var(--text);
-  transition: background-color 0.5s ease;
-}
-
-#cancel-button:hover {
-  background-color: #e74c3c;
-}
-
 #inventory-status {
   max-width: 600px;
   margin: 20px auto;

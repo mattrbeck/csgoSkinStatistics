@@ -120,10 +120,18 @@
         accesskey="n"
         title="Enter Steam profile URL or Steam ID to analyze their inventory. Use Alt-N on Windows or Ctrl-Alt-N on Mac to focus on input."
       />
-      <div id="button-container">
-        <input style="cursor: pointer" id="button" type="button" value="Analyze" />
-        <input style="cursor: pointer; display: none;" id="cancel-button" type="button" value="Cancel" />
-      </div>
+      <button id="button" type="button" aria-label="Analyze" title="Analyze">
+        <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="10.5" cy="10.5" r="5.5" fill="none" stroke="currentColor" stroke-width="2.4" />
+          <line x1="14.8" y1="14.8" x2="20.5" y2="20.5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" />
+        </svg>
+      </button>
+      <button id="cancel-button" type="button" aria-label="Cancel" title="Cancel" style="display: none;">
+        <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+          <line x1="6" y1="6" x2="18" y2="18" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" />
+          <line x1="18" y1="6" x2="6" y2="18" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" />
+        </svg>
+      </button>
     </form>
 
     <p class="search-hint">Paste a Steam profile URL or ID to analyze its CS2 inventory.</p>

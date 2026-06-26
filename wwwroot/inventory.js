@@ -578,7 +578,7 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
     
     // Show cancel button, hide analyze button
     elements.button.style.display = 'none';
-    elements.cancelButton.style.display = 'inline-block';
+    elements.cancelButton.style.display = 'flex';
     
     elements.errorDisplay.style.display = 'none';
     elements.status.textContent = '';
@@ -806,7 +806,7 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
     elements.errorDisplay.style.display = 'block';
   } finally {
     // Always restore button states
-    elements.button.style.display = 'inline-block';
+    elements.button.style.display = 'flex';
     elements.cancelButton.style.display = 'none';
     analysisController = null;
   }
@@ -856,7 +856,7 @@ function resetInterface() {
   elements.status.textContent = '';
 
   // Reset button states
-  elements.button.style.display = 'inline-block';
+  elements.button.style.display = 'flex';
   elements.cancelButton.style.display = 'none';
 
   // Reset data
@@ -955,8 +955,8 @@ window.addEventListener("load", function () {
     }
   });
 
-  elements.button.addEventListener("click", function (element) {
-    element.target.blur();
+  elements.button.addEventListener("click", function (event) {
+    event.currentTarget.blur(); // currentTarget is the button itself, not the clicked inner <svg>
 
     const userInput = elements.textbox.value.trim();
 
@@ -974,8 +974,8 @@ window.addEventListener("load", function () {
     analyzeInventory(userInput, extractedSteamId);
   });
 
-  elements.cancelButton.addEventListener("click", function (element) {
-    element.target.blur();
+  elements.cancelButton.addEventListener("click", function (event) {
+    event.currentTarget.blur(); // currentTarget is the button itself, not the clicked inner <svg>
     cancelAnalysis();
   });
 

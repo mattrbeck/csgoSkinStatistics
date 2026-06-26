@@ -155,8 +155,8 @@ window.addEventListener("load", function () {
     }
   });
 
-  controls.button.addEventListener("click", function (element) {
-    element.target.blur();
+  controls.button.addEventListener("click", function (event) {
+    event.currentTarget.blur(); // currentTarget is the button itself, not the clicked inner <svg>
 
     const input = controls.textbox.value;
     // Strip either the legacy (rungame/<steamid>) or new (run/730//) prefix.

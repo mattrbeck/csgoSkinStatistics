@@ -556,13 +556,25 @@ html {
 
 /* Input and submit button share one line. The button used to live on its own row so
    long s/a/d/m inspect strings had the full width, but that's no longer a concern. */
+
+/* Unified search "pill": the input and the round icon button live inside one rounded, centered
+   container, so the bar reads as a single centered element and the hint below lines up under it. */
 form {
   display: flex;
-  justify-content: center;
-  align-items: stretch;
-  gap: 8px;
-  width: 608px;
+  align-items: center;
+  width: min(608px, 100% - 24px);
   margin: 0 auto;
+  padding: 5px;
+  box-sizing: border-box;
+  background: var(--dark);
+  border: 1px solid var(--light);
+  border-radius: 999px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+form:focus-within {
+  border-color: var(--pop);
+  box-shadow: 0 0 0 3px rgb(46 204 113 / 18%);
 }
 
 a,
@@ -614,33 +626,8 @@ a:active {
 
 input {
   border: none;
-  border-radius: 4px;
   color: var(--text);
   font-family: Lato, sans-serif;
-}
-
-input[type="button"] {
-  appearance: none;
-  background: var(--gray);
-}
-
-/* Submit buttons match the text input's font and height exactly */
-#button,
-#cancel-button {
-  padding: 4px 20px;
-  font-size: 18px;
-  cursor: pointer;
-}
-
-#button {
-  background-color: var(--pop);
-  color: var(--gray);
-  font-weight: bold;
-  transition: background-color 0.3s ease;
-}
-
-#button:hover {
-  background-color: #27ae60;
 }
 
 form * {
@@ -650,23 +637,47 @@ form * {
 input[type="text"] {
   flex: 1;
   min-width: 0;
-  background: var(--dark);
-  text-align: center;
-  padding: 4px;
-  font-size: 18px;
+  background: transparent;
   border: none;
+  text-align: center;
+  padding: 0 10px;
+  font-size: 17px;
 }
 
 input[type="text"]:focus {
+  outline: none; /* the focus ring lives on the whole pill via :focus-within */
+}
+
+/* Round icon button at the right of the pill: a neutral gray touch target with an accent-green
+   magnifier (the cancel/stop button uses the error color instead). */
+#button,
+#cancel-button {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 40px;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
   background: var(--light);
+  color: var(--pop);
+  cursor: pointer;
+  transition: background-color 0.2s ease;
 }
 
-input[type="text"]:hover {
-  animation: dark-light 0.5s forwards;
+#button:hover {
+  background: rgb(46 204 113 / 18%);
 }
 
-input[type="text"]:not(:hover, :focus) {
-  animation: light-dark 0.5s forwards;
+#cancel-button {
+  color: var(--error);
+}
+
+#cancel-button:hover {
+  background: rgb(204 73 47 / 18%);
 }
 
 #error-display {
@@ -757,21 +768,9 @@ input[type="text"]:not(:hover, :focus) {
     margin-bottom: 20px;
   }
 
-  form {
-    width: 100%;
-    padding: 0 12px;
-    box-sizing: border-box;
-  }
-
   /* Never below 16px: iOS Safari auto-zooms the page when focusing a smaller text input */
   input[type="text"] {
     font-size: 16px;
-  }
-
-  #button,
-  #cancel-button {
-    padding: 4px 14px;
-    font-size: 14px;
   }
 }
 
@@ -790,22 +789,3 @@ input[type="text"]:not(:hover, :focus) {
   }
 }
 
-@keyframes light-dark {
-  from {
-    background-color: var(--light);
-  }
-
-  to {
-    background-color: var(--dark);
-  }
-}
-
-@keyframes dark-light {
-  from {
-    background-color: var(--dark);
-  }
-
-  to {
-    background-color: var(--light);
-  }
-}
