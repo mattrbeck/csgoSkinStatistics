@@ -13,6 +13,9 @@
     "lint:css": "stylelint wwwroot/*.css",
     "lint": "npm run lint:js && npm run lint:css"
   },
+  "overrides": {
+    "js-yaml": "^4.2.0"
+  },
   "devDependencies": {
     "@babel/preset-env": "^7.28.3",
     "@testing-library/dom": "^10.4.0",
