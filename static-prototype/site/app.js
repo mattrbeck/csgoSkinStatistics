@@ -112,11 +112,35 @@ function renderCard({ item, info, stickers, keychains, image, netLog }) {
   $("cards").prepend(card);
 }
 
+// Warm the rest of the catalog during browser idle time, before the user types anything.
+// Each shard is immutable + cache-forever, so this populates the HTTP cache too: a query
+// later resolves from memory with zero network. One shard per idle tick keeps the main
+// thread responsive and lets a real query barge in (its fetch just joins the cache).
+function startIdlePrefetch() {
+  const todo = loader.allShards(); // const-core is already cached; prefetch() skips it
+
+  const idle = window.requestIdleCallback || ((cb) => setTimeout(() => cb({ timeRemaining: () => 16 }), 200));
+  let i = 0, warmed = 0;
+  const tick = (deadline) => {
+    while (i < todo.length && (!deadline || deadline.timeRemaining() > 4)) {
+      if (loader.prefetch(todo[i])) warmed++;
+      i++;
+    }
+    const pct = Math.round((i / todo.length) * 100);
+    $("prefetch").textContent = i < todo.length
+      ? `prefetching catalog in the background… ${pct}%`
+      : `catalog fully prefetched (${warmed} shards warm) — queries now resolve with no network`;
+    if (i < todo.length) idle(tick);
+  };
+  idle(tick);
+}
+
 async function boot() {
   status("Loading manifest + core catalog…");
   await loader.init();
   core = await loader.constCore(); // needed to name every item; loaded once
   status("");
+  startIdlePrefetch();
 
   $("button").addEventListener("click", () => handle($("textbox").value));
   $("textbox").addEventListener("keydown", (e) => { if (e.key === "Enter") handle($("textbox").value); });

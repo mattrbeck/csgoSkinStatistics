@@ -1,0 +1,28 @@
+#source-row { display: flex; flex-wrap: wrap; gap: 1rem; margin: .6rem 0 0; color: var(--muted); font-size: .82rem; }
+#source-row label { display: inline-flex; align-items: center; gap: .35rem; cursor: pointer; }
+
+.summary { margin: .75rem 0 1rem; padding: .7rem .9rem; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; font-size: .9rem; line-height: 1.5; }
+.summary strong { color: var(--text); }
+.summary em { color: var(--accent); font-style: normal; }
+
+#grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: .75rem; }
+.tile { background: var(--panel); border: 1px solid var(--line); border-radius: 9px; padding: .6rem; display: flex; flex-direction: column; gap: .3rem; }
+.tile-img { height: 80px; display: grid; place-items: center; background: var(--panel2); border-radius: 6px; }
+.tile-img img { max-height: 76px; max-width: 100%; }
+.tile-img.ph::after { content: "—"; color: var(--muted); }
+.tile-name { font-size: .82rem; font-weight: 600; line-height: 1.25; }
+.tile-name.knife { color: #e0b3ff; }
+.tile-line { font-family: ui-monospace, monospace; font-size: .7rem; color: var(--muted); min-height: .9em; }
+.tile-badges { display: flex; flex-wrap: wrap; gap: .25rem; }
+.tile-badges .b { font-size: .66rem; padding: .08em .4em; border-radius: 4px; }
+.b.sp { background: #3a2f12; color: #ffd479; }
+.b.st { background: #2a1f3d; color: #c9a6ff; }
+.b.q { background: var(--panel2); color: var(--muted); }
+.b.muted { background: transparent; color: var(--muted); border: 1px dashed var(--line); }
+.tile-stickers { display: flex; flex-wrap: wrap; gap: .2rem; }
+.schip { width: 22px; height: 22px; border-radius: 50%; background: #0006; border: 1px solid var(--line); overflow: hidden; display: grid; place-items: center; }
+.schip.slab { border-color: #a63; }
+.schip img { width: 100%; height: 100%; object-fit: contain; }
+.tile-src { font-size: .64rem; margin-top: auto; }
+.tile-src.ok { color: var(--ok); }
+.tile-src.muted { color: var(--muted); }

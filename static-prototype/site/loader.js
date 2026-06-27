@@ -51,18 +51,28 @@ export class DataLoader {
   keychains() { return this._shard(this.manifest.shards.keychains); }
   floatRanges() { return this._shard(this.manifest.shards.floatRanges); }
 
-  // Resolve one sticker id → {name, image}, loading only its bucket shard.
+  // Find the balanced shard whose contiguous id range contains `id`: the one with the
+  // largest `min` that is <= id (binary search over ascending-min shards).
+  static _shardFor(shards, id) {
+    let lo = 0, hi = shards.length - 1, file = null;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (shards[mid].min <= id) { file = shards[mid].file; lo = mid + 1; }
+      else hi = mid - 1;
+    }
+    return file;
+  }
+
+  // Resolve one sticker id → {name, image}, loading only the shard that covers it.
   async sticker(id) {
-    const { bucket, files } = this.manifest.shards.stickers;
-    const file = files[Math.floor(id / bucket)];
+    const file = DataLoader._shardFor(this.manifest.shards.stickers.shards, id);
     if (!file) return null;
     return (await this._shard(file))[id] ?? null;
   }
 
-  // Resolve a skin image by defindex+paintindex, loading only the paintindex bucket shard.
+  // Resolve a skin image by defindex+paintindex, loading only the shard covering paintindex.
   async image(defindex, paintindex) {
-    const { bucket, files } = this.manifest.shards.images;
-    const file = files[Math.floor(paintindex / bucket)];
+    const file = DataLoader._shardFor(this.manifest.shards.images.shards, paintindex);
     if (!file) return "";
     return (await this._shard(file))[`${defindex}_${paintindex}`] ?? "";
   }
@@ -75,6 +85,26 @@ export class DataLoader {
     }
     const kit = (await this.keychains())[id] ?? null;
     return { ...(kit ?? { name: "", image: "" }), slab: false, wrapped_sticker: 0 };
+  }
+
+  // Every shard filename the manifest references, in a sensible warm order: the small
+  // always/often-needed shards first, then the big sticker/image ranges. Used by the idle
+  // prefetcher to fill the cache before the user asks for anything.
+  allShards() {
+    const s = this.manifest.shards;
+    return [
+      s.constCore, s.constSpecial, s.keychains, s.floatRanges,
+      ...s.images.shards.map((x) => x.file),
+      ...s.stickers.shards.map((x) => x.file),
+    ];
+  }
+
+  // Warm one shard if not already cached/in-flight. Returns false if it was already known
+  // (so the prefetcher can skip the work).
+  prefetch(name) {
+    if (this._cache.has(name)) return false;
+    this._shard(name);
+    return true;
   }
 
   // Bytes actually downloaded this session (reused shards counted once).

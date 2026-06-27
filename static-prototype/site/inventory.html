@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CS2 Inventory — static prototype</title>
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="inventory.css" />
+</head>
+<body>
+  <header>
+    <h1>Static inventory prototype</h1>
+    <p class="sub">
+      Loads a Steam CS2 inventory and decodes <strong>every item's embedded certificate in your
+      browser</strong> — floats, seeds, patterns, StatTrak counts and stickers that Steam's own
+      inventory JSON doesn't expose. The <strong>only</strong> server piece is a dumb CORS shim for
+      the fetch (Steam blocks cross-origin reads); there is no Game Coordinator and no database.
+      <a href="index.html">← single-item page</a>
+    </p>
+  </header>
+
+  <section id="search">
+    <input id="steamid" type="text" placeholder="SteamID64 (e.g. 76561198261551396) or leave blank for the bundled sample" spellcheck="false" />
+    <button id="load">Load</button>
+  </section>
+  <section id="source-row">
+    <label><input type="radio" name="source" value="fixture" checked /> bundled fixture (always works, real 281-item inventory)</label>
+    <label><input type="radio" name="source" value="proxy" /> live via local CORS shim (<code>node build/cors-proxy.mjs</code>)</label>
+  </section>
+
+  <p id="status" class="status"></p>
+  <div id="summary" class="summary"></div>
+  <section id="grid"></section>
+
+  <template id="tile-template">
+    <article class="tile">
+      <div class="tile-img"><img alt="" /></div>
+      <div class="tile-name"></div>
+      <div class="tile-line tile-float"></div>
+      <div class="tile-badges"></div>
+      <div class="tile-stickers"></div>
+      <div class="tile-src"></div>
+    </article>
+  </template>
+
+  <script type="module" src="inventory.js"></script>
+</body>
+</html>

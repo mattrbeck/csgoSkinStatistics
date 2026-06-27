@@ -27,8 +27,15 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const repo = join(__dirname, "..", "..");
 const outDir = join(__dirname, "..", "site", "data");
 
-const STICKER_BUCKET = 1000; // sticker_id span per shard
-const IMAGE_BUCKET = 1000;   // paintindex span per image shard
+// Balanced bucketing targets (raw bytes per shard, ~4x smaller gzipped). The build picks
+// contiguous id ranges so each shard lands near these. Kept generous so a typical item
+// still pulls a single shard for all its decals.
+const STICKER_TARGET = 130 * 1024;
+const IMAGE_TARGET = 130 * 1024;
+
+// Old fixed-bucket sizes, retained only to print the before/after comparison.
+const STICKER_BUCKET = 1000;
+const IMAGE_BUCKET = 1000;
 
 const readJson = (p) => JSON.parse(readFileSync(join(repo, p), "utf8"));
 
@@ -52,20 +59,58 @@ function emit(logicalBase, obj) {
   return name;
 }
 
-// Split an id-keyed map into fixed-size buckets. `bucketOf` maps a map key to the numeric
-// value the bucket is computed from (the key itself for sticker ids; the paintindex part
-// for "<def>_<paint>" image keys). Returns { bucketIndex: filename }.
-function shardByBucket(prefix, map, bucketSize, bucketOf = (k) => Number(k)) {
-  const buckets = {};
+// --- bucketing strategies ---------------------------------------------------
+// `bucketOf` maps a map key to the numeric value it's bucketed on (the key itself for
+// sticker ids; the paintindex part for "<def>_<paint>" image keys).
+
+// FIXED: floor(value / size). Simple, but lopsided when ids cluster (image bucket 0 held
+// every low paintindex and ballooned). Kept only to report the comparison.
+function planFixed(map, bucketSize, bucketOf) {
+  const buckets = new Map();
   for (const [id, val] of Object.entries(map)) {
     const b = Math.floor(bucketOf(id) / bucketSize);
-    (buckets[b] ??= {})[id] = val;
+    (buckets.get(b) ?? buckets.set(b, {}).get(b))[id] = val;
   }
-  const files = {};
-  for (const [b, contents] of Object.entries(buckets)) {
-    files[b] = emit(`${prefix}-${b}`, contents);
+  return [...buckets.values()].map((contents) => ({ contents }));
+}
+
+// BALANCED: keep ids contiguous (so a multi-decal item still tends to hit one shard) but
+// choose the cut points so each shard is ~targetBytes. Greedily fill a shard in id order;
+// start a new one when adding the next entry would overflow. Returns shards in id order,
+// each tagged with the smallest id it contains so the client can binary-search.
+function planBalanced(map, targetBytes, bucketOf) {
+  const entries = Object.entries(map).sort((a, b) => bucketOf(a[0]) - bucketOf(b[0]));
+  const shards = [];
+  let cur = null, curBytes = 0;
+  for (const [id, val] of entries) {
+    const size = id.length + JSON.stringify(val).length + 8; // ~bytes this entry adds
+    if (!cur || (curBytes + size > targetBytes && Object.keys(cur).length)) {
+      cur = {}; curBytes = 0;
+      shards.push({ min: bucketOf(id), contents: cur });
+    }
+    cur[id] = val; curBytes += size;
   }
-  return files;
+  return shards;
+}
+
+// Write a plan's shards to disk and return manifest-ready descriptors. Balanced shards
+// carry their `min`; fixed shards are emitted under a logical -N suffix.
+function emitShards(prefix, plan) {
+  return plan.map((s, i) => {
+    const file = emit(`${prefix}-${s.min ?? i}`, s.contents);
+    return s.min != null ? { min: s.min, file } : { file };
+  });
+}
+
+// Summarise a plan's shard-size distribution (gzip-equivalent ratio aside, raw bytes).
+function sizeStats(plan) {
+  const sizes = plan.map((s) => JSON.stringify(s.contents).length).sort((a, b) => a - b);
+  const kb = (n) => +(n / 1024).toFixed(1);
+  return {
+    shards: sizes.length, max: kb(sizes.at(-1)), min: kb(sizes[0]),
+    avg: kb(sizes.reduce((n, x) => n + x, 0) / sizes.length),
+    p95: kb(sizes[Math.min(sizes.length - 1, Math.floor(sizes.length * 0.95))]),
+  };
 }
 
 // --- const split: core (always needed) vs special (only for fade%/fire&ice) -
@@ -78,10 +123,26 @@ const constCoreFile = emit("const-core", constCore);
 const constSpecialFile = emit("const-special", { fade_order, fireice_order });
 
 // --- sticker / keychain / image / float shards ------------------------------
-const stickerFiles = shardByBucket("stickers", stickers.stickers, STICKER_BUCKET);
+const stickerId = (k) => Number(k);
+const imageId = (k) => Number(k.split("_")[1]); // bucket images on paintindex
+
+const stickerPlan = planBalanced(stickers.stickers, STICKER_TARGET, stickerId);
+const imagePlan = planBalanced(skinImages, IMAGE_TARGET, imageId);
+const stickerShards = emitShards("stickers", stickerPlan);
+const imageShards = emitShards("images", imagePlan);
 const keychainsFile = emit("keychains", stickers.keychains); // only ~78 entries, ship whole
-const imageFiles = shardByBucket("images", skinImages, IMAGE_BUCKET, (k) => Number(k.split("_")[1]));
 const floatFile = emit("float-ranges", floatRanges);
+
+// Compare the two strategies on the same data (sizes only; fixed plan isn't emitted).
+const compare = (label, map, idOf, target, bucket) => {
+  const fixed = sizeStats(planFixed(map, bucket, idOf));
+  const balanced = sizeStats(planBalanced(map, target, idOf));
+  return { label, fixed, balanced };
+};
+const comparisons = [
+  compare("stickers", stickers.stickers, stickerId, STICKER_TARGET, STICKER_BUCKET),
+  compare("images", skinImages, imageId, IMAGE_TARGET, IMAGE_BUCKET),
+];
 
 // --- manifest ---------------------------------------------------------------
 // `version` is a hash of every shard filename, so any data change yields a new version
@@ -89,14 +150,16 @@ const floatFile = emit("float-ranges", floatRanges);
 // ONLY file served with no-cache; every shard it points at is immutable + cache-forever.
 const manifest = {
   version: createHash("sha256").update(written.map((w) => w.name).sort().join()).digest("hex").slice(0, 12),
-  builtFrom: { stickerBucket: STICKER_BUCKET, imageBucket: IMAGE_BUCKET },
+  builtFrom: { strategy: "balanced", stickerTarget: STICKER_TARGET, imageTarget: IMAGE_TARGET },
   shards: {
     constCore: constCoreFile,
     constSpecial: constSpecialFile,
     keychains: keychainsFile,
     floatRanges: floatFile,
-    stickers: { bucket: STICKER_BUCKET, files: stickerFiles },
-    images: { bucket: IMAGE_BUCKET, files: imageFiles },
+    // Balanced shards: each entry is { min, file } in ascending `min` order. The client
+    // binary-searches for the largest min <= id. The bucket size is no longer uniform.
+    stickers: { strategy: "balanced", shards: stickerShards },
+    images: { strategy: "balanced", shards: imageShards },
   },
 };
 writeFileSync(join(outDir, "manifest.json"), JSON.stringify(manifest, null, 2));
@@ -154,12 +217,19 @@ writeFileSync(join(__dirname, "..", "site", "samples.json"), JSON.stringify(samp
 
 // --- report -----------------------------------------------------------------
 const total = written.reduce((n, w) => n + w.bytes, 0);
-const stickerShards = Object.keys(stickerFiles).length;
-const imageShards = Object.keys(imageFiles).length;
+const kb = (name) => (written.find((w) => w.name === name).bytes / 1024).toFixed(1);
 console.log(`manifest version ${manifest.version}`);
 console.log(`wrote ${written.length} shards, ${(total / 1024).toFixed(0)} KB total (uncompressed)`);
-console.log(`  const-core      ${(written.find((w) => w.name === constCoreFile).bytes / 1024).toFixed(1)} KB (loaded once, every item)`);
-console.log(`  const-special   ${(written.find((w) => w.name === constSpecialFile).bytes / 1024).toFixed(1)} KB (only fade/fire&ice)`);
-console.log(`  stickers        ${stickerShards} shards, avg ${(Object.values(stickerFiles).reduce((n, f) => n + written.find((w) => w.name === f).bytes, 0) / stickerShards / 1024).toFixed(1)} KB each`);
-console.log(`  images          ${imageShards} shards`);
-console.log(`wrote ${sampleOut.length} sample links to site/samples.json`);
+console.log(`  const-core      ${kb(constCoreFile)} KB (loaded once, every item)`);
+console.log(`  const-special   ${kb(constSpecialFile)} KB (only fade/fire&ice)`);
+console.log("\nbucketing comparison (raw KB per shard):");
+console.log("  catalog    strategy   shards   max     min     avg     p95");
+for (const c of comparisons) {
+  for (const [strat, s] of [["fixed/1000", c.fixed], ["balanced", c.balanced]]) {
+    console.log(
+      `  ${c.label.padEnd(9)}  ${strat.padEnd(10)} ${String(s.shards).padStart(4)}   ` +
+      `${String(s.max).padStart(6)}  ${String(s.min).padStart(6)}  ${String(s.avg).padStart(6)}  ${String(s.p95).padStart(6)}`,
+    );
+  }
+}
+console.log(`\nwrote ${sampleOut.length} sample links to site/samples.json`);

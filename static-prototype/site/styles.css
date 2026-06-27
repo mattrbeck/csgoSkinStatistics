@@ -75,4 +75,5 @@ button.sample {
 .card-net-table tr.reused td:first-child { color: var(--muted); }
 .card-net-table tr.reused td { color: var(--muted); }
 
-footer { margin-top: 2rem; color: var(--muted); font-size: .8rem; }
+footer { margin-top: 2rem; color: var(--muted); font-size: .8rem; display: flex; flex-direction: column; gap: .3rem; }
+.prefetch { color: var(--accent); }
