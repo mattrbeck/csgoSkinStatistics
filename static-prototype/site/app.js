@@ -37,18 +37,26 @@ async function handle(input) {
   try { item = decodeCert(hex); }
   catch { status("Could not decode that cert payload.", true); return; }
 
-  // Names/special: const-core is already loaded; pull const-special only if this item needs it.
-  let special = null;
-  if (needsSpecialShard(item, core)) special = await loader.constSpecial();
-  const info = resolveItem(item, core, special);
+  // Preempt the background bulk warm so this query's shards get the pipe to themselves, then
+  // hand the pipe back. If the bulk isn't running (deep link, or already done) this is a no-op.
+  loader.pauseBulk();
+  let stickers, keychains, image, info;
+  try {
+    // Names/special: const-core is already loaded; pull const-special only if this item needs it.
+    let special = null;
+    if (needsSpecialShard(item, core)) special = await loader.constSpecial();
+    info = resolveItem(item, core, special);
 
-  // Decals + image: each resolves from a single bucket shard, fetched on demand.
-  const stickers = await Promise.all((item.stickers || []).map(async (s) => ({
-    ...s, ...((await loader.sticker(s.sticker_id)) ?? { name: "", image: "" }),
-  })));
-  const keychains = await Promise.all((item.keychains || []).map(async (k) =>
-    ({ ...k, ...(await loader.keychain(k.sticker_id, k.wrapped_sticker)) })));
-  const image = Number(item.paintindex) > 0 ? await loader.image(item.defindex, item.paintindex) : "";
+    // Decals + image: each resolves from a single bucket shard, fetched on demand.
+    stickers = await Promise.all((item.stickers || []).map(async (s) => ({
+      ...s, ...((await loader.sticker(s.sticker_id)) ?? { name: "", image: "" }),
+    })));
+    keychains = await Promise.all((item.keychains || []).map(async (k) =>
+      ({ ...k, ...(await loader.keychain(k.sticker_id, k.wrapped_sticker)) })));
+    image = Number(item.paintindex) > 0 ? await loader.image(item.defindex, item.paintindex) : "";
+  } finally {
+    loader.resumeBulk();
+  }
 
   renderCard({ item, info, stickers, keychains, image, netLog: loader.log.slice(before) });
   status("");
@@ -112,27 +120,31 @@ function renderCard({ item, info, stickers, keychains, image, netLog }) {
   $("cards").prepend(card);
 }
 
-// Warm the rest of the catalog during browser idle time, before the user types anything.
-// Each shard is immutable + cache-forever, so this populates the HTTP cache too: a query
-// later resolves from memory with zero network. One shard per idle tick keeps the main
-// thread responsive and lets a real query barge in (its fetch just joins the cache).
-function startIdlePrefetch() {
-  const todo = loader.allShards(); // const-core is already cached; prefetch() skips it
-
-  const idle = window.requestIdleCallback || ((cb) => setTimeout(() => cb({ timeRemaining: () => 16 }), 200));
-  let i = 0, warmed = 0;
-  const tick = (deadline) => {
-    while (i < todo.length && (!deadline || deadline.timeRemaining() > 4)) {
-      if (loader.prefetch(todo[i])) warmed++;
-      i++;
-    }
-    const pct = Math.round((i / todo.length) * 100);
-    $("prefetch").textContent = i < todo.length
-      ? `prefetching catalog in the background… ${pct}%`
-      : `catalog fully prefetched (${warmed} shards warm) — queries now resolve with no network`;
-    if (i < todo.length) idle(tick);
+// Warm the rest of the catalog in the background. Two strategies:
+//   default — interruptible bulk load: one shard at a time at LOW priority, and it pauses the
+//             instant a query arrives (handle() calls pauseBulk) so the query owns the pipe,
+//             then resumes. Best of both: warms toward offline without slowing a live lookup.
+//   ?bulk=flood — the old idle-prefetch that fires every shard at once (floods the connection
+//             pool). Kept for the benchmark that shows why interruptible is better.
+function startBulkPrefetch() {
+  const setText = (done, total) => {
+    $("prefetch").textContent = done < total
+      ? `warming catalog in the background… ${Math.round((done / total) * 100)}% (yields to your queries)`
+      : `catalog fully warm — queries now resolve with no network`;
   };
-  idle(tick);
+  if (new URLSearchParams(location.search).get("bulk") === "flood") {
+    const todo = loader.allShards();
+    const idle = window.requestIdleCallback || ((cb) => setTimeout(() => cb({ timeRemaining: () => 16 }), 200));
+    let i = 0;
+    const tick = (d) => {
+      while (i < todo.length && (!d || d.timeRemaining() > 4)) { loader.prefetch(todo[i]); i++; }
+      setText(i, todo.length);
+      if (i < todo.length) idle(tick);
+    };
+    idle(tick);
+  } else {
+    loader.bulkLoad(setText);
+  }
 }
 
 async function boot() {
@@ -143,7 +155,8 @@ async function boot() {
   // Eager mode (?preload=eager): block on downloading the WHOLE catalog before resolving
   // anything, so the first item — and every item after — is instant and offline-ready. The
   // trade is a fixed upfront stall instead of the lazy path's quick-first-item-then-warm.
-  const eager = new URLSearchParams(location.search).get("preload") === "eager";
+  const params = new URLSearchParams(location.search);
+  const eager = params.get("preload") === "eager";
   if (eager) {
     status("Preloading full catalog…");
     await loader.preloadAll();
@@ -162,7 +175,20 @@ async function boot() {
     await handle(h);
     window.__cardMs = performance.now(); // benchmark hook: nav-start → deep-linked card rendered
   }
-  if (!eager) startIdlePrefetch();
+  if (!eager) startBulkPrefetch();
+
+  // Benchmark hook (?bq=<hex>&bqDelay=ms): fire a query that many ms after the bulk warm
+  // starts, to measure how long a query takes *while the catalog is still downloading* — the
+  // scenario the interruptible bulk load is meant to win. Records window.__queryMs.
+  const bq = params.get("bq");
+  if (bq) {
+    setTimeout(async () => {
+      const t0 = performance.now();
+      $("textbox").value = bq;
+      await handle(bq);
+      window.__queryMs = +(performance.now() - t0).toFixed(1);
+    }, Number(params.get("bqDelay") || 1500));
+  }
 
   // Sample buttons (real cert links minted by the build from real catalog ids).
   try {

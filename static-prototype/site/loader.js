@@ -30,14 +30,16 @@ export class DataLoader {
   }
 
   // Fetch one shard by filename, memoised. Immutable hashed URL → force-cache.
-  async _shard(name) {
+  async _shard(name, priority = "auto") {
     if (this._cache.has(name)) {
       this.log.push({ name, bytes: 0, ms: 0, reused: true });
       return this._cache.get(name);
     }
     const p = (async () => {
       const t = performance.now();
-      const res = await fetch(`${this.base}/${name}`, { cache: "force-cache" });
+      // `priority` is the Fetch Priority hint: foreground item shards go "high", the
+      // background bulk warm goes "low" so the browser de-prioritizes it behind a real query.
+      const res = await fetch(`${this.base}/${name}`, { cache: "force-cache", priority });
       const text = await res.text();
       this.log.push({ name, bytes: text.length, ms: +(performance.now() - t).toFixed(1), reused: false });
       return JSON.parse(text);
@@ -112,6 +114,34 @@ export class DataLoader {
   // the idle prefetcher, which never blocks but leaves a window where an early lookup is cold.
   async preloadAll() {
     await Promise.all(this.allShards().map((n) => this._shard(n)));
+  }
+
+  // --- interruptible background bulk load -----------------------------------
+  // pauseBulk()/resumeBulk() let a foreground query preempt the warm: bulkLoad() fetches ONE
+  // shard at a time at low priority and, between shards, parks on `_awaitResume()` while
+  // paused. So when the user queries, handle() pauses the bulk, the query's shards fetch at
+  // high priority over a near-empty pipe, then the bulk resumes where it left off. Contrast
+  // the idle prefetcher, which kicks off many shards at once and floods the connection pool,
+  // making a mid-warm query queue behind them.
+  pauseBulk() { this._paused = true; }
+  resumeBulk() {
+    this._paused = false;
+    const w = this._resumeWaiters || [];
+    this._resumeWaiters = [];
+    w.forEach((r) => r());
+  }
+  _awaitResume() {
+    if (!this._paused) return Promise.resolve();
+    return new Promise((r) => (this._resumeWaiters ||= []).push(r));
+  }
+
+  async bulkLoad(onProgress) {
+    const todo = this.allShards();
+    for (let i = 0; i < todo.length; i++) {
+      await this._awaitResume();              // yield the pipe to any in-flight query
+      if (!this._cache.has(todo[i])) await this._shard(todo[i], "low"); // one at a time, low priority
+      onProgress?.(i + 1, todo.length);
+    }
   }
 
   // Bytes actually downloaded this session (reused shards counted once).

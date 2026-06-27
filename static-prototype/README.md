@@ -254,13 +254,13 @@ static-prototype/
     static-gzip.mjs   # CDN-like gzip + immutable-cache static server (for fair benchmarking)
   site/
     index.html        # single-item page (#<hex> deep-links; ?preload=eager = proactive preload)
-    app.js            # wiring + per-item network panel + idle prefetch + eager mode
+    app.js            # wiring + per-item network panel + interruptible bulk warm + eager mode
     inventory.html    # full inventory page
     inventory.js      # stitch + decode every cert client-side; CORS shim / fixture sources
     inventory.css
     proto.js          # protobuf reader/writer + cert XOR unwrap (browser + Node)
     resolve.js        # client port of ConstDataService (incl. special-pattern logic)
-    loader.js         # manifest-driven shard loader: balanced-range binary search + prefetch + preloadAll
+    loader.js         # manifest-driven shard loader: balanced-range search + interruptible bulk warm (pause/resume) + preloadAll
     styles.css
     fixtures/inventory-sample.json   # a real 281-item inventory, so the demo needs no proxy
     data/             # generated (gitignored) — run the build

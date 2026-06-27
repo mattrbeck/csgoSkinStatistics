@@ -99,7 +99,7 @@ existing: page cached, but the item still needs `/api`):
 This is the inversion, and it's stark: the existing app pays a full `/api` round-trip on
 **every** lookup forever (and it scales with RTT: 177 ms → 580 ms → ~2 s), while the prototype
 resolves each new item with **zero network** — the 5.8 ms figure was measured *under Slow 4G
-throttle*, because no request is made at all. The idle prefetcher makes the page warm within
+throttle*, because no request is made at all. The background warm makes the page warm within
 seconds of load, and warm lookups work fully offline.
 
 ### 2c. Prototype strategies: **lazy** vs **eager (proactive) full preload** — measured
@@ -108,9 +108,10 @@ There are three ways the static prototype can handle its catalog. All three end 
 #2+ resolve in ~6 ms offline); they differ in **when** the catalog is downloaded and whether the
 first paint blocks on it:
 
-- **Lazy** (default): fetch only the shards each item needs, on demand.
-- **Lazy + idle prefetch** (also default): lazy *plus* warming the rest during browser idle —
-  so item #1 is quick and the cache fills in the background without blocking.
+- **Lazy**: fetch only the shards each item needs, on demand.
+- **Lazy + interruptible bulk warm** (the default): lazy *plus* warming the rest in the
+  background — one shard at a time, at low priority, **pausing whenever a query needs the pipe**
+  (see 2d). Item #1 is quick and the cache fills without ever slowing a lookup.
 - **Eager** (`?preload=eager`): download the **entire** catalog (834 KB gz, 32 shards) up front
   and block the first paint until it's all in cache. "Spinner for a beat, then everything —
   including item #1 — is instant and offline."
@@ -130,13 +131,40 @@ After that first paint, **every** item costs ~6 ms for both lazy and eager.
 **So is the "1–2 s proactive download" worth it?** It only *is* 1–2 s on a fast link: ~1 s on
 real broadband, ~2.2 s on Fast 4G. On Slow 4G it's ~8.6 s and on Slow 3G ~30 s of blank screen,
 because you're now blocking first paint on 834 KB instead of the ~90 KB one item needs. And the
-payoff it buys — every later item instant and offline — is **already delivered by lazy + idle
-prefetch**, which paints item #1 in 1.3 s (Fast 4G) and backfills the same catalog in the
-background without ever blocking. The one thing eager adds is a *guarantee*: no item ever stalls,
+payoff it buys — every later item instant and offline — is **already delivered by lazy +
+interruptible warm**, which paints item #1 in 1.3 s (Fast 4G) and backfills the same catalog in
+the background without ever blocking. The one thing eager adds is a *guarantee*: no item ever stalls,
 even if the user races ahead during the idle-prefetch window. That's a niche worth paying for
 only on fast connections (gate it behind a `navigator.connection`/Save-Data check), or for an
 explicitly offline-first "download for offline" button. As a default it's strictly worse than
-lazy + idle prefetch on first-paint, and dramatically so on slow networks.
+lazy + interruptible warm on first-paint, and dramatically so on slow networks.
+
+### 2d. **Interruptible** bulk warm — a query mid-warm preempts the download — measured
+
+The catch with any background warm is **bandwidth contention**: if the user queries *while* the
+catalog is still downloading, the query's shards compete with the warm. The fix is to make the
+warm yield. Two implementations, benchmarked:
+
+- **Flood** (`?bulk=flood`, the old idle-prefetch): kicks off all 32 shards at once, saturating
+  the connection pool. A query that arrives mid-warm queues **behind** the in-flight warm.
+- **Interruptible** (now the default): the warm fetches **one shard at a time at low priority**,
+  and `handle()` calls `pauseBulk()` the instant a query starts — so the query's shards download
+  over a near-empty pipe — then `resumeBulk()` hands the pipe back. This is exactly the
+  user-proposed flow: *load → bulk starts → query → bulk pauses → query resolves → bulk resumes.*
+
+Measured **query-to-card time for a 2-sticker item fired while the catalog was still warming**
+(Slow 4G, fresh cache; the query needed ~3 uncached shards):
+
+| Query fires at | Flood (old) | **Interruptible (new)** | Speedup |
+|---|---|---|---|
+| 700 ms in (pool fully saturated) | 2.77 s | **1.53 s** | **1.8×** |
+| 1500 ms in | 1.92 s | **1.53 s** | 1.25× |
+
+The headline isn't just that interruptible is faster — it's that its query time is **flat at
+~1.53 s regardless of when the query fires**, because the query always gets a clear pipe. The
+flood's query time **degrades with contention** (2.77 s when the warm is busiest). Interruptible
+keeps the page's core promise — *fast lookups* — intact while still warming toward offline in the
+background. It's the default; `?bulk=flood` is kept only to reproduce this comparison.
 
 ### 3. Single item **without stickers**, cold (modeled)
 
@@ -194,7 +222,7 @@ are dominated by the Steam fetch itself.
 | **Data version skew** | Impossible (client+data in lockstep) | Possible; managed by the manifest `version` (client can detect + soft-reload) |
 | **Offline / flaky network** | Unusable offline; every lookup needs the server | Warm catalog ⇒ lookups work offline; only the inventory fetch needs the network |
 | **Failure modes** | Server down = full outage; GC down = `S/A/D/M` fails; single place to fix | CDN outages rare; a bad shard is caught by hashing + one-file manifest rollback; public inventory proxy is flaky/rate-limited |
-| **Catalog bandwidth** | Never ships the catalog (per-item only) | Ships up to ~1 MB-gz of catalog to an active user (amortized; prefetched at idle) |
+| **Catalog bandwidth** | Never ships the catalog (per-item only) | Ships up to ~1 MB-gz of catalog to an active user (amortized; warmed interruptibly in the background) |
 | **Code / maintenance** | ~600-line controller + services + SteamKit + DB + GC mgmt | proto + resolve + loader + build; no runtime server logic except the shim |
 | **Security posture** | Validates/bounds server-side | Must treat decoded fields as untrusted in-browser (names rendered via `textContent`; `paintseed` bounds-checked in `resolve.js`, mirroring the server) |
 | **Trust** | Users trust the server's numbers | Decode is inspectable client-side; reproducible from the public cert |
@@ -207,10 +235,10 @@ are dominated by the Steam fetch itself.
 - **Static prototype wins** for: repeat/session use (browse many items — each is then free and
   offline), operational simplicity and cost (no server, no Steam bot, no DB to babysit),
   infinite cheap scaling, and privacy on the single-item page (nothing leaves the browser).
-- **Catalog strategy:** default to **lazy + idle prefetch** — it gives the fast first item *and*
-  the instant-everything-after, without ever blocking. Reserve **eager full preload**
-  (`?preload=eager`, ~1 s on broadband but ~30 s on Slow 3G) for fast connections or an explicit
-  "make available offline" action; never as the default.
+- **Catalog strategy:** default to **lazy + interruptible bulk warm** — fast first item, instant
+  everything after, and a mid-warm query preempts the download (flat ~1.5 s vs the flood's 2.8 s
+  on Slow 4G). Reserve **eager full preload** (`?preload=eager`, ~1 s on broadband but ~30 s on
+  Slow 3G) for fast connections or an explicit "make available offline" action; never as default.
 - **Hybrid is the real sweet spot:** serve the **single-item hex page fully static** (it's a
   strict win on infra with no downside beyond cold first-paint), keep a **thin server only for
   what genuinely needs it** — `S/A/D/M` (GC bot) and the inventory CORS fetch (a logic-free
@@ -219,7 +247,7 @@ are dominated by the Steam fetch itself.
 
 ## Methodology notes / honesty
 
-- **Scenarios 1, 2, 2c are real benchmarks.** Both apps run locally and **gzip-served** — the
+- **Scenarios 1, 2, 2c, 2d are real benchmarks.** Both apps run locally and **gzip-served** — the
   existing app via ASP.NET ResponseCompression on :5050, the prototype via `build/static-gzip.mjs`
   on :8780 (a small CDN-like server with gzip + immutable caching for hashed shards). Driven with
   Chrome DevTools network throttling. Each cold run used a **fresh isolated browser context**
@@ -235,5 +263,5 @@ are dominated by the Steam fetch itself.
 - The existing `/api` numbers, asset sizes, and the 72 KB inventory response are **measured**
   against the app running locally (`dotnet run`, hex path, no GC needed). Prototype sizes and
   decode times are **measured** in the browser.
-- "Warm" assumes the idle prefetcher (or a prior visit) has populated the HTTP cache with the
+- "Warm" assumes the background warm (or a prior visit) has populated the HTTP cache with the
   immutable shards — safe precisely because they're content-hashed.
