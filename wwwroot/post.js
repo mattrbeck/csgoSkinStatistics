@@ -140,49 +140,60 @@ function renderErrorCard(card, message) {
   card.querySelector(".card-submessage").textContent = message;
 }
 
-window.addEventListener("load", function () {
+// The real search. Parses an inspect link (or the bare reduced form) and kicks off the lookup.
+// Called by the early-input shim in index.html the moment the app is ready, and by the
+// deep-link / queued-input paths below.
+function submitSearch(rawInput) {
+  controls.button.blur();
+  // Strip either the legacy (rungame/<steamid>) or new (run/730//) prefix.
+  const reduced = (rawInput || "")
+    .replace(/^.*csgo_econ_action_preview(%20|\s+)/i, "")
+    .trim();
+  if (/^[SM]\d+A\d+D\d+$/.test(reduced) || /^[0-9A-F]+$/.test(reduced)) {
+    document.body.classList.remove("pre-search"); // glide the search up out of its centered landing
+    window.location.hash = reduced;
+    post(inspectPrefix + reduced, reduced);
+    controls.textbox.value = ""; // clear on search, like the inventory page
+  } else {
+    controls.textbox.value = "Not a valid inspect link";
+  }
+}
+
+function initSearch() {
+  const textbox = document.getElementById("textbox");
+  const button = document.getElementById("button");
+  if (!textbox || !button) return; // not the search page (or a test importing this module)
   controls = {
     cardOuter: document.getElementById("item-card-outer"),
     template: document.getElementById("item-card-template"),
-    textbox: document.getElementById("textbox"),
-    button: document.getElementById("button"),
+    textbox,
+    button,
   };
 
-  controls.textbox.addEventListener("keydown", function (event) {
-    if (event.code === "Enter") {
-      event.preventDefault();
-      controls.button.click();
-    }
-  });
-
-  controls.button.addEventListener("click", function (event) {
-    event.currentTarget.blur(); // currentTarget is the button itself, not the clicked inner <svg>
-
-    const input = controls.textbox.value;
-    // Strip either the legacy (rungame/<steamid>) or new (run/730//) prefix.
-    const reduced = input
-      .replace(/^.*csgo_econ_action_preview(%20|\s+)/i, "")
-      .trim();
-    if (/^[SM]\d+A\d+D\d+$/.test(reduced) || /^[0-9A-F]+$/.test(reduced)) {
-      document.body.classList.remove("pre-search"); // glide the search up out of its centered landing
-      window.location.hash = reduced;
-      post(inspectPrefix + reduced, reduced);
-      controls.textbox.value = ""; // clear on search, like the inventory page
-    } else {
-      controls.textbox.value = "Not a valid inspect link";
-    }
-  });
+  // Hand the real search to the early-input shim, which owns the Enter/click listeners so input
+  // is captured before this script loads. If the shim isn't present (e.g. post.js used alone),
+  // wire the listeners here as a fallback.
+  window.__submitSearch = submitSearch;
+  if (!window.__shimReady) {
+    const form = document.getElementById("input");
+    if (form) form.addEventListener("submit", (e) => { e.preventDefault(); submitSearch(controls.textbox.value); });
+    controls.button.addEventListener("click", () => submitSearch(controls.textbox.value));
+  }
 
   if (window.location.hash) {
     const hashURL = window.location.hash.substring(1);
     controls.textbox.value = hashURL;
-    controls.button.click();
+    submitSearch(hashURL);
+  } else if (window.__pendingSearch) {
+    // A paste+search that arrived while this script was still downloading — replay it now.
+    const queued = window.__pendingSearch;
+    window.__pendingSearch = null;
+    submitSearch(queued);
   } else {
-    // Empty landing: put the cursor in the search box. (Skipped above when deep-linking, since
-    // that loads straight into content.)
+    // Empty landing: put the cursor in the search box (the shim already did this; harmless).
     controls.textbox.focus({ preventScroll: true });
   }
-});
+}
 
 // Wait this long before revealing the loading shimmer. Cert/cache lookups usually return
 // faster than this, so they fill the card in directly and never flash a loading state; only
@@ -263,4 +274,17 @@ function post(url, key) {
 // there and the functions stay ordinary globals loaded via <script>.
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { renderName, renderErrorCard };
+}
+
+// Bootstrap last, so everything this module defines (post(), LOADING_DELAY_MS, …) is
+// initialized before initSearch can replay a queued/deep-linked search. Deferred script ⇒ the
+// DOM is already parsed, so init right away rather than waiting for `load` (which on a slow link
+// trails behind fonts/images, needlessly delaying the handlers); fall back to DOMContentLoaded
+// if this is ever loaded without `defer`.
+if (typeof document !== 'undefined') {
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initSearch);
+  } else {
+    initSearch();
+  }
 }

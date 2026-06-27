@@ -22,8 +22,11 @@
     <link href="https://fonts.googleapis.com/css2?family=Lato&display=swap" rel="stylesheet">
     <link type="text/css" rel="stylesheet" href="styles.css" media="screen" />
 
-    <script src="decals.js" type="text/javascript"></script>
-    <script src="post.js" type="text/javascript"></script>
+    <!-- defer: don't block the first paint on these. The body (search box) renders immediately
+         and the inline early-input shim below the form captures any paste+search that happens
+         while these are still downloading on a slow connection. -->
+    <script src="decals.js" type="text/javascript" defer></script>
+    <script src="post.js" type="text/javascript" defer></script>
 
     <title>Item Analyzer - Skin Stats</title>
   </head>
@@ -125,6 +128,30 @@
         </svg>
       </button>
     </form>
+    <script>
+      // Early-input shim. The search box above is static markup that paints with the first
+      // body render, but post.js (deferred) may still be downloading on a slow link. This inline
+      // script — available the instant the form is parsed — captures a paste + Enter (or a click)
+      // during that gap: it cancels the form's default POST reload and either runs the search
+      // immediately (if post.js is already up) or queues it for post.js to replay on init. So a
+      // user can land on the page, Ctrl-V, Enter, and never miss the search bar.
+      (function () {
+        var box = document.getElementById("textbox");
+        var form = document.getElementById("input");
+        var btn = document.getElementById("button");
+        if (!box) return;
+        if (!location.hash) box.focus({ preventScroll: true }); // hash = deep link, loads into content
+        function go() {
+          var v = box.value.trim();
+          if (!v) return;
+          if (window.__submitSearch) window.__submitSearch(v);
+          else window.__pendingSearch = v; // not ready yet — post.js replays this on init
+        }
+        if (form) form.addEventListener("submit", function (e) { e.preventDefault(); go(); }); // Enter
+        if (btn) btn.addEventListener("click", go);
+        window.__shimReady = true;
+      })();
+    </script>
 
     <p class="search-hint">Paste a CS2 inspect link to see its float, pattern, stickers &amp; more.</p>
 
