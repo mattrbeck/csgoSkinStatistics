@@ -1,0 +1,78 @@
+:root {
+  --bg: #0f1115; --panel: #181b22; --panel2: #1f232c; --line: #2a2f3a;
+  --text: #e6e8ec; --muted: #9aa3b2; --accent: #6ea8fe; --err: #ff6b6b; --ok: #58d68d;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 2rem 1.25rem 4rem; background: var(--bg); color: var(--text);
+  font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  max-width: 920px; margin-inline: auto;
+}
+header h1 { margin: 0 0 .25rem; font-size: 1.4rem; }
+.sub { color: var(--muted); margin: 0 0 1.5rem; }
+code { background: var(--panel2); padding: .05em .35em; border-radius: 4px; font-size: .85em; }
+
+#search { display: flex; gap: .5rem; }
+#textbox {
+  flex: 1; background: var(--panel); border: 1px solid var(--line); color: var(--text);
+  padding: .6rem .75rem; border-radius: 8px; font-family: ui-monospace, monospace; font-size: .85rem;
+}
+#textbox:focus { outline: none; border-color: var(--accent); }
+button {
+  background: var(--accent); color: #0b0d12; border: 0; border-radius: 8px;
+  padding: .6rem 1rem; font-weight: 600; cursor: pointer;
+}
+button:hover { filter: brightness(1.08); }
+
+#samples { margin: .9rem 0 .25rem; display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }
+.samples-label { color: var(--muted); font-size: .85rem; margin-right: .25rem; }
+button.sample {
+  background: var(--panel2); color: var(--text); border: 1px solid var(--line);
+  font-weight: 500; font-size: .8rem; padding: .35rem .6rem;
+}
+
+.status { min-height: 1.2em; color: var(--muted); font-size: .88rem; margin: .75rem 0; }
+.status.err { color: var(--err); }
+
+#cards { display: flex; flex-direction: column; gap: 1rem; margin-top: .5rem; }
+.card {
+  background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--accent);
+  border-radius: 10px; padding: 1rem;
+}
+.card-head { display: flex; gap: 1rem; align-items: center; }
+.card-img-frame {
+  width: 120px; height: 90px; flex: none; background: var(--panel2); border-radius: 8px;
+  display: grid; place-items: center; overflow: hidden;
+}
+.card-image { max-width: 100%; max-height: 100%; }
+.card-image.placeholder::after { content: "no image"; color: var(--muted); font-size: .7rem; }
+.card-name { font-size: 1.05rem; font-weight: 600; display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }
+.card-name.knife { color: #e0b3ff; }
+.special { background: #3a2f12; color: #ffd479; font-size: .72rem; padding: .1em .45em; border-radius: 4px; }
+.st { background: #2a1f3d; color: #c9a6ff; font-size: .72rem; padding: .1em .45em; border-radius: 4px; }
+.card-rarity { color: var(--muted); font-size: .85rem; margin-top: .15rem; }
+
+.card-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: .5rem 1rem; margin: 1rem 0 0; }
+.card-grid dt { color: var(--muted); font-size: .7rem; text-transform: uppercase; letter-spacing: .04em; }
+.card-grid dd { margin: .1rem 0 0; font-family: ui-monospace, monospace; font-size: .82rem; }
+
+.card-stickers { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .85rem; }
+.chip {
+  display: inline-flex; align-items: center; gap: .35rem; background: var(--panel2);
+  border: 1px solid var(--line); border-radius: 999px; padding: .2rem .55rem .2rem .25rem; font-size: .78rem;
+}
+.chip img { width: 26px; height: 26px; object-fit: contain; border-radius: 50%; background: #0008; }
+.chip-charm { border-color: #3a6; }
+.chip-slab { border-color: #a63; }
+
+.card-market { margin-top: .85rem; color: var(--muted); font-family: ui-monospace, monospace; font-size: .78rem; }
+
+.card-net { margin-top: .85rem; border-top: 1px dashed var(--line); padding-top: .6rem; }
+.card-net summary { cursor: pointer; color: var(--muted); font-size: .8rem; }
+.card-net-table { width: 100%; border-collapse: collapse; margin-top: .5rem; font-size: .76rem; }
+.card-net-table td { padding: .2rem .4rem; border-bottom: 1px solid var(--line); font-family: ui-monospace, monospace; }
+.card-net-table td:first-child { color: var(--accent); width: 3.5rem; }
+.card-net-table tr.reused td:first-child { color: var(--muted); }
+.card-net-table tr.reused td { color: var(--muted); }
+
+footer { margin-top: 2rem; color: var(--muted); font-size: .8rem; }

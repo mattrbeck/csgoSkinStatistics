@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CS2 Skin Statistics — static prototype</title>
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header>
+    <h1>Static / client-side prototype</h1>
+    <p class="sub">
+      Paste a CS2 <strong>hex</strong> inspect link (the <code>…preview&nbsp;&lt;hex&gt;</code> "cert"
+      form). It is decoded, named, and rendered <strong>entirely in your browser</strong> — no API call.
+      The panel under each card shows which data shards the lookup actually fetched.
+    </p>
+  </header>
+
+  <section id="search">
+    <input id="textbox" type="text" placeholder="steam://run/730//+csgo_econ_action_preview%2000180720…" spellcheck="false" />
+    <button id="button">Decode</button>
+  </section>
+
+  <section id="samples">
+    <span class="samples-label">Try a sample:</span>
+    <span id="sample-buttons"></span>
+  </section>
+
+  <p id="status" class="status"></p>
+
+  <section id="cards"></section>
+
+  <footer>
+    <span id="session-stats"></span>
+  </footer>
+
+  <template id="card-template">
+    <article class="card">
+      <div class="card-head">
+        <div class="card-img-frame"><img class="card-image" alt="" /></div>
+        <div class="card-headtext">
+          <div class="card-name"></div>
+          <div class="card-rarity"></div>
+        </div>
+      </div>
+      <dl class="card-grid">
+        <div><dt>Float</dt><dd class="card-float">—</dd></div>
+        <div><dt>Wear</dt><dd class="card-wear">—</dd></div>
+        <div><dt>Pattern</dt><dd class="card-seed">—</dd></div>
+        <div><dt>Quality</dt><dd class="card-quality">—</dd></div>
+        <div><dt>Origin</dt><dd class="card-origin">—</dd></div>
+        <div><dt>Item ID</dt><dd class="card-itemid">—</dd></div>
+      </dl>
+      <div class="card-stickers"></div>
+      <div class="card-market"></div>
+      <details class="card-net">
+        <summary>network for this item · <span class="card-net-sum"></span></summary>
+        <table class="card-net-table"></table>
+      </details>
+    </article>
+  </template>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
