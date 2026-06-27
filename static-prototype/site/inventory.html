@@ -26,7 +26,7 @@
   </section>
   <section id="source-row">
     <label><input type="radio" name="source" value="fixture" checked /> bundled fixture (always works, real 281-item inventory)</label>
-    <label><input type="radio" name="source" value="proxy" /> live via local CORS shim (<code>node build/cors-proxy.mjs</code>)</label>
+    <label><input type="radio" name="source" value="proxy" /> live via public CORS proxy (rate-limited; falls back across a few)</label>
   </section>
 
   <p id="status" class="status"></p>

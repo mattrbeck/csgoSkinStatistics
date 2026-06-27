@@ -25,15 +25,21 @@ cd static-prototype/site && python3 -m http.server 8777
 # open http://localhost:8777            (single-item page)
 # open http://localhost:8777/inventory.html   (full inventory page)
 
-# optional, only for the inventory page's "live" mode (a real fetch to Steam):
+# the inventory page's "live" mode defaults to public CORS proxies (no setup, but flaky).
+# for a reliable local fetch instead, run the bundled shim:
 node static-prototype/build/cors-proxy.mjs            # dumb CORS shim on :8788
 ```
+
+A full **measured comparison of this prototype vs the existing app** — cold/warm, with/without
+stickers, inventories, across fast and slow networks, plus the complete tradeoff matrix — is in
+[`COMPARISON.md`](COMPARISON.md).
 
 - **`index.html`** — click a sample or paste a hex inspect link. Each card's "network for
   this item" panel shows exactly which shards that lookup fetched vs reused from cache. The
   footer shows the idle prefetcher warming the rest of the catalog in the background.
 - **`inventory.html`** — loads a whole inventory and decodes every embedded cert client-side.
-  Defaults to a bundled real 281-item fixture; flip to "live" to fetch through the shim.
+  Defaults to a bundled real 281-item fixture; flip to "live" to fetch a SteamID64 through a
+  public CORS proxy (or the local shim).
 
 `screenshot.png` (item page) and `screenshot-inventory.png` show them running.
 
@@ -206,12 +212,15 @@ Game Coordinator round-trips and 159 database rows the old backend needed — no
 **The CORS finding (the one unavoidable server piece).** A browser *cannot* fetch
 `steamcommunity.com/inventory/...` cross-origin: the endpoint sends no
 `Access-Control-Allow-Origin`, so `fetch` throws `TypeError: Failed to fetch` (verified live).
-A static inventory page therefore needs a CORS shim — but only a shim:
-`build/cors-proxy.mjs` is ~40 lines, forwards one whitelisted `?steamid=<id64>` shape (no open
-proxy / SSRF), and stamps CORS headers. **No** Game Coordinator, **no** database, **no** Steam
-login, **no** business logic — all of that moved into the browser. Compare
-`Controllers/SkinController.cs` (~600 lines) + `SteamService` + `DatabaseService`. The page
-also ships a bundled real inventory fixture so the demo runs with no proxy at all.
+A static inventory page therefore needs a CORS unblocker for the fetch. The page tries
+**public CORS proxies** by default (zero setup — but they rate-limit, go down, and see the
+SteamID you look up, so they're a "for now" convenience, not a real answer). The production
+form is your own shim: `build/cors-proxy.mjs` is ~40 lines, forwards one whitelisted
+`?steamid=<id64>` shape (no open proxy / SSRF), and stamps CORS headers. **No** Game
+Coordinator, **no** database, **no** Steam login, **no** business logic — all of that moved
+into the browser. Compare `Controllers/SkinController.cs` (~600 lines) + `SteamService` +
+`DatabaseService`. The page also ships a bundled real inventory fixture so the demo runs with
+no network at all.
 
 So the scorecard for a fully static app:
 

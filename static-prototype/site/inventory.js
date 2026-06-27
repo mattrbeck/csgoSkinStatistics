@@ -7,7 +7,17 @@ import { resolveItem, needsSpecialShard } from "./resolve.js";
 import { DataLoader } from "./loader.js";
 
 const IMG_BASE = "https://community.akamai.steamstatic.com/economy/image/";
-const PROXY = "http://localhost:8788/inventory";
+
+// Public CORS proxies, tried in order until one returns the inventory JSON. These are the
+// "for now" stand-in for a real CORS shim (build/cors-proxy.mjs) — convenient for a demo,
+// but they rate-limit, can go down, and see the SteamID64 you look up. A production static
+// app would run its own ~40-line shim or a serverless edge function instead.
+const STEAM_URL = (sid) => `https://steamcommunity.com/inventory/${sid}/730/2?l=english&count=2000`;
+const PUBLIC_PROXIES = [
+  (sid) => `https://proxy.cors.sh/${STEAM_URL(sid)}`,
+  (sid) => `https://api.allorigins.win/raw?url=${encodeURIComponent(STEAM_URL(sid))}`,
+  (sid) => `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(STEAM_URL(sid))}`,
+];
 
 const loader = new DataLoader();
 let core = null;
@@ -17,10 +27,21 @@ const status = (m, err = false) => { const s = $("status"); s.textContent = m; s
 
 async function getInventory(steamid, source) {
   if (source === "proxy") {
-    if (!/^7656\d{13}$/.test(steamid)) throw new Error("Enter a SteamID64 to use the live shim.");
-    const r = await fetch(`${PROXY}?steamid=${steamid}`, { cache: "no-store" });
-    if (!r.ok) throw new Error(`shim returned ${r.status} — is \`node build/cors-proxy.mjs\` running?`);
-    return r.json();
+    if (!/^7656\d{13}$/.test(steamid)) throw new Error("Enter a SteamID64 to fetch a live inventory.");
+    let lastErr = "";
+    for (const make of PUBLIC_PROXIES) {
+      const url = make(steamid);
+      const host = new URL(url).host;
+      try {
+        status(`Fetching via ${host}…`);
+        const r = await fetch(url, { cache: "no-store" });
+        if (!r.ok) { lastErr = `${host} → ${r.status}`; continue; }
+        const data = await r.json();
+        if (data && data.assets) return data;
+        lastErr = `${host} → no inventory in response (private/empty?)`;
+      } catch (e) { lastErr = `${host} → ${e.message || e}`; }
+    }
+    throw new Error(`All public proxies failed (${lastErr}). They rate-limit and go down — run \`node build/cors-proxy.mjs\` for a reliable local shim, or use the bundled fixture.`);
   }
   // Bundled real inventory (so the demo runs with no network/proxy at all).
   const r = await fetch("fixtures/inventory-sample.json", { cache: "no-store" });
