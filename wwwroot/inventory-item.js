@@ -372,6 +372,12 @@ class InventoryItem extends HTMLElement {
         -webkit-touch-callout: none;
       }
 
+      /* Held past the copy threshold, awaiting release. */
+      .icon-btn.arming {
+        background-color: var(--pop, #2ecc71);
+        color: var(--gray, #1f2d3a);
+      }
+
       /* Brief confirmation after a long-press copy (mobile has no hover state to borrow). */
       .icon-btn.copied {
         position: relative;

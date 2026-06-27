@@ -733,6 +733,12 @@ input[type="text"]:focus {
     opacity: 0.6;
   }
 
+  /* Held past the copy threshold, awaiting release. */
+  &.arming {
+    background-color: var(--pop);
+    color: var(--gray);
+  }
+
   /* Brief confirmation after a long-press copy. */
   &.copied {
     position: relative;
