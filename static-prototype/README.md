@@ -34,9 +34,10 @@ A full **measured comparison of this prototype vs the existing app** — cold/wa
 stickers, inventories, across fast and slow networks, plus the complete tradeoff matrix — is in
 [`COMPARISON.md`](COMPARISON.md).
 
-- **`index.html`** — click a sample or paste a hex inspect link. Each card's "network for
-  this item" panel shows exactly which shards that lookup fetched vs reused from cache. The
-  footer shows the idle prefetcher warming the rest of the catalog in the background.
+- **`index.html`** — click a sample or paste a hex inspect link (or deep-link with
+  `index.html#<hex>`, which auto-decodes one item like the existing app's `/#<hex>`). Each
+  card's "network for this item" panel shows exactly which shards that lookup fetched vs reused
+  from cache. The footer shows the idle prefetcher warming the rest of the catalog.
 - **`inventory.html`** — loads a whole inventory and decodes every embedded cert client-side.
   Defaults to a bundled real 281-item fixture; flip to "live" to fetch a SteamID64 through a
   public CORS proxy (or the local shim).

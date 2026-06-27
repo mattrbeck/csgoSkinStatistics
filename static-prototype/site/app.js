@@ -140,10 +140,20 @@ async function boot() {
   await loader.init();
   core = await loader.constCore(); // needed to name every item; loaded once
   status("");
-  startIdlePrefetch();
 
   $("button").addEventListener("click", () => handle($("textbox").value));
   $("textbox").addEventListener("keydown", (e) => { if (e.key === "Enter") handle($("textbox").value); });
+
+  // Deep link: #<hex|link> auto-decodes one item, mirroring the existing app's /#<hex>.
+  // The linked item is resolved FIRST, then the idle prefetcher starts — so a shared link
+  // paints its item without the background warm competing for bandwidth.
+  if (location.hash.length > 1) {
+    const h = decodeURIComponent(location.hash.slice(1));
+    $("textbox").value = h;
+    await handle(h);
+    window.__cardMs = performance.now(); // benchmark hook: nav-start → deep-linked card rendered
+  }
+  startIdlePrefetch();
 
   // Sample buttons (real cert links minted by the build from real catalog ids).
   try {

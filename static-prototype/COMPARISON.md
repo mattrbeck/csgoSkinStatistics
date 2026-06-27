@@ -1,9 +1,10 @@
 # Existing app vs static prototype — in-depth comparison
 
 What the two architectures cost, scenario by scenario, on fast and slow networks, and the
-full set of tradeoffs. Numbers are **measured** where marked; wall-clock grids are **modeled**
-from measured transfer sizes + network profiles calibrated against the real Chrome-throttled
-measurements in `docs/client-side-cert-decode-findings.md` (same app, same data).
+full set of tradeoffs. The single-item cold and warm grids are **real throttled-browser
+benchmarks** (both apps run locally, DevTools network throttling, fresh cache per run); the
+inventory grids are **modeled** from measured transfer sizes + profiles calibrated against the
+real Chrome-throttled runs in `docs/client-side-cert-decode-findings.md` (same app, same data).
 
 ## The two architectures
 
@@ -52,43 +53,65 @@ Model: `time ≈ (sequential round-trips × RTT) + (transferred KB ÷ bandwidth)
 
 ## Scenario grids (time to first rendered item)
 
-### 1. Single item **with stickers**, cold (first-ever visit)
+Scenarios 1 and 2 are **real throttled-browser measurements** (method below); 3–5 are
+**modeled** (the inventory path is dominated by the external Steam fetch, which is too noisy to
+benchmark cleanly through a public proxy).
+
+> **Model vs measured.** The model got the *shape and ratio* right but **underestimated cold
+> absolute latency by ~1.5–1.7×**: measured Fast 4G was 905 ms / 1.64 s vs modeled ~530 / ~950.
+> The gap is real-world serialization the simple model ignores — chiefly the existing app's
+> **render-blocking Google Fonts** (two extra third-party origins, each its own DNS+TLS+RTT)
+> and per-origin connection setup. The prototype uses system fonts (no such tax) but still
+> trails because of `const-core` + the deeper round-trip chain. **Warm** numbers matched the
+> model almost exactly (measured 177 / 580 ms vs modeled ~170 / ~570 ms).
+
+### 1. Single item **with stickers**, cold (first-ever visit) — **measured**
+
+Real stopwatch, throttled Chrome, fresh isolated cache per run, same real cert (UMP-45 |
+Exposure, 2 stickers), time from navigation start to the rendered card:
+
+| Profile | Existing | Prototype | Ratio |
+|---|---|---|---|
+| Broadband (modeled) | ~90 ms | ~190 ms | ~2× |
+| Fast 4G | **905 ms** | **1.64 s** | 1.8× |
+| Slow 4G | **2.64 s** | **6.18 s** | 2.3× |
+| Slow 3G | **9.11 s** | **21.9 s** | **2.4×** |
+
+The prototype's 24 KB `const-core` + the manifest→core→shard round-trip chain lose to one
+enriched server response. Confirmed the chain empirically — the prototype fetched exactly
+`manifest → const-core → one sticker shard → one image shard` before painting.
+
+### 2. Single item, **warm** (any later lookup in the session) — **measured**
+
+A second, different item looked up in an already-loaded page (prototype: catalog cached;
+existing: page cached, but the item still needs `/api`):
 
 | Profile | Existing | Prototype | Winner |
 |---|---|---|---|
-| Broadband | ~90 ms | ~190 ms | existing |
-| Fast 4G | ~530 ms | ~950 ms | existing |
-| Slow 4G | ~1.8 s | ~3.4 s | existing |
-| Slow 3G | ~6.5 s | ~12.2 s | **existing (≈1.9×)** |
+| Fast 4G | **177 ms** | **~6 ms** | prototype |
+| Slow 4G | **580 ms** | **5.8 ms** | prototype |
+| Slow 3G | ~2 s (one round-trip) | **~6 ms** | **prototype (no network at all)** |
 
-The prototype's 24 KB `const-core` + extra round-trips lose to one enriched server response.
+This is the inversion, and it's stark: the existing app pays a full `/api` round-trip on
+**every** lookup forever (and it scales with RTT: 177 ms → 580 ms → ~2 s), while the prototype
+resolves each new item with **zero network** — the 5.8 ms figure was measured *under Slow 4G
+throttle*, because no request is made at all. The idle prefetcher makes the page warm within
+seconds of load, and warm lookups work fully offline.
 
-### 2. Single item, **warm** (any later lookup in the session / repeat visit)
-
-| Profile | Existing | Prototype | Winner |
-|---|---|---|---|
-| Broadband | ~26 ms | **~2 ms** | prototype |
-| Fast 4G | ~170 ms | **~2 ms** | prototype |
-| Slow 4G | ~570 ms | **~2 ms** | prototype |
-| Slow 3G | ~2.05 s | **~2 ms** | **prototype (no network at all)** |
-
-This is the inversion: the existing app pays a full round-trip on **every** lookup forever; the
-prototype, once warm (and the idle prefetcher makes it warm within seconds of page load), does
-each lookup with **zero network** and works offline.
-
-### 3. Single item **without stickers**, cold
+### 3. Single item **without stickers**, cold (modeled)
 
 | Profile | Existing | Prototype |
 |---|---|---|
-| Broadband | ~90 ms | ~170 ms |
 | Fast 4G | ~530 ms | ~920 ms |
 | Slow 4G | ~1.8 s | ~3.2 s |
 | Slow 3G | ~6.5 s | ~11.6 s |
 
-Skipping the sticker shard barely helps — `const-core` dominates the prototype's cold cost.
-(Warm: same as scenario 2 — prototype ~2 ms, existing a full round-trip.)
+Modeled, but the takeaway is robust: dropping the sticker shard saves one ~30 KB shard, and
+scenario 1 showed the **image shard + `const-core` dominate** anyway — so a no-sticker item is
+only marginally cheaper than a with-sticker one. (Apply the same ~1.5–1.7× real-world factor as
+scenario 1.) Warm: identical to scenario 2 — prototype ~6 ms, existing a full round-trip.
 
-### 4. Inventory, cold (first visit). `+P` = the Steam fetch (~0.5–2 s, similar for both)
+### 4. Inventory, cold (first visit) — modeled. `+P` = the Steam fetch (~0.5–2 s, similar for both)
 
 | Profile | Existing `+P_server` | Prototype `+P_proxy` |
 |---|---|---|
@@ -101,7 +124,7 @@ The server returns a **trimmed, enriched 72 KB** in one shot; the prototype must
 78 KB inventory plus ~300 KB of catalog shards** cold, over more round-trips. On slow networks
 that's brutal.
 
-### 5. Inventory, warm (page + catalog cached). `+P` = Steam fetch
+### 5. Inventory, warm (page + catalog cached) — modeled. `+P` = Steam fetch
 
 | Profile | Existing `+P_server` | Prototype `+P_proxy` |
 |---|---|---|
@@ -118,8 +141,8 @@ are dominated by the Steam fetch itself.
 
 | Dimension | Existing app | Static prototype |
 |---|---|---|
-| **Cold first paint** | Faster (1 enriched round-trip) | Slower (catalog + more round-trips) |
-| **Warm/repeat lookup** | Round-trip every time | **Zero-network, instant, offline** |
+| **Cold first paint** (measured, Slow 4G) | Faster — **2.6 s** (1 enriched round-trip) | Slower — **6.2 s** (catalog + more round-trips) |
+| **Warm/repeat lookup** (measured, Slow 4G) | **580 ms** round-trip every time | **5.8 ms**, zero-network, offline |
 | **Inventory cold** | Lighter wire (server trims to 72 KB) | Heavier (raw inv + ~300 KB catalog) |
 | **Inventory warm** | ~same | ~same (slightly heavier wire, no server CPU) |
 | **Infra** | Always-on server, Steam-bot login, SQLite, GC connection | Static CDN (+ ~40-line CORS shim for inventory only) |
@@ -152,10 +175,15 @@ are dominated by the Steam fetch itself.
 
 ## Methodology notes / honesty
 
-- Wall-clock grids are a model, not a stopwatch on every cell; they combine **measured**
-  transfer sizes and round-trip counts with bandwidth/RTT **calibrated to the prior doc's real
-  throttled measurements** on this exact app and data. Treat them as well-grounded estimates
-  (±20–30%), not benchmarks.
+- **Scenarios 1 & 2 are real benchmarks.** Both apps were run locally (`dotnet run` on :5050;
+  static files on :8777), driven with Chrome DevTools network throttling. Each cold run used a
+  **fresh isolated browser context** (guaranteed empty cache) and a **single navigation** to a
+  deep-link URL; time-to-card was read from `performance.now()` at the moment the result card
+  rendered (the prototype records it directly; the existing app via the `/api` resource-timing
+  entry, which lands a few ms before paint). The same real cert was used for both apps. Numbers
+  are single runs (±10–15% run-to-run under throttling), enough to show ratios that are 1.8–2.4×.
+- **Scenarios 3–5 remain modeled** — same formula, calibrated to the prior doc; treat as
+  estimates (±20–30%), and apply the ~1.5–1.7× cold real-world factor scenarios 1–2 revealed.
 - The Steam fetch (`+P`) is left as a symbol because it's the same external dependency for both
   and swamps the rest on the inventory path; the public proxy adds a hop and variance the
   existing server-side fetch avoids.
