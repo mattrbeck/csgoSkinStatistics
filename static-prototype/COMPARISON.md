@@ -57,29 +57,33 @@ Scenarios 1 and 2 are **real throttled-browser measurements** (method below); 3�
 **modeled** (the inventory path is dominated by the external Steam fetch, which is too noisy to
 benchmark cleanly through a public proxy).
 
-> **Model vs measured.** The model got the *shape and ratio* right but **underestimated cold
-> absolute latency by ~1.5–1.7×**: measured Fast 4G was 905 ms / 1.64 s vs modeled ~530 / ~950.
-> The gap is real-world serialization the simple model ignores — chiefly the existing app's
-> **render-blocking Google Fonts** (two extra third-party origins, each its own DNS+TLS+RTT)
-> and per-origin connection setup. The prototype uses system fonts (no such tax) but still
-> trails because of `const-core` + the deeper round-trip chain. **Warm** numbers matched the
-> model almost exactly (measured 177 / 580 ms vs modeled ~170 / ~570 ms).
+> **Fairness fix — gzip.** Both apps are now served **gzipped** (the existing app via ASP.NET
+> ResponseCompression; the prototype via a small CDN-like gzip server, `build/static-gzip.mjs`).
+> An earlier pass served the prototype through Python's `http.server`, which sends everything
+> **uncompressed** — unfairly inflating its shards ~4× (const-core 87 KB raw vs 24 KB gz). The
+> numbers below are the corrected gzip-served ones; gzip cut the prototype's cold times ~20–25%
+> (Fast 4G 1.64 s → 1.32 s, Slow 3G 21.9 s → 16.4 s).
+>
+> **Model vs measured.** With gzip, the model is close: measured Fast 4G 905 ms / 1.32 s vs
+> modeled ~530 / ~950 — still ~1.4× high on the cold absolute (real serialization the model
+> omits: the existing app's **render-blocking Google Fonts**, per-origin setup). **Warm**
+> matched the model almost exactly (measured 177 / 580 ms vs modeled ~170 / ~570 ms).
 
-### 1. Single item **with stickers**, cold (first-ever visit) — **measured**
+### 1. Single item **with stickers**, cold (first-ever visit) — **measured (gzip-served)**
 
 Real stopwatch, throttled Chrome, fresh isolated cache per run, same real cert (UMP-45 |
 Exposure, 2 stickers), time from navigation start to the rendered card:
 
-| Profile | Existing | Prototype | Ratio |
+| Profile | Existing | Prototype (lazy) | Ratio |
 |---|---|---|---|
-| Broadband (modeled) | ~90 ms | ~190 ms | ~2× |
-| Fast 4G | **905 ms** | **1.64 s** | 1.8× |
-| Slow 4G | **2.64 s** | **6.18 s** | 2.3× |
-| Slow 3G | **9.11 s** | **21.9 s** | **2.4×** |
+| Broadband (modeled) | ~90 ms | ~150 ms | ~1.7× |
+| Fast 4G | **905 ms** | **1.32 s** | 1.5× |
+| Slow 4G | **2.64 s** | **4.62 s** | 1.8× |
+| Slow 3G | **9.11 s** | **16.4 s** | **1.8×** |
 
 The prototype's 24 KB `const-core` + the manifest→core→shard round-trip chain lose to one
 enriched server response. Confirmed the chain empirically — the prototype fetched exactly
-`manifest → const-core → one sticker shard → one image shard` before painting.
+`manifest → const-core → one sticker shard → one image shard` (≈90 KB gz) before painting.
 
 ### 2. Single item, **warm** (any later lookup in the session) — **measured**
 
@@ -97,6 +101,42 @@ This is the inversion, and it's stark: the existing app pays a full `/api` round
 resolves each new item with **zero network** — the 5.8 ms figure was measured *under Slow 4G
 throttle*, because no request is made at all. The idle prefetcher makes the page warm within
 seconds of load, and warm lookups work fully offline.
+
+### 2c. Prototype strategies: **lazy** vs **eager (proactive) full preload** — measured
+
+There are three ways the static prototype can handle its catalog. All three end up "warm" (item
+#2+ resolve in ~6 ms offline); they differ in **when** the catalog is downloaded and whether the
+first paint blocks on it:
+
+- **Lazy** (default): fetch only the shards each item needs, on demand.
+- **Lazy + idle prefetch** (also default): lazy *plus* warming the rest during browser idle —
+  so item #1 is quick and the cache fills in the background without blocking.
+- **Eager** (`?preload=eager`): download the **entire** catalog (834 KB gz, 32 shards) up front
+  and block the first paint until it's all in cache. "Spinner for a beat, then everything —
+  including item #1 — is instant and offline."
+
+Measured **time to the first item** (the eager column is the full proactive download + decode):
+
+| Profile | Existing | Lazy (1st item) | **Eager (1st item)** | Catalog size |
+|---|---|---|---|---|
+| localhost (≈ broadband floor) | — | — | **89 ms** | 834 KB gz |
+| Broadband (real, est.) | ~90 ms | ~150 ms | **~1 s** | |
+| Fast 4G | 905 ms | 1.32 s | **2.24 s** | |
+| Slow 4G | 2.64 s | 4.62 s | **8.58 s** | |
+| Slow 3G | 9.11 s | 16.4 s | **30.5 s** | |
+
+After that first paint, **every** item costs ~6 ms for both lazy and eager.
+
+**So is the "1–2 s proactive download" worth it?** It only *is* 1–2 s on a fast link: ~1 s on
+real broadband, ~2.2 s on Fast 4G. On Slow 4G it's ~8.6 s and on Slow 3G ~30 s of blank screen,
+because you're now blocking first paint on 834 KB instead of the ~90 KB one item needs. And the
+payoff it buys — every later item instant and offline — is **already delivered by lazy + idle
+prefetch**, which paints item #1 in 1.3 s (Fast 4G) and backfills the same catalog in the
+background without ever blocking. The one thing eager adds is a *guarantee*: no item ever stalls,
+even if the user races ahead during the idle-prefetch window. That's a niche worth paying for
+only on fast connections (gate it behind a `navigator.connection`/Save-Data check), or for an
+explicitly offline-first "download for offline" button. As a default it's strictly worse than
+lazy + idle prefetch on first-paint, and dramatically so on slow networks.
 
 ### 3. Single item **without stickers**, cold (modeled)
 
@@ -141,7 +181,7 @@ are dominated by the Steam fetch itself.
 
 | Dimension | Existing app | Static prototype |
 |---|---|---|
-| **Cold first paint** (measured, Slow 4G) | Faster — **2.6 s** (1 enriched round-trip) | Slower — **6.2 s** (catalog + more round-trips) |
+| **Cold first paint** (measured gz, Slow 4G) | Faster — **2.6 s** (1 enriched round-trip) | Slower — **4.6 s** lazy / **8.6 s** eager (catalog + more round-trips) |
 | **Warm/repeat lookup** (measured, Slow 4G) | **580 ms** round-trip every time | **5.8 ms**, zero-network, offline |
 | **Inventory cold** | Lighter wire (server trims to 72 KB) | Heavier (raw inv + ~300 KB catalog) |
 | **Inventory warm** | ~same | ~same (slightly heavier wire, no server CPU) |
@@ -167,6 +207,10 @@ are dominated by the Steam fetch itself.
 - **Static prototype wins** for: repeat/session use (browse many items — each is then free and
   offline), operational simplicity and cost (no server, no Steam bot, no DB to babysit),
   infinite cheap scaling, and privacy on the single-item page (nothing leaves the browser).
+- **Catalog strategy:** default to **lazy + idle prefetch** — it gives the fast first item *and*
+  the instant-everything-after, without ever blocking. Reserve **eager full preload**
+  (`?preload=eager`, ~1 s on broadband but ~30 s on Slow 3G) for fast connections or an explicit
+  "make available offline" action; never as the default.
 - **Hybrid is the real sweet spot:** serve the **single-item hex page fully static** (it's a
   strict win on infra with no downside beyond cold first-paint), keep a **thin server only for
   what genuinely needs it** — `S/A/D/M` (GC bot) and the inventory CORS fetch (a logic-free
@@ -175,15 +219,16 @@ are dominated by the Steam fetch itself.
 
 ## Methodology notes / honesty
 
-- **Scenarios 1 & 2 are real benchmarks.** Both apps were run locally (`dotnet run` on :5050;
-  static files on :8777), driven with Chrome DevTools network throttling. Each cold run used a
-  **fresh isolated browser context** (guaranteed empty cache) and a **single navigation** to a
-  deep-link URL; time-to-card was read from `performance.now()` at the moment the result card
-  rendered (the prototype records it directly; the existing app via the `/api` resource-timing
-  entry, which lands a few ms before paint). The same real cert was used for both apps. Numbers
-  are single runs (±10–15% run-to-run under throttling), enough to show ratios that are 1.8–2.4×.
+- **Scenarios 1, 2, 2c are real benchmarks.** Both apps run locally and **gzip-served** — the
+  existing app via ASP.NET ResponseCompression on :5050, the prototype via `build/static-gzip.mjs`
+  on :8780 (a small CDN-like server with gzip + immutable caching for hashed shards). Driven with
+  Chrome DevTools network throttling. Each cold run used a **fresh isolated browser context**
+  (guaranteed empty cache) and a **single navigation** to a deep-link URL; time-to-card was read
+  from `performance.now()` at the moment the card rendered (the prototype records it directly; the
+  existing app via the `/api` resource-timing entry, which lands a few ms before paint). Same real
+  cert for both apps. Single runs (±10–15% under throttling), enough for the 1.5–1.8× ratios.
 - **Scenarios 3–5 remain modeled** — same formula, calibrated to the prior doc; treat as
-  estimates (±20–30%), and apply the ~1.5–1.7× cold real-world factor scenarios 1–2 revealed.
+  estimates (±20–30%).
 - The Steam fetch (`+P`) is left as a symbol because it's the same external dependency for both
   and swamps the rest on the inventory path; the public proxy adds a hop and variance the
   existing server-side fetch avoids.

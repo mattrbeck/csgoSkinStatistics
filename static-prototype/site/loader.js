@@ -107,6 +107,13 @@ export class DataLoader {
     return true;
   }
 
+  // Eager preload: download the entire catalog up front and resolve only when it's all in
+  // cache. The "spinner for a beat, then every item is instant + offline" strategy — versus
+  // the idle prefetcher, which never blocks but leaves a window where an early lookup is cold.
+  async preloadAll() {
+    await Promise.all(this.allShards().map((n) => this._shard(n)));
+  }
+
   // Bytes actually downloaded this session (reused shards counted once).
   downloadedBytes() {
     const seen = new Set();

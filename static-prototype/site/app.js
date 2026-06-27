@@ -139,6 +139,15 @@ async function boot() {
   status("Loading manifest + core catalog…");
   await loader.init();
   core = await loader.constCore(); // needed to name every item; loaded once
+
+  // Eager mode (?preload=eager): block on downloading the WHOLE catalog before resolving
+  // anything, so the first item — and every item after — is instant and offline-ready. The
+  // trade is a fixed upfront stall instead of the lazy path's quick-first-item-then-warm.
+  const eager = new URLSearchParams(location.search).get("preload") === "eager";
+  if (eager) {
+    status("Preloading full catalog…");
+    await loader.preloadAll();
+  }
   status("");
 
   $("button").addEventListener("click", () => handle($("textbox").value));
@@ -153,7 +162,7 @@ async function boot() {
     await handle(h);
     window.__cardMs = performance.now(); // benchmark hook: nav-start → deep-linked card rendered
   }
-  startIdlePrefetch();
+  if (!eager) startIdlePrefetch();
 
   // Sample buttons (real cert links minted by the build from real catalog ids).
   try {
