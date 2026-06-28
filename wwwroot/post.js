@@ -76,7 +76,8 @@ function populateCard(card, iteminfo, url, loadTime) {
   // Applied stickers / charms / slabs (shared with the inventory card).
   const hasDecals = (iteminfo.stickers || []).length > 0 || (iteminfo.keychains || []).length > 0;
   const stickers = q(".item-stickers");
-  stickers.replaceChildren(hasDecals ? buildStickerChips(iteminfo.stickers, iteminfo.keychains) : "");
+  // showLabels: the single-item page has room to spell out each sticker's name inline.
+  stickers.replaceChildren(hasDecals ? buildStickerChips(iteminfo.stickers, iteminfo.keychains, { showLabels: true }) : "");
   stickers.style.display = hasDecals ? "" : "none";
 
   const inspect = q(".card-inspect");
@@ -145,6 +146,18 @@ function renderErrorCard(card, message) {
 // deep-link / queued-input paths below.
 function submitSearch(rawInput) {
   controls.button.blur();
+
+  // Unified search bar: a Steam profile/ID belongs to the inventory page, so hand it off there
+  // (deep-linked via the hash, which that page reads on load). classifyInput lives in
+  // app-shared.js; if it somehow isn't loaded, fall through to the inspect-link path below.
+  if (typeof classifyInput === "function") {
+    const cls = classifyInput(rawInput);
+    if (cls.kind === "profile") {
+      window.location.href = "/inventory#" + encodeURIComponent(cls.value);
+      return;
+    }
+  }
+
   // Strip either the legacy (rungame/<steamid>) or new (run/730//) prefix.
   const reduced = (rawInput || "")
     .replace(/^.*csgo_econ_action_preview(%20|\s+)/i, "")
@@ -155,7 +168,7 @@ function submitSearch(rawInput) {
     post(inspectPrefix + reduced, reduced);
     controls.textbox.value = ""; // clear on search, like the inventory page
   } else {
-    controls.textbox.value = "Not a valid inspect link";
+    controls.textbox.value = "Not a valid inspect link or profile";
   }
 }
 
@@ -190,8 +203,13 @@ function initSearch() {
     window.__pendingSearch = null;
     submitSearch(queued);
   } else {
-    // Empty landing: put the cursor in the search box (the shim already did this; harmless).
+    // Empty landing: put the cursor in the search box (the shim already did this; harmless) and
+    // show recent lookups as clickable chips. Picking one re-runs it through submitSearch (a
+    // profile recent routes itself to the inventory page).
     controls.textbox.focus({ preventScroll: true });
+    if (typeof renderRecents === "function") {
+      renderRecents(document.getElementById("recent-searches"), (value) => submitSearch(value));
+    }
   }
 }
 
@@ -259,6 +277,16 @@ function post(url, key) {
       try {
         populateCard(card, iteminfo, url, loadTime);
         if (assetId) cardsByAssetId.set(assetId, card);
+        // Remember this lookup so it shows as a chip on the empty landing (here and on the
+        // inventory page). `key` is the reduced inspect form, which submitSearch re-runs directly.
+        if (typeof addRecent === "function" && iteminfo.weapon) {
+          addRecent({
+            type: "item",
+            value: key,
+            label: `${iteminfo.weapon} | ${iteminfo.skin}`,
+            sub: iteminfo.wear_name || "",
+          });
+        }
       } catch (e) {
         renderErrorCard(card, "An error occurred while displaying the item data");
         throw e;

@@ -117,7 +117,12 @@ function enableLongPressCopy(el) {
 
 // A Sticker Slab is a charm that seals a sticker inside it; the server sends the sealed
 // sticker's name/image and flags it, so we show the sticker but mark it.
-function buildStickerChips(stickers, keychains) {
+//
+// opts.showLabels renders each decal's name inline (icon + name pill) instead of an icon-only
+// chip with a hover tooltip. The single-item page passes it (room for the full name); the dense
+// inventory grid leaves it off and keeps the compact icons + tooltip.
+function buildStickerChips(stickers, keychains, opts = {}) {
+  const showLabels = !!opts.showLabels;
   const decals = [
     ...(stickers || []).map(s => ({ s, charm: false })),
     ...(keychains || []).map(s => ({ s, charm: true })),
@@ -140,9 +145,13 @@ function buildStickerChips(stickers, keychains) {
     const wear = Number(s.wear) || 0;
     const worn = !charm && wear > 0;
     if (worn) label += ` · ${Math.round(wear * 100)}% worn`;
-    chip.dataset.label = label;
     chip.setAttribute('aria-label', label);
-    enableTooltip(chip);
+    // Labeled chips print the name, so they don't need the hover tooltip (it would just repeat
+    // the visible text); icon-only chips keep it as their only way to surface the name.
+    if (!showLabels) {
+      chip.dataset.label = label;
+      enableTooltip(chip);
+    }
 
     if (s.image) {
       const img = document.createElement('img');
@@ -154,11 +163,33 @@ function buildStickerChips(stickers, keychains) {
       if (worn) img.style.opacity = String(1 - 0.6 * wear);
       chip.appendChild(img);
     } else {
-      // Unknown/new id the catalog predates: keep a labeled placeholder so the decal still
-      // shows and its name is reachable via the tooltip.
+      // Unknown/new id the catalog predates: keep a placeholder so the decal still shows and
+      // its name stays reachable (via the tooltip, or the inline label when showing labels).
       chip.classList.add('placeholder');
-      chip.textContent = '?';
+      if (showLabels) {
+        const ph = document.createElement('span');
+        ph.className = 'sticker-ph';
+        ph.textContent = '?';
+        chip.appendChild(ph);
+      } else {
+        chip.textContent = '?';
+      }
     }
+
+    if (showLabels) {
+      chip.classList.add('labeled');
+      const nameEl = document.createElement('span');
+      nameEl.className = 'sticker-name';
+      nameEl.textContent = slab ? `${name} · Slab` : name;
+      chip.appendChild(nameEl);
+      if (worn) {
+        const wearEl = document.createElement('span');
+        wearEl.className = 'sticker-wear';
+        wearEl.textContent = `${Math.round(wear * 100)}%`;
+        chip.appendChild(wearEl);
+      }
+    }
+
     frag.appendChild(chip);
   }
   return frag;

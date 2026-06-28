@@ -442,10 +442,11 @@ inventory-item {
 .sidebar h4 {
   margin: 0 0 15px;
   color: var(--text);
-  font-size: 14px;
-  font-weight: 500;
+  font-family: var(--display, "Rajdhani", "Lato", sans-serif);
+  font-size: 15px;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 1.2px;
   opacity: 0.8;
 }
 

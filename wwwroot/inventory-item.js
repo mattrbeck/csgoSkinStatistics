@@ -147,15 +147,17 @@ class InventoryItem extends HTMLElement {
         display: inline-flex;
         align-items: center;
         vertical-align: middle;
-        margin-left: 8px;
-        padding: 2px 6px;
-        border-radius: 3px;
-        background-color: var(--pop, #2ecc71);
-        color: var(--gray, #1f2d3a);
-        font-size: 10px;
-        font-weight: bold;
+        margin-left: 9px;
+        padding: 2px 7px;
+        background-color: var(--stattrak, #e0843a);
+        color: #16100a;
+        font-family: var(--display, "Rajdhani", "Lato", sans-serif);
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.5px;
         white-space: nowrap;
         cursor: default;
+        transform: skewX(-12deg);
       }
 
       /* The kill count slides out of the ST badge on hover; :focus covers taps
@@ -188,7 +190,11 @@ class InventoryItem extends HTMLElement {
 
       .detail-label {
         color: var(--text, #ecf0f1);
-        opacity: 0.7;
+        font-family: var(--display, "Rajdhani", "Lato", sans-serif);
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.6px;
+        opacity: 0.6;
       }
 
       .detail-value {
@@ -222,13 +228,16 @@ class InventoryItem extends HTMLElement {
       }
 
       .wear-pill {
-        font-size: 10px;
-        font-weight: bold;
-        line-height: 1.3;
-        padding: 1px 5px;
-        border-radius: 3px;
+        font-family: var(--display, "Rajdhani", "Lato", sans-serif);
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+        line-height: 1.25;
+        padding: 1px 6px;
+        margin-right: 2px;
         border: 1px solid currentColor;
         flex-shrink: 0;
+        transform: skewX(-12deg);
       }
       .wear-pill.fn { color: #2ecc71; }
       .wear-pill.mw { color: #82c91e; }
@@ -319,8 +328,11 @@ class InventoryItem extends HTMLElement {
       .rarity-text {
         margin-left: auto;
         padding-left: 8px;
-        font-size: 11px;
+        font-family: var(--display, "Rajdhani", "Lato", sans-serif);
+        font-size: 12px;
         font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.8px;
         white-space: nowrap;
         opacity: 0.9;
       }

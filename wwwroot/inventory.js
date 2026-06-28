@@ -604,6 +604,17 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
           if (window.location.hash.substring(1) !== desiredHash) {
             window.location.hash = desiredHash;
           }
+          // Remember this profile so it shows as a chip on the empty landing (here and on the
+          // item page). The hash value re-runs the lookup directly.
+          if (typeof addRecent === "function") {
+            addRecent({
+              type: "profile",
+              value: profile.hash,
+              label: profile.persona_name || profile.hash,
+              sub: "inventory",
+              avatar: profile.avatar || "",
+            });
+          }
         }
       })
       .catch(() => { /* profile is non-critical; ignore failures and aborts */ });
@@ -908,10 +919,22 @@ function submitSearch(userInput) {
   elements.button.blur();
   userInput = (userInput || "").trim();
   if (!userInput) {
-    elements.errorDisplay.textContent = 'Please enter a Steam profile URL';
+    elements.errorDisplay.textContent = 'Please enter a Steam profile or inspect link';
     elements.errorDisplay.style.display = 'block';
     return;
   }
+
+  // Unified search bar: an inspect link is a single item, so hand it off to the item page
+  // (deep-linked via the hash, which that page reads on load). classifyInput lives in
+  // app-shared.js; if it isn't loaded, fall through to the inventory path below.
+  if (typeof classifyInput === "function") {
+    const cls = classifyInput(userInput);
+    if (cls.kind === "item") {
+      window.location.href = "/#" + cls.value;
+      return;
+    }
+  }
+
   // Extract SteamId64 if possible, otherwise let the server resolve it. The hash is set by the
   // profile endpoint response (authoritative), not on input.
   const extractedSteamId = extractSteamIdFromInput(userInput);
@@ -1215,8 +1238,13 @@ function initInventory() {
     elements.textbox.value = queued;
     submitSearch(queued);
   } else {
-    // Empty landing: put the cursor in the search box (the shim already did this; harmless).
+    // Empty landing: put the cursor in the search box (the shim already did this; harmless) and
+    // show recent lookups as clickable chips. Picking one re-runs it through submitSearch (an
+    // item recent routes itself to the item page).
     elements.textbox.focus({ preventScroll: true });
+    if (typeof renderRecents === "function") {
+      renderRecents(document.getElementById("recent-searches"), (value) => submitSearch(value));
+    }
   }
 }
 

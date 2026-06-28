@@ -1,11 +1,17 @@
 :root {
-  --gray: #1f2d3a;
-  --dark: #0f1d2a;
-  --light: #2f3d4a;
-  --pop: #2ecc71;
-  --text: #ecf0f1;
+  --gray: #151c27;       /* page background (mid) */
+  --dark: #0e141d;       /* surfaces: header, cards (darkest) */
+  --light: #2c3a4b;      /* borders / raised elements (lightest of the three) */
+  --pop: #2fe3a3;        /* accent: brighter mint emerald */
+  --pop-soft: rgb(47 227 163 / 14%); /* accent wash for hovers/glows */
+  --text: #e9eef3;
   --error: #cc492f;
   --souvenir: #ccb22f;
+  --stattrak: #e0843a;   /* StatTrak orange, matching CS2's in-game kill-counter color */
+
+  /* The condensed display face used for HUD chrome (wordmark, nav, headings, labels, HUD chips),
+     mirroring CS2's all-caps interface type. Body text and item names stay in Lato. */
+  --display: "Rajdhani", "Lato", sans-serif;
 
   /* Quality colors based on CS2 schema */
   --genuine: #4D7455;    /* Genuine - Green */
@@ -22,6 +28,60 @@ body {
   font-family: Lato, sans-serif;
   color: var(--text);
   background: var(--gray);
+}
+
+/* A soft mint glow bleeding down from the top - just enough to lift the flat background and
+   give the page some depth. Non-critical (only in styles.css, which loads async), fixed and
+   behind everything, so it never affects layout or first paint. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(1100px 560px at 50% -8%, rgb(47 227 163 / 7%), transparent 62%),
+    radial-gradient(900px 500px at 100% 0%, rgb(47 227 163 / 4%), transparent 60%);
+}
+
+/* A faint HUD-style dot grid behind the empty-state hero, masked to fade out toward the edges
+   so it dresses the landing without ever competing with content. Scoped to .pre-search: once a
+   search begins it's gone, so it never sits behind a dense results/inventory view. */
+body.pre-search::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image: radial-gradient(rgb(255 255 255 / 3.5%) 1px, transparent 1.5px);
+  background-size: 24px 24px;
+  -webkit-mask-image: radial-gradient(78% 62% at 50% 2%, #000 0%, transparent 72%);
+  mask-image: radial-gradient(78% 62% at 50% 2%, #000 0%, transparent 72%);
+}
+
+/* Themed thin scrollbar so the browser default chrome doesn't break the dark UI. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--light) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 11px;
+  height: 11px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--light);
+  border-radius: 6px;
+  border: 3px solid var(--gray);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3a4d63;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 ::selection {
@@ -55,25 +115,26 @@ body {
 }
 
 body.pre-search .page-shift {
-  transform: translateY(min(38vh, 360px));
+  transform: translateY(min(18vh, 170px));
 }
 
-.search-hint {
-  margin-top: 12px;
-  max-height: 40px;
-  color: var(--text);
-  opacity: 0.5;
-  font-size: 14px;
-  text-align: center;
-  transition: opacity 0.3s ease, max-height 0.45s ease, margin 0.45s ease;
+/* Empty-state hero lead (eyebrow + headline + subtitle). Base sizing lives in the critical CSS;
+   these are the async refinements: a subtle white-to-mint gradient on the headline and the
+   fade/collapse once a search begins (mirrors how the old hint behaved). */
+.hero-lead {
+  transition: opacity 0.3s ease;
 }
 
-/* After a search the hint fades and collapses so it doesn't sit above the results. */
-body:not(.pre-search) .search-hint {
-  opacity: 0;
-  max-height: 0;
-  margin: 0;
-  pointer-events: none;
+.hero-title {
+  background: linear-gradient(108deg, var(--text) 38%, var(--pop));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.hero-sub {
+  max-width: 38ch;
+  margin-inline: auto;
 }
 
 /* Respect reduced-motion: skip the hero entirely - the search just stays at the top. */
@@ -99,14 +160,19 @@ html {
   outline-offset: 2px;
 }
 
-.github-corner svg {
-  /* --light reads against both the dark header bar and the gray page body */
-  fill: var(--light);
-  color: var(--dark);
-  position: absolute;
-  top: 0;
-  border: 0;
-  right: 0;
+/* Logo reticle + GitHub icon. The dated octocat corner ribbon is gone; the repo link is now a
+   quiet icon at the right end of the header (margin-left:auto in the critical CSS pushes it there). */
+.wordmark .logo-mark {
+  color: var(--pop);
+}
+
+.gh-link {
+  transition: opacity 0.2s ease, color 0.2s ease;
+}
+
+.gh-link:hover {
+  opacity: 1;
+  color: var(--pop);
 }
 
 
@@ -133,9 +199,11 @@ html {
   align-items: start;
   width: min(620px, 100%);
   padding: 18px;
-  border-radius: 8px;
+  border-radius: 10px;
+  border: 1px solid var(--light);
   border-left: 4px solid var(--light);
   background-color: var(--dark);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 28%);
   transition: opacity 0.3s ease;
 }
 
@@ -258,16 +326,20 @@ html {
   font-weight: bold;
 }
 
+/* StatTrak™ badge: a slanted parallelogram in CS2's orange kill-counter color, echoing the
+   in-game HUD chip. The skew leans the whole badge (text included) like the real counter. */
 .stattrak-badge {
   display: inline-block;
-  margin-left: 8px;
-  padding: 2px 6px;
-  border-radius: 3px;
-  background-color: var(--pop);
-  color: var(--gray);
-  font-size: 11px;
-  font-weight: bold;
+  margin-left: 9px;
+  padding: 2px 7px;
+  background-color: var(--stattrak);
+  color: #16100a;
+  font-family: var(--display);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
   vertical-align: middle;
+  transform: skewX(-12deg);
 }
 
 /* The kill count slides out of the ST badge on hover; :focus covers taps (the badge is
@@ -312,9 +384,20 @@ html {
   font-size: 14px;
 }
 
+/* The "Pattern" field label, as a condensed HUD caption like the meta labels below it. */
+.card-pattern-line .card-muted {
+  font-family: var(--display);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+
 .card-rarity {
   margin-left: auto;
+  font-family: var(--display);
   font-weight: 600;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
 }
 
 .card-meta {
@@ -334,7 +417,11 @@ html {
 }
 
 .card-meta dt {
-  opacity: 0.6;
+  font-family: var(--display);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  opacity: 0.55;
 }
 
 .card-meta dd {
@@ -393,14 +480,19 @@ html {
   flex: 1;
 }
 
+/* Wear pill (FN/MW/FT/WW/BS): a slanted HUD chip, matching the StatTrak badge's angle so the
+   card's badges share one tactical language. */
 .wear-pill {
   flex-shrink: 0;
-  padding: 1px 6px;
+  padding: 1px 7px;
+  margin-right: 2px;
   border: 1px solid currentcolor;
-  border-radius: 3px;
-  font-size: 11px;
-  font-weight: bold;
-  line-height: 1.3;
+  font-family: var(--display);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  line-height: 1.25;
+  transform: skewX(-12deg);
 }
 
 .wear-pill.fn { color: #2ecc71; }
@@ -569,12 +661,15 @@ form {
   background: var(--dark);
   border: 1px solid var(--light);
   border-radius: 999px;
+  /* A subtle drop shadow + a 1px top inner highlight gives the pill some tactile depth so it
+     reads as the page's primary surface rather than a flat outline. */
+  box-shadow: 0 10px 30px rgb(0 0 0 / 30%), inset 0 1px 0 rgb(255 255 255 / 5%);
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 form:focus-within {
   border-color: var(--pop);
-  box-shadow: 0 0 0 3px rgb(46 204 113 / 18%);
+  box-shadow: 0 0 0 3px rgb(47 227 163 / 18%), 0 10px 30px rgb(0 0 0 / 30%);
 }
 
 a,
@@ -586,34 +681,51 @@ a:active {
   color: var(--text);
 }
 
-/* Slim site header: wordmark + page tabs. The GitHub corner overlays its right end. */
+/* Slim site header: logo + wordmark, page tabs, then a quiet GitHub icon at the right end. */
 #site-header {
   display: flex;
   align-items: center;
-  gap: 24px;
-  padding: 12px 20px;
+  gap: 22px;
+  padding: 13px 22px;
 
   /* Same on both pages so the centered empty-state search lands at the same height (and so the
      margin doesn't change between the hero and results states, which would jump the glide). */
-  margin-bottom: 20px;
+  margin-bottom: 24px;
   background-color: var(--dark);
+  border-bottom: 1px solid var(--light);
 }
 
 #site-header .wordmark {
-  font-size: 20px;
-  font-weight: bold;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--display);
+  font-size: 23px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+}
+
+/* "Stats" in the accent color - a small piece of branding with zero layout cost (mirrored in
+   the critical CSS so it doesn't repaint when the async stylesheet lands). */
+#site-header .wordmark .wm-accent {
+  color: var(--pop);
 }
 
 #site-header nav {
   display: flex;
-  gap: 18px;
+  gap: 20px;
 }
 
 #site-header nav a {
+  font-family: var(--display);
   padding: 4px 2px;
-  font-size: 14px;
+  font-size: 15px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
   border-bottom: 2px solid transparent;
-  opacity: 0.75;
+  opacity: 0.65;
   transition: opacity 0.2s ease;
 }
 
@@ -623,7 +735,6 @@ a:active {
 
 #site-header nav a.current {
   border-bottom-color: var(--pop);
-  font-weight: bold;
   opacity: 1;
 }
 
@@ -651,8 +762,8 @@ input[type="text"]:focus {
   outline: none; /* the focus ring lives on the whole pill via :focus-within */
 }
 
-/* Round icon button at the right of the pill: a neutral gray touch target with an accent-green
-   magnifier (the cancel/stop button uses the error color instead). */
+/* Round icon button at the right of the pill. The primary search button is a solid mint disc
+   (a clear, vibrant CTA); the cancel/stop button stays a neutral gray disc with an error-red icon. */
 #button,
 #cancel-button {
   appearance: none;
@@ -671,11 +782,14 @@ input[type="text"]:focus {
   transition: background-color 0.2s ease, color 0.2s ease;
 }
 
-/* Invert on hover, matching the card-inspect button: the circle fills with the accent and the
-   icon flips to the background color. */
-#button:hover {
+#button {
   background: var(--pop);
-  color: var(--gray);
+  color: var(--dark);
+}
+
+#button:hover {
+  background: #54f0b6;
+  color: var(--dark);
 }
 
 #cancel-button {
@@ -702,12 +816,16 @@ input[type="text"]:focus {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 9px 10px;
+  padding: 10px 10px;
   border: 1px solid var(--light);
   border-radius: 4px;
   background-color: var(--gray);
   color: var(--pop);
-  font-weight: bold;
+  font-family: var(--display);
+  font-size: 15px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
   text-decoration: none;
   cursor: pointer;
   transition: background-color 0.2s ease, color 0.2s ease;
@@ -799,6 +917,206 @@ input[type="text"]:focus {
 
   .card-image-frame {
     height: 180px;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Labeled stickers (item page only)
+   The single-item page has room to show each applied sticker's name inline,
+   rather than the icon-only chips the dense inventory grid uses. buildStickerChips
+   adds .labeled when called with { showLabels: true } from post.js; the icon-only
+   chips above are untouched. Each chip becomes a horizontal tag: thumbnail + name
+   (+ a muted scrape %% for worn stickers).
+   -------------------------------------------------------------------------- */
+.item-stickers:has(.sticker-chip.labeled) {
+  gap: 8px;
+}
+
+.sticker-chip.labeled {
+  width: auto;
+  height: auto;
+  gap: 8px;
+  justify-content: flex-start;
+  padding: 4px 12px 4px 5px;
+  border-radius: 999px;
+  background-color: var(--gray);
+}
+
+.sticker-chip.labeled img {
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+}
+
+.sticker-chip.labeled.placeholder {
+  padding: 6px 14px;
+}
+
+.sticker-chip.labeled .sticker-ph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+  background-color: var(--dark);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+  opacity: 0.6;
+  flex-shrink: 0;
+}
+
+.sticker-chip.labeled .sticker-name {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.sticker-chip.labeled .sticker-wear {
+  font-size: 11px;
+  font-weight: 600;
+  opacity: 0.55;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Keep the slab/charm accent borders meaningful on the labeled pills too. */
+.sticker-chip.labeled.charm { border-color: var(--pop); }
+.sticker-chip.labeled.charm.slab { border-color: #5e98d9; }
+
+/* --------------------------------------------------------------------------
+   Recent searches
+   A row of clickable chips (items + profiles) on the empty landing of each page,
+   backed by localStorage (app-shared.js). Lives inside .page-shift so it glides
+   with the hero, and collapses once a search begins (mirrors the search hint).
+   -------------------------------------------------------------------------- */
+.recent-searches {
+  width: min(620px, 100% - 24px);
+  margin: 18px auto 0;
+  transition: opacity 0.3s ease;
+}
+
+.recent-searches[hidden] {
+  display: none;
+}
+
+/* Once a search starts, fold the recents away like the hint does. */
+body:not(.pre-search) .recent-searches {
+  display: none;
+}
+
+.recent-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin: 0 4px 8px;
+}
+
+.recent-title {
+  font-family: var(--display);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  opacity: 0.5;
+}
+
+.recent-clear {
+  appearance: none;
+  border: none;
+  background: none;
+  padding: 2px 4px;
+  color: var(--text);
+  opacity: 0.5;
+  font-size: 12px;
+  cursor: pointer;
+  transition: opacity 0.15s ease, color 0.15s ease;
+}
+
+.recent-clear:hover {
+  opacity: 1;
+  color: var(--pop);
+}
+
+.recent-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.recent-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 100%;
+  padding: 5px 8px 5px 9px;
+  border: 1px solid var(--light);
+  border-radius: 999px;
+  background-color: var(--dark);
+  color: var(--text);
+  font-family: Lato, sans-serif;
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease, transform 0.15s ease;
+}
+
+.recent-chip:hover {
+  border-color: var(--pop);
+  background-color: var(--pop-soft);
+  transform: translateY(-1px);
+}
+
+.recent-chip-icon {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  color: var(--pop);
+}
+
+.recent-chip.recent-item .recent-chip-icon {
+  opacity: 0.85;
+}
+
+.recent-chip-avatar {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.recent-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
+  font-weight: 600;
+}
+
+.recent-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-left: 1px;
+  border-radius: 50%;
+  color: var(--text);
+  opacity: 0.4;
+  font-size: 15px;
+  line-height: 1;
+  transition: opacity 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+}
+
+.recent-chip-remove:hover {
+  opacity: 1;
+  background-color: var(--error);
+  color: #fff;
+}
+
+@media (width <= 608px) {
+  .recent-chip-label {
+    max-width: 150px;
   }
 }
 
