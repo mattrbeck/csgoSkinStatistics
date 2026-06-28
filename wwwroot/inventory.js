@@ -902,7 +902,27 @@ function extractSteamIdFromInput(input) {
   return null;
 }
 
-window.addEventListener("load", function () {
+// Run the inventory analysis for a raw user input (SteamID64 / profile URL / vanity). Called by
+// the early-input shim and the deep-link / queued-input paths.
+function submitSearch(userInput) {
+  elements.button.blur();
+  userInput = (userInput || "").trim();
+  if (!userInput) {
+    elements.errorDisplay.textContent = 'Please enter a Steam profile URL';
+    elements.errorDisplay.style.display = 'block';
+    return;
+  }
+  // Extract SteamId64 if possible, otherwise let the server resolve it. The hash is set by the
+  // profile endpoint response (authoritative), not on input.
+  const extractedSteamId = extractSteamIdFromInput(userInput);
+  resetInterface();
+  analyzeInventory(userInput, extractedSteamId);
+}
+
+function initInventory() {
+  const textbox = document.getElementById("textbox");
+  const button = document.getElementById("button");
+  if (!textbox || !button) return; // not the inventory page (or a test importing this module)
   elements = {
     textbox: document.getElementById("textbox"),
     button: document.getElementById("button"),
@@ -948,31 +968,15 @@ window.addEventListener("load", function () {
     floatSliderDimRight: document.getElementById("float-slider-dim-right")
   };
 
-  elements.textbox.addEventListener("keydown", function (event) {
-    if (event.code === "Enter") {
-      event.preventDefault();
-      elements.button.click();
-    }
-  });
-
-  elements.button.addEventListener("click", function (event) {
-    event.currentTarget.blur(); // currentTarget is the button itself, not the clicked inner <svg>
-
-    const userInput = elements.textbox.value.trim();
-
-    if (!userInput) {
-      elements.errorDisplay.textContent = 'Please enter a Steam profile URL';
-      elements.errorDisplay.style.display = 'block';
-      return;
-    }
-
-    // Extract SteamId64 if possible, otherwise let server handle resolution
-    const extractedSteamId = extractSteamIdFromInput(userInput);
-
-    // The hash is set by the profile endpoint response (authoritative), not on input.
-    resetInterface();
-    analyzeInventory(userInput, extractedSteamId);
-  });
+  // The early-input shim (inline in inventory.html) owns the Enter/click listeners so a
+  // paste+analyze during script download isn't lost; hand it the real search and fall back to
+  // wiring here if the shim is absent.
+  window.__submitSearch = submitSearch;
+  if (!window.__shimReady) {
+    const form = document.getElementById("input");
+    if (form) form.addEventListener("submit", (e) => { e.preventDefault(); submitSearch(elements.textbox.value); });
+    elements.button.addEventListener("click", () => submitSearch(elements.textbox.value));
+  }
 
   elements.cancelButton.addEventListener("click", function (event) {
     event.currentTarget.blur(); // currentTarget is the button itself, not the clicked inner <svg>
@@ -1198,18 +1202,23 @@ window.addEventListener("load", function () {
     if (extractedId) {
       // If we can extract a SteamId64, use it directly
       elements.textbox.value = extractedId;
-      elements.button.click();
+      submitSearch(extractedId);
     } else if (hashValue && (hashValue.includes('steamcommunity.com') || !hashValue.match(/^\d+$/))) {
       // If it looks like a URL or custom ID, try it
       elements.textbox.value = hashValue;
-      elements.button.click();
+      submitSearch(hashValue);
     }
+  } else if (window.__pendingSearch) {
+    // A paste+analyze that arrived while this script was still downloading — replay it now.
+    const queued = window.__pendingSearch;
+    window.__pendingSearch = null;
+    elements.textbox.value = queued;
+    submitSearch(queued);
   } else {
-    // Empty landing: put the cursor in the search box. (Skipped above when deep-linking, since
-    // that loads straight into content.)
+    // Empty landing: put the cursor in the search box (the shim already did this; harmless).
     elements.textbox.focus({ preventScroll: true });
   }
-});
+}
 
 // Exposed for unit tests under Node/CommonJS. The browser has no `module`, so this is skipped
 // there and the functions stay ordinary globals loaded via <script>.
@@ -1219,4 +1228,15 @@ if (typeof module !== 'undefined' && module.exports) {
     getWearFromFloat, getRarityFromNumber, isStarItem, isKnifeOrGlove,
     sortItems, getRarityValue, filterItems, validateSteamId, extractSteamIdFromInput
   };
+}
+
+// Bootstrap last, so every const/function above is initialized before initInventory can replay a
+// queued/deep-linked analysis. Deferred script ⇒ DOM already parsed, so init right away; fall
+// back to DOMContentLoaded if loaded without `defer`.
+if (typeof document !== 'undefined') {
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initInventory);
+  } else {
+    initInventory();
+  }
 }
