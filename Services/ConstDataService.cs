@@ -7,6 +7,11 @@ namespace CSGOSkinAPI.Services
             PropertyNameCaseInsensitive = true
         };
 
+        // Blue Gem catalogue: pattern -> weapon -> paint seed -> { playside/backside blue % }. Case
+        // Hardened / Heat Treated carry no gem info in the item cert - the blue look is purely the
+        // paint seed (weapon-specific). Loaded from blue-gem.json in the constructor.
+        private readonly Dictionary<string, Dictionary<string, Dictionary<string, BlueGemPattern>>> _blueGem;
+
         private readonly ConstData _constData;
         private readonly StickerCatalog _stickers;
         private readonly Dictionary<string, string> _skinImages;
@@ -27,6 +32,13 @@ namespace CSGOSkinAPI.Services
             // each weapon it appears on.
             var skinImageJson = File.ReadAllText("skin-images.json");
             _skinImages = JsonSerializer.Deserialize<Dictionary<string, string>>(skinImageJson, JsonOptions) ?? [];
+
+            // Built by scripts/update_bluegem.js from csfloat/extension's MIT data file (the CSBlueGem
+            // numbers). Optional — absence just means Case Hardened / Heat Treated items go unlabelled.
+            _blueGem = File.Exists("blue-gem.json")
+                ? JsonSerializer.Deserialize<Dictionary<string, Dictionary<string, Dictionary<string, BlueGemPattern>>>>(
+                      File.ReadAllText("blue-gem.json"), JsonOptions) ?? []
+                : [];
         }
 
         public StickerKit? ResolveSticker(uint stickerId) => Resolve(_stickers.Stickers, stickerId);
@@ -82,6 +94,12 @@ namespace CSGOSkinAPI.Services
             else if (pattern == "Crimson Kimono" && _constData.Kimonos?.ContainsKey(paintseed.ToString()) == true)
             {
                 special = _constData.Kimonos[paintseed.ToString()];
+            }
+            else if (_blueGem.TryGetValue(pattern, out var byWeapon)
+                && byWeapon.TryGetValue(weaponType, out var gemSeeds)
+                && gemSeeds.TryGetValue(paintseed.ToString(), out var gem))
+            {
+                special = FormatBlueGem(item.defindex, gem);
             }
 
             return new ItemInformation
@@ -206,11 +224,42 @@ namespace CSGOSkinAPI.Services
              return "Unknown";
         }
 
+        // Blue-gem label for a Case Hardened / Heat Treated item. Collectors judge knives on the
+        // playside. The AK-47 (defindex 7) is special: its two faces are the "top" (playside) and the
+        // "magazine" (backside), and a blue magazine is independently prized — so it can surface both.
+        private static string FormatBlueGem(uint defindex, BlueGemPattern gem)
+        {
+            static int Pct(double v) => (int)Math.Round(v);
+            var mag = gem.Bb ?? 0;
+
+            if (defindex == 7) // AK-47: top / magazine
+            {
+                if (gem.Pb >= 38.4)
+                {
+                    return mag > 30
+                        ? $"Blue Gem {Pct(gem.Pb)}% / {Pct(mag)}% mag"
+                        : $"Blue Gem {Pct(gem.Pb)}%";
+                }
+                return mag > 30 ? $"Blue Gem {Pct(mag)}% mag" : "";
+            }
+
+            // Knives + other guns: judged on the playside.
+            return gem.Pb >= 30 ? $"Blue Gem {Pct(gem.Pb)}%" : "";
+        }
+
         private static bool IsKnifeOrGlove(uint defindex)
         {
             // Knives typically have defindex 500-600
             // Gloves typically have defindex 5000+
             return (defindex >= 500 && defindex < 600) || defindex >= 5000;
         }
+    }
+
+    // One blue-gem pattern from blue-gem.json (harvested by scripts/update_bluegem.js from
+    // csfloat/extension, MIT). Pb/Bb = playside/backside blue % (raw).
+    public class BlueGemPattern
+    {
+        public double Pb { get; set; }  // playside blue % (raw)
+        public double? Bb { get; set; } // backside blue % (raw)
     }
 }
