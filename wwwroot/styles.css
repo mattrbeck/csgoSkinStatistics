@@ -189,6 +189,18 @@ body:not(.pre-search) #recent-lookups { display: none; }
   max-height: 34px;
   object-fit: contain;
 }
+/* Profile rows: round avatar + a small "Since YYYY" / "Inventory" tag instead of float/wear. */
+.recent-thumb.avatar img {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+.recent-tag {
+  font-size: 12px;
+  opacity: 0.6;
+  white-space: nowrap;
+}
 
 .recent-name {
   flex: 1;

@@ -609,6 +609,8 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
             window.location.hash = desiredHash;
           }
         }
+        // Record this profile in the shared "Recent lookups" list (post.js owns it).
+        if (typeof addRecentProfile === "function") addRecentProfile(profile);
       })
       .catch(() => { /* profile is non-critical; ignore failures and aborts */ });
 

@@ -50,7 +50,13 @@ function saveRecents(list) {
 }
 
 // Dedupe key: the same item (name + float) collapses to one row regardless of link encoding.
-function recentKey(e) { return `item:${e.name}|${e.float}`; }
+// Dedupe key: items by visible identity (name+float); profiles by their SteamId64, which never
+// changes — persona name and vanity URL both can — so a re-query updates the row in place (with the
+// fresh name) instead of adding a duplicate. Falls back to the share hash for older stored entries.
+function recentKey(e) {
+  if (e.type === "profile") return `profile:${e.steamId || e.value}`;
+  return `item:${e.name}|${e.float}`;
+}
 
 // Insert newest-first, dedupe (a repeat lookup moves to the front), cap, re-render.
 function upsertRecent(entry) {
@@ -81,20 +87,35 @@ function addRecentItem(iteminfo, reducedLink) {
   });
 }
 
+// Record a resolved Steam profile. Called by inventory.js once /api/profile comes back.
+function addRecentProfile(profile) {
+  if (!profile || !profile.hash) return;
+  upsertRecent({
+    type: "profile",
+    steamId: profile.steamid || null,  // stable identity for dedupe (persona + vanity can change)
+    value: profile.hash,               // vanity or SteamId64 — re-runs the lookup on click
+    name: profile.persona_name || profile.hash,
+    avatar: profile.avatar || "",
+    sinceYear: profile.since_year || null,
+  });
+}
+
 // Build one recent row (a button that re-runs the lookup). DOM nodes only — names are remote data.
 function recentRow(entry) {
+  const isProfile = entry.type === "profile";
   const row = document.createElement("button");
   row.type = "button";
-  row.className = "recent-row";
+  row.className = isProfile ? "recent-row recent-profile" : "recent-row";
   row.title = entry.name;
   if (entry.rarityColor) row.style.borderLeftColor = entry.rarityColor;
   row.addEventListener("click", () => { controls.textbox.value = entry.value; submitSearch(entry.value); });
 
   const thumb = document.createElement("span");
-  thumb.className = "recent-thumb";
-  if (entry.image) {
+  thumb.className = isProfile ? "recent-thumb avatar" : "recent-thumb";
+  const src = isProfile ? entry.avatar : entry.image;
+  if (src) {
     const img = document.createElement("img");
-    img.src = entry.image; img.alt = ""; img.loading = "lazy";
+    img.src = src; img.alt = ""; img.loading = "lazy";
     thumb.appendChild(img);
   }
   row.appendChild(thumb);
@@ -104,9 +125,15 @@ function recentRow(entry) {
   name.textContent = entry.name;
   row.appendChild(name);
 
-  if (entry.float) {
-    const meta = document.createElement("span");
-    meta.className = "recent-meta";
+  const meta = document.createElement("span");
+  meta.className = "recent-meta";
+  if (isProfile) {
+    const tag = document.createElement("span");
+    tag.className = "recent-tag";
+    tag.textContent = entry.sinceYear ? `Since ${entry.sinceYear}` : "Inventory";
+    meta.appendChild(tag);
+    row.appendChild(meta);
+  } else if (entry.float) {
     const wear = document.createElement("span");
     wear.className = "recent-wear";
     wear.textContent = entry.wearAbbr;
@@ -122,9 +149,8 @@ function recentRow(entry) {
 function renderRecents() {
   const host = document.getElementById("recent-lookups");
   if (!host) return;
-  // Item lookups only on this page; ignore any foreign entries (e.g. profile rows written by a
-  // different build sharing the storage key).
-  const list = loadRecents().filter((e) => e && e.type === "item");
+  // Items and profiles both show now; ignore any malformed / unknown-type entries.
+  const list = loadRecents().filter((e) => e && (e.type === "item" || e.type === "profile"));
   if (!list.length) { host.hidden = true; host.replaceChildren(); return; }
   const head = document.createElement("div");
   head.className = "recents-head";
