@@ -31,13 +31,13 @@
       a,a:visited{text-decoration:none;color:var(--text)}
       /* Top bar: landing = wordmark centered + search below; results = wordmark left + search up
          top. Both states are here (no transition — styles.css adds the smooth slide + responsive). */
-      #site-header{position:relative;height:64px;margin-bottom:16px;background-color:var(--dark)}
+      #site-header{position:relative;height:72px;margin-bottom:16px;background-color:var(--dark)}
       body.pre-search #site-header{height:176px}
-      .logo{position:absolute;top:14px;left:20px;display:inline-block;font-family:Lato,sans-serif;font-style:italic;font-weight:700;font-size:18px;color:var(--dark);background:var(--pop);padding:8px 15px;letter-spacing:.02em;line-height:1;white-space:nowrap;text-decoration:none;clip-path:polygon(8px 0,100% 0,calc(100% - 8px) 100%,0 100%)}
+      .logo{position:absolute;top:19px;left:20px;display:inline-block;font-family:Lato,sans-serif;font-style:italic;font-weight:700;font-size:18px;color:var(--dark);background:var(--pop);padding:8px 15px;letter-spacing:.02em;line-height:1;white-space:nowrap;text-decoration:none;clip-path:polygon(8px 0,100% 0,calc(100% - 8px) 100%,0 100%)}
       .logo:link,.logo:visited{color:var(--dark)}
       .logo-mono{display:none}
       body.pre-search .logo{top:34px;transform:translateX(calc(50vw - 20px - 50%))}
-      .topbar-search{position:absolute;top:12px;left:50%;transform:translateX(-50%);width:min(460px,100% - 220px)}
+      .topbar-search{position:absolute;top:10px;left:50%;transform:translateX(-50%);width:min(460px,100% - 220px)}
       body.pre-search .topbar-search{top:100px;width:min(608px,100% - 32px)}
       form{display:flex;align-items:center;padding:5px;box-sizing:border-box;background:var(--dark);border:1px solid var(--light);border-radius:999px}
       form:focus-within{border-color:var(--pop);box-shadow:0 0 0 3px rgb(46 204 113 / 18%)}

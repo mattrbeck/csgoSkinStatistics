@@ -352,8 +352,12 @@ html {
 }
 
 .card-image {
-  max-width: 100%;
-  max-height: 100%;
+  /* Fill the frame and let object-fit letterbox. iOS Safari ignores a percentage max-height on a
+     flex-child image until a re-layout (so the image renders at natural size until reload); an
+     explicit width/height + object-fit sidesteps that bug. */
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 /* The decoded item carries no image; some items (medals, music kits, skins the catalog
@@ -748,7 +752,7 @@ a:active {
    The bar's own height animates too, so the content beneath it slides along. */
 #site-header {
   position: relative;
-  height: 64px;                       /* results */
+  height: 72px;                       /* results — tall enough for the ~52px search bar + margins */
   margin-bottom: 16px;
   background-color: var(--dark);
   transition: height 0.45s cubic-bezier(0.22, 1, 0.36, 1);
@@ -758,7 +762,7 @@ body.pre-search #site-header { height: 176px; }   /* landing: wordmark + search 
 /* Parallelogram wordmark. Two labels: full "Skin Stats", and "SS" for the tight mobile bar. */
 .logo {
   position: absolute;
-  top: 14px;
+  top: 19px;                          /* results: vertically centred in the 72px bar (34px tall) */
   left: 20px;                         /* results: top-left */
   display: inline-block;
   font-family: Lato, sans-serif;
@@ -790,7 +794,7 @@ body.pre-search .logo {
    (only top + width change). Overrides the base form width/margin. */
 .topbar-search {
   position: absolute;
-  top: 12px;                          /* results: centered in the 64px bar */
+  top: 10px;                          /* results: centred in the 72px bar (~52px tall) */
   left: 50%;
   transform: translateX(-50%);
   width: min(460px, 100% - 220px);    /* results: centered, room for the wordmark on the left */
