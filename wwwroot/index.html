@@ -48,6 +48,14 @@
       #button{appearance:none;display:flex;align-items:center;justify-content:center;flex:0 0 40px;width:40px;height:40px;padding:0;border:none;border-radius:50%;background:var(--light);color:var(--pop);cursor:pointer}
       #button:hover{background:var(--pop);color:var(--gray)}
       .search-hint{margin-top:12px;max-height:40px;color:var(--text);opacity:.5;font-size:14px;text-align:center}
+      /* Landing-only chrome (hint + examples) must mirror styles.css's pre-search gating HERE too.
+         Otherwise a ?q= deep-link (which strips .pre-search before first paint) still paints them
+         expanded under this critical CSS, then styles.css loads and animates them collapsed/away —
+         the "hint flashes then the content slides up" on load. Hiding them from the first frame when
+         it's not the landing removes the flash and the transition. */
+      body:not(.pre-search) .search-hint{opacity:0;max-height:0;margin:0;pointer-events:none}
+      .examples{display:none}
+      body.pre-search .examples{display:block}
       :focus-visible{outline:2px solid var(--pop);outline-offset:2px}
     </style>
 
@@ -181,7 +189,7 @@
       </div>
     </div>
 
-    <br />
+    <br class="landing-spacer" />
 
     <!-- Searched items stack here, newest first; each is a clone of the template below. -->
     <div id="item-card-outer"></div>

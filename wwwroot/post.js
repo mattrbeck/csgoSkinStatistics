@@ -15,9 +15,17 @@ const inspectPrefix = "steam://run/730//+csgo_econ_action_preview%20";
 const cardsByInput = new Map();
 const cardsByAssetId = new Map();
 
-// Move an already-rendered card back to the top of the stack, with a brief flash.
+// Make `card` the ONLY card on the item page. A new search replaces the previous item rather than
+// stacking beneath it — back/forward and "Recent lookups" are how you revisit now. Replaced cards
+// are only detached from the DOM (their refs live on in cardsByInput / cardsByAssetId), so
+// re-searching one, or navigating back to it, re-attaches the rendered node with no refetch.
+function showOnlyCard(card) {
+  controls.cardOuter.replaceChildren(card);
+}
+
+// Re-show an already-rendered card as the sole item, with a brief flash.
 function resurface(card) {
-  controls.cardOuter.prepend(card);
+  showOnlyCard(card);
   card.classList.remove("resurfaced");
   void card.offsetWidth; // restart the flash animation if it's already played
   card.classList.add("resurfaced");
@@ -290,16 +298,14 @@ function renderErrorCard(card, message) {
 // Called by the early-input shim in index.html the moment the app is ready, and by the
 // deep-link / queued-input paths below.
 // Record the active search in the URL as ?q=<value> (shareable; back/forward work via the popstate
-// handler in initSearch). The FIRST search from the empty landing (no ?q yet) REPLACES it rather
-// than stacking a second entry — so Back from that first result leaves the site instead of returning
-// to the blank landing; later searches push, so you can still step back through them. (inventory.js
-// separately replaceState's the canonical vanity in.)
+// handler in initSearch). Every distinct search PUSHES a new history entry — including the first one
+// from the empty landing — so Back walks the full trail the user actually visited (landing → item →
+// inventory → …) and Forward retraces it, matching what the arrows do everywhere else on the web.
+// (inventory.js separately replaceState's the canonical vanity into the current entry.)
 function setQuery(q) {
   const current = new URLSearchParams(location.search).get("q");
   if (current === q) return; // same query — no duplicate entry
-  const url = location.pathname + "?q=" + encodeURIComponent(q);
-  if (current) history.pushState({ q }, "", url);    // already on a result → new history entry
-  else history.replaceState({ q }, "", url);         // on the landing → replace it, don't stack
+  history.pushState({ q }, "", location.pathname + "?q=" + encodeURIComponent(q));
 }
 
 // Return to the empty landing (e.g. the user hit Back past the first search).
@@ -416,13 +422,13 @@ function initSearch() {
 // a genuinely slow lookup (e.g. a Game Coordinator round trip) shows it.
 const LOADING_DELAY_MS = 200;
 
-// Each search adds a card above the previous results rather than replacing them. The card
-// holds its spot at the top but stays invisible until there's something to show - the result,
-// or, if the lookup runs long, a loading state. Repeat searches resurface the existing card
-// (result or error) with no network request.
+// Each search shows a single card, replacing whatever item was there before. The card starts
+// invisible until there's something to show - the result, or, if the lookup runs long, a loading
+// state. Repeat searches (including back/forward) resurface the cached card - result or error -
+// with no network request, even after it was detached by a later search.
 function post(url, key) {
   const seen = cardsByInput.get(key);
-  if (seen && seen.isConnected) {
+  if (seen) {
     resurface(seen);
     return;
   }
@@ -434,7 +440,7 @@ function post(url, key) {
   if (/^[SM]\d+A\d+D\d+$/.test(key)) {
     card.querySelector(".card-name").textContent = "Looking up in-game…";
   }
-  controls.cardOuter.prepend(card);
+  showOnlyCard(card);
   cardsByInput.set(key, card);
 
   let settled = false;
@@ -461,7 +467,7 @@ function post(url, key) {
       // one already on the page, pointing this search at it too.
       const assetId = String(iteminfo.a || iteminfo.itemid || "");
       const twin = assetId && cardsByAssetId.get(assetId);
-      if (twin && twin !== card && twin.isConnected) {
+      if (twin && twin !== card) {
         settled = true;
         clearTimeout(loadingTimer);
         card.remove();

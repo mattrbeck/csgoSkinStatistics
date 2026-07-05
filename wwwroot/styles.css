@@ -250,7 +250,6 @@ body:not(.pre-search) #recent-lookups { display: none; }
    (hint / recents / examples) are gated on body.pre-search, so they hide in either mode. */
 #inventory-area { display: none; }
 body.mode-inventory #inventory-area { display: block; }
-body.mode-inventory #item-card-outer { display: none; }
 
 /* Respect reduced-motion: skip the hero entirely - the search just stays at the top. */
 @media (prefers-reduced-motion: reduce) {
@@ -276,15 +275,18 @@ html {
 }
 
 
-/* Item page: each search adds a card (mirroring an inventory grid item, plus the extra
-   wear/quality/origin/id fields) to this stack, newest on top. */
+/* Item page: the current item's card (mirroring an inventory grid item, plus the extra
+   wear/quality/origin/id fields). One card at a time — a new search replaces it; back/forward and
+   "Recent lookups" bring past items back. Shown only while an item search is active (mode-item), so
+   it never lingers on the landing or behind the inventory view. */
 #item-card-outer {
-  display: flex;
+  display: none;
   flex-direction: column;
   align-items: center;
   gap: 14px;
   padding: 0 12px 24px;
 }
+body.mode-item #item-card-outer { display: flex; }
 
 /* Image top-left, data on the right, inspect button along the bottom (full width so it
    doesn't strand a gap when the data column is taller than the image). On narrow screens
@@ -988,6 +990,13 @@ input[type="text"]:focus {
 @media (width <= 608px) {
   #site-header {
     margin-bottom: 20px;
+  }
+
+  /* On a result view the landing spacer below the examples is just dead space pushing the result
+     card down. Reclaim it on phones (both item and inventory views, so they stay equal), where the
+     vertical room matters most. The landing keeps it. */
+  body:not(.pre-search) .landing-spacer {
+    display: none;
   }
 
   /* Never below 16px: iOS Safari auto-zooms the page when focusing a smaller text input */
