@@ -199,6 +199,14 @@ function initSearch() {
     controls.button.addEventListener("click", () => submitSearch(controls.textbox.value));
   }
 
+  // "Try an example" tiles on the landing pre-fill the box and run the lookup.
+  document.querySelectorAll(".example-item[data-value]").forEach((el) => {
+    el.addEventListener("click", () => {
+      controls.textbox.value = el.dataset.value;
+      submitSearch(el.dataset.value);
+    });
+  });
+
   if (window.location.hash) {
     const hashURL = window.location.hash.substring(1);
     controls.textbox.value = hashURL;

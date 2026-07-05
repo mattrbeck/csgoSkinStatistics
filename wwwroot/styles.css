@@ -76,6 +76,75 @@ body:not(.pre-search) .search-hint {
   pointer-events: none;
 }
 
+/* "Try an example" — landing-only (pre-search) sample inspect links; clicking one runs the lookup.
+   Hidden once a search has been made, like the hint above. */
+.examples {
+  display: none;
+  max-width: 620px;
+  margin: 22px auto 0;
+}
+body.pre-search .examples { display: block; }
+
+.examples-head {
+  color: var(--text);
+  opacity: 0.5;
+  font-size: 13px;
+  text-align: center;
+  margin-bottom: 10px;
+}
+
+.examples-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+}
+
+.example-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 260px;
+  max-width: 300px;
+  padding: 8px 12px;
+  background: var(--dark);
+  border: 1px solid var(--light);
+  border-radius: 10px;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  font-family: Lato, sans-serif;
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+.example-item:hover {
+  border-color: var(--pop);
+  transform: translateY(-1px);
+}
+
+.example-thumb {
+  width: 54px;
+  height: 40px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.example-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.example-title {
+  font-weight: bold;
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.example-sub {
+  font-size: 12px;
+  opacity: 0.6;
+}
+
 /* Respect reduced-motion: skip the hero entirely - the search just stays at the top. */
 @media (prefers-reduced-motion: reduce) {
   .page-shift {
