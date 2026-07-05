@@ -5,13 +5,9 @@ let controls;
 // dummy steamid the legacy rungame/<steamid> form required.
 const inspectPrefix = "steam://run/730//+csgo_econ_action_preview%20";
 
-// Paint-kit wear ranges (paint index -> [min, max]) used to dim the float bar's
-// unreachable ends. Fetched once; buildFloatBar tolerates it being null (no dimming).
-let floatRanges = null;
-fetch("float-ranges.json")
-  .then((r) => (r.ok ? r.json() : null))
-  .then((data) => { floatRanges = data; })
-  .catch(() => { /* cosmetic; the bar simply stays undimmed */ });
+// floatRanges (paint index -> [min,max], for dimming the float bar) is declared + fetched by
+// inventory.js, which loads before post.js on this shared page; both this file and inventory-item.js
+// read that one global.
 
 // Session caches so a repeat search resurfaces an existing card instead of re-fetching:
 // by the exact search string (caught before any network call), and by the resolved asset
@@ -33,7 +29,9 @@ function resurface(card) {
 // separate inventory page).
 // ---------------------------------------------------------------------------
 const RECENTS_KEY = "skinstats:recents:v1";
-const RECENTS_MAX = 12;
+const RECENTS_MAX = 12;        // how many are kept in storage
+const RECENTS_COLLAPSED = 5;   // how many show before "Show more" is clicked
+let recentsExpanded = false;
 
 // Float -> wear zone (exclusive upper bounds), so a recent row draws without the item response.
 const RECENT_WEAR_ZONES = [
@@ -133,8 +131,19 @@ function renderRecents() {
   head.textContent = "Recent lookups";
   const rows = document.createElement("div");
   rows.className = "recents-list";
-  list.forEach((e) => rows.appendChild(recentRow(e)));
-  host.replaceChildren(head, rows);
+  // Show only the first few until the user asks for more.
+  const shown = recentsExpanded ? list : list.slice(0, RECENTS_COLLAPSED);
+  shown.forEach((e) => rows.appendChild(recentRow(e)));
+  const children = [head, rows];
+  if (list.length > RECENTS_COLLAPSED) {
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "recents-toggle";
+    toggle.textContent = recentsExpanded ? "Show less" : `Show ${list.length - RECENTS_COLLAPSED} more`;
+    toggle.addEventListener("click", () => { recentsExpanded = !recentsExpanded; renderRecents(); });
+    children.push(toggle);
+  }
+  host.replaceChildren(...children);
   host.hidden = false;
 }
 
@@ -277,13 +286,19 @@ function submitSearch(rawInput) {
 
   if (isItem) {
     const cert = reduced.toUpperCase();
-    document.body.classList.remove("pre-search"); // glide the search up out of its centered landing
+    // Show the item view (hide any prior inventory) and glide out of the centered landing.
+    document.body.classList.remove("pre-search", "mode-inventory");
+    document.body.classList.add("mode-item");
     window.location.hash = cert;
     post(inspectPrefix + cert, cert);
     controls.textbox.value = ""; // clear on search, like the inventory page
   } else if (isProfile) {
-    // The inventory analyzer is a separate page; it reads the profile from the hash on load.
-    window.location.href = `/inventory#${encodeURIComponent(input)}`;
+    // Inventory analysis renders INLINE on this same page now (no navigation). inventory.js owns
+    // the inventory view + sets the hash from the resolved profile.
+    document.body.classList.remove("pre-search", "mode-item");
+    document.body.classList.add("mode-inventory");
+    if (window.SkinInventory) window.SkinInventory.run(input);
+    else window.__pendingSearch = input; // inventory.js not up yet — its init replays this
   } else {
     controls.textbox.value = "Not a valid inspect link or profile";
   }
@@ -321,9 +336,9 @@ function initSearch() {
   renderRecents(); // draw any stored history into the landing
 
   if (window.location.hash) {
-    const hashURL = window.location.hash.substring(1);
+    const hashURL = decodeURIComponent(window.location.hash.substring(1));
     controls.textbox.value = hashURL;
-    submitSearch(hashURL);
+    submitSearch(hashURL); // classifies item vs profile and shows the right view
   } else if (window.__pendingSearch) {
     // A paste+search that arrived while this script was still downloading — replay it now.
     const queued = window.__pendingSearch;

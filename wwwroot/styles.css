@@ -43,20 +43,8 @@ body {
   border: 0;
 }
 
-/* Pre-search "hero": on an empty page the search form floats to the vertical middle with a
-   one-line hint; the first search glides it up to the top and the results appear below. The
-   transform is on the whole page body (.page-shift) - search AND results - so they move together
-   in lockstep; transforming only the form would leave its layout box at the top, and results
-   would pop in there instantly while the form was still gliding up. Transform/opacity only, so
-   it's a cheap GPU transition with no reflow. JS removes body.pre-search on the first search;
-   it never returns, so the centered state is only ever the empty landing. */
-.page-shift {
-  transition: transform 0.55s cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-body.pre-search .page-shift {
-  transform: translateY(min(38vh, 360px));
-}
+/* .page-shift is just the content column below the top bar now — the search no longer lives in it
+   and the top bar owns the landing→results slide, so there's no page-level transform. */
 
 .search-hint {
   margin-top: 12px;
@@ -231,6 +219,27 @@ body:not(.pre-search) #recent-lookups { display: none; }
 .recent-float.wear-ww { color: #e67e22; }
 .recent-float.wear-bs { color: #e74c3c; }
 
+.recents-toggle {
+  display: block;
+  margin: 8px auto 0;
+  padding: 4px 10px;
+  background: none;
+  border: none;
+  color: var(--pop);
+  font-family: Lato, sans-serif;
+  font-size: 13px;
+  cursor: pointer;
+  opacity: 0.85;
+}
+.recents-toggle:hover { opacity: 1; text-decoration: underline; }
+
+/* One page, two result views. A profile search adds body.mode-inventory (post.js) to show the
+   inventory area and hide the item cards; an item search uses mode-item. The landing sections
+   (hint / recents / examples) are gated on body.pre-search, so they hide in either mode. */
+#inventory-area { display: none; }
+body.mode-inventory #inventory-area { display: block; }
+body.mode-inventory #item-card-outer { display: none; }
+
 /* Respect reduced-motion: skip the hero entirely - the search just stays at the top. */
 @media (prefers-reduced-motion: reduce) {
   .page-shift {
@@ -253,6 +262,7 @@ html {
   outline: 2px solid var(--pop);
   outline-offset: 2px;
 }
+
 
 /* Item page: each search adds a card (mirroring an inventory grid item, plus the extra
    wear/quality/origin/id fields) to this stack, newest on top. */
@@ -730,45 +740,84 @@ a:active {
   color: var(--text);
 }
 
-/* Slim site header: wordmark + page tabs. The GitHub corner overlays its right end. */
+/* ── Top bar ─────────────────────────────────────────────────────────────────────────────────
+   #site-header holds the parallelogram wordmark (.logo) and the ONE search box (.topbar-search),
+   both absolutely positioned so they can SLIDE between two states (not swap):
+     landing (body.pre-search): wordmark centered near the top, search centered below it;
+     results: wordmark on the left, search up in the bar (centered on wide screens).
+   The bar's own height animates too, so the content beneath it slides along. */
 #site-header {
-  display: flex;
-  align-items: center;
-  gap: 24px;
-  padding: 12px 20px;
-
-  /* Same on both pages so the centered empty-state search lands at the same height (and so the
-     margin doesn't change between the hero and results states, which would jump the glide). */
-  margin-bottom: 20px;
+  position: relative;
+  height: 64px;                       /* results */
+  margin-bottom: 16px;
   background-color: var(--dark);
+  transition: height 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+}
+body.pre-search #site-header { height: 176px; }   /* landing: wordmark + search stacked */
+
+/* Parallelogram wordmark. Two labels: full "Skin Stats", and "SS" for the tight mobile bar. */
+.logo {
+  position: absolute;
+  top: 14px;
+  left: 20px;                         /* results: top-left */
+  display: inline-block;
+  font-family: Lato, sans-serif;
+  font-style: italic;
+  font-weight: 700;
+  font-size: 18px;
+  color: var(--dark);
+  background: var(--pop);
+  padding: 8px 15px;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  white-space: nowrap;
+  text-decoration: none;
+  clip-path: polygon(8px 0, 100% 0, calc(100% - 8px) 100%, 0 100%);
+  transition: top 0.45s cubic-bezier(0.22, 1, 0.36, 1),
+              transform 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.logo:link, .logo:visited, .logo:hover, .logo:focus, .logo:active { color: var(--dark); }
+.logo:hover { filter: brightness(1.08); }
+.logo-mono { display: none; }
+/* Landing: centered near the top. Center via transform (not a left px↔% jump) so the slide is
+   smooth; calc keeps left:20px fixed and shifts the wordmark to the viewport centre. */
+body.pre-search .logo {
+  top: 34px;
+  transform: translateX(calc(50vw - 20px - 50%));
 }
 
-#site-header .wordmark {
-  font-size: 20px;
-  font-weight: bold;
+/* The one search box. Centered horizontally in both states, so the slide is a clean vertical move
+   (only top + width change). Overrides the base form width/margin. */
+.topbar-search {
+  position: absolute;
+  top: 12px;                          /* results: centered in the 64px bar */
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(460px, 100% - 220px);    /* results: centered, room for the wordmark on the left */
+  margin: 0;
+  transition: top 0.45s cubic-bezier(0.22, 1, 0.36, 1),
+              width 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+}
+body.pre-search .topbar-search {
+  top: 100px;                         /* landing: below the wordmark */
+  width: min(608px, 100% - 32px);
 }
 
-#site-header nav {
-  display: flex;
-  gap: 18px;
+@media (prefers-reduced-motion: reduce) {
+  #site-header, .logo, .topbar-search { transition: none; }
 }
 
-#site-header nav a {
-  padding: 4px 2px;
-  font-size: 14px;
-  border-bottom: 2px solid transparent;
-  opacity: 0.75;
-  transition: opacity 0.2s ease;
-}
-
-#site-header nav a:hover {
-  opacity: 1;
-}
-
-#site-header nav a.current {
-  border-bottom-color: var(--pop);
-  font-weight: bold;
-  opacity: 1;
+/* Tight screens: in the results bar, shrink the wordmark to "SS" and let the search fill the rest.
+   The landing keeps the full "Skin Stats" centered (it has its own row there). */
+@media (max-width: 680px) {
+  body:not(.pre-search) .logo-word { display: none; }
+  body:not(.pre-search) .logo-mono { display: inline; }
+  body:not(.pre-search) .topbar-search {
+    left: 74px;
+    right: 12px;
+    width: auto;
+    transform: none;
+  }
 }
 
 input {

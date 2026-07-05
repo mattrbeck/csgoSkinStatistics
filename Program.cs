@@ -50,9 +50,10 @@ app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
 }));
 
 app.UseResponseCompression();
-// Serve the inventory page at the clean /inventory URL.
+// /inventory now serves the unified single page (index.html); a #profile hash makes it open
+// straight into the inventory view. Kept as a rewrite so old /inventory links still work.
 app.UseRewriter(new RewriteOptions()
-    .AddRewrite("^inventory$", "inventory.html", skipRemainingRules: true));
+    .AddRewrite("^inventory$", "index.html", skipRemainingRules: true));
 app.UseDefaultFiles(); // Must be before UseStaticFiles
 app.UseStaticFiles();
 

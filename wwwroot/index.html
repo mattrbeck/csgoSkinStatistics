@@ -29,12 +29,17 @@
       body{overflow-x:hidden;position:relative;min-height:100%;margin:0;font-family:Lato,sans-serif;color:var(--text);background:var(--gray)}
       .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
       a,a:visited{text-decoration:none;color:var(--text)}
-      #site-header{display:flex;align-items:center;gap:24px;padding:12px 20px;margin-bottom:20px;background-color:var(--dark)}
-      #site-header .wordmark{font-size:20px;font-weight:bold}
-      .page-shift{transition:transform .55s cubic-bezier(.22,1,.36,1)}
-      body.pre-search .page-shift{transform:translateY(min(38vh,360px))}
-      @media (prefers-reduced-motion:reduce){.page-shift,body.pre-search .page-shift{transition:none;transform:none}}
-      form{display:flex;align-items:center;width:min(608px,100% - 24px);margin:0 auto;padding:5px;box-sizing:border-box;background:var(--dark);border:1px solid var(--light);border-radius:999px}
+      /* Top bar: landing = wordmark centered + search below; results = wordmark left + search up
+         top. Both states are here (no transition — styles.css adds the smooth slide + responsive). */
+      #site-header{position:relative;height:64px;margin-bottom:16px;background-color:var(--dark)}
+      body.pre-search #site-header{height:176px}
+      .logo{position:absolute;top:14px;left:20px;display:inline-block;font-family:Lato,sans-serif;font-style:italic;font-weight:700;font-size:18px;color:var(--dark);background:var(--pop);padding:8px 15px;letter-spacing:.02em;line-height:1;white-space:nowrap;text-decoration:none;clip-path:polygon(8px 0,100% 0,calc(100% - 8px) 100%,0 100%)}
+      .logo:link,.logo:visited{color:var(--dark)}
+      .logo-mono{display:none}
+      body.pre-search .logo{top:34px;transform:translateX(calc(50vw - 20px - 50%))}
+      .topbar-search{position:absolute;top:12px;left:50%;transform:translateX(-50%);width:min(460px,100% - 220px)}
+      body.pre-search .topbar-search{top:100px;width:min(608px,100% - 32px)}
+      form{display:flex;align-items:center;padding:5px;box-sizing:border-box;background:var(--dark);border:1px solid var(--light);border-radius:999px}
       form:focus-within{border-color:var(--pop);box-shadow:0 0 0 3px rgb(46 204 113 / 18%)}
       form *{box-sizing:border-box}
       input{border:none;color:var(--text);font-family:Lato,sans-serif}
@@ -50,14 +55,20 @@
          them off the screen render, and onload flips them to screen once fetched. <noscript>
          covers JS-disabled. The critical CSS above carries the above-the-fold render meanwhile. -->
     <link rel="stylesheet" href="styles.css" media="print" onload="this.media='screen'" />
+    <link rel="stylesheet" href="inventory.css" media="print" onload="this.media='screen'" />
     <noscript><link rel="stylesheet" href="styles.css" /></noscript>
+    <noscript><link rel="stylesheet" href="inventory.css" /></noscript>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lato&display=swap" media="print" onload="this.media='screen'" />
     <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lato&display=swap"></noscript>
 
     <!-- defer: don't block the first paint on these. The body (search box) renders immediately
          and the inline early-input shim below the form captures any paste+search that happens
          while these are still downloading on a slow connection. -->
+    <!-- Order matters: inventory.js exposes window.SkinInventory before post.js (the search
+         dispatcher) loads and routes an initial #hash to it. -->
     <script src="decals.js" type="text/javascript" defer></script>
+    <script src="inventory-item.js" type="text/javascript" defer></script>
+    <script src="inventory.js" type="text/javascript" defer></script>
     <script src="post.js" type="text/javascript" defer></script>
 
     <title>Item Analyzer - Skin Stats</title>
@@ -86,55 +97,62 @@
       </div>
     </noscript>
 
+    <!-- Top bar: the parallelogram wordmark + the ONE search box. Both are absolutely positioned
+         inside #site-header and reposition between the landing (wordmark centered, search below) and
+         the results view (wordmark left, search up top) via CSS — a smooth slide, not a swap. -->
     <header id="site-header">
-      <a class="wordmark" href="/">Skin Stats</a>
+      <a class="logo" href="/" aria-label="Skin Stats home"><span class="logo-word">Skin Stats</span><span class="logo-mono">SS</span></a>
+
+      <form id="input" class="topbar-search" name="input" method="post" autocomplete="off">
+        <input
+          type="text"
+          id="textbox"
+          name="id"
+          placeholder="Inspect link or Steam profile"
+          onClick="this.select();"
+          accesskey="n"
+          title="Enter a CS2 inspect link, or a Steam profile URL/ID to analyze its inventory. Use Alt-N on Windows or Ctrl-Alt-N on Mac to focus on input."
+        />
+        <button id="button" type="button" aria-label="Search" title="Search">
+          <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="10.5" cy="10.5" r="5.5" fill="none" stroke="currentColor" stroke-width="2.4" />
+            <line x1="14.8" y1="14.8" x2="20.5" y2="20.5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" />
+          </svg>
+        </button>
+        <!-- Shown only while an inventory analysis is running (inventory.js toggles it). -->
+        <button id="cancel-button" type="button" aria-label="Cancel" title="Cancel" style="display: none;">
+          <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+            <line x1="6" y1="6" x2="18" y2="18" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" />
+            <line x1="18" y1="6" x2="6" y2="18" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" />
+          </svg>
+        </button>
+      </form>
+      <script>
+        // Early-input shim: the search box is static markup that paints immediately, but post.js
+        // (deferred) may still be downloading. This captures a paste + Enter/click during that gap
+        // — cancelling the form's POST reload — and either runs the search now (if post.js is up) or
+        // queues it for post.js to replay on init.
+        (function () {
+          var box = document.getElementById("textbox");
+          var form = document.getElementById("input");
+          var btn = document.getElementById("button");
+          if (!box) return;
+          if (!location.hash) box.focus({ preventScroll: true }); // hash = deep link, loads into content
+          function go() {
+            var v = box.value.trim();
+            if (!v) return;
+            if (window.__submitSearch) window.__submitSearch(v);
+            else window.__pendingSearch = v; // not ready yet — post.js replays this on init
+          }
+          if (form) form.addEventListener("submit", function (e) { e.preventDefault(); go(); }); // Enter
+          if (btn) btn.addEventListener("click", go);
+          window.__shimReady = true;
+        })();
+      </script>
     </header>
 
-    <!-- .page-shift moves the search AND the results together for the pre-search hero glide. -->
     <div class="page-shift">
     <h1 class="sr-only">CS2 Skin Inspector</h1>
-
-    <form id="input" name="input" method="post" autocomplete="off">
-      <input
-        type="text"
-        id="textbox"
-        name="id"
-        placeholder="Inspect link or Steam profile"
-        onClick="this.select();"
-        accesskey="n"
-        title="Enter a CS2 inspect link, or a Steam profile URL/ID to analyze its inventory. Use Alt-N on Windows or Ctrl-Alt-N on Mac to focus on input."
-      />
-      <button id="button" type="button" aria-label="Search" title="Search">
-        <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
-          <circle cx="10.5" cy="10.5" r="5.5" fill="none" stroke="currentColor" stroke-width="2.4" />
-          <line x1="14.8" y1="14.8" x2="20.5" y2="20.5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" />
-        </svg>
-      </button>
-    </form>
-    <script>
-      // Early-input shim. The search box above is static markup that paints with the first
-      // body render, but post.js (deferred) may still be downloading on a slow link. This inline
-      // script — available the instant the form is parsed — captures a paste + Enter (or a click)
-      // during that gap: it cancels the form's default POST reload and either runs the search
-      // immediately (if post.js is already up) or queues it for post.js to replay on init. So a
-      // user can land on the page, Ctrl-V, Enter, and never miss the search bar.
-      (function () {
-        var box = document.getElementById("textbox");
-        var form = document.getElementById("input");
-        var btn = document.getElementById("button");
-        if (!box) return;
-        if (!location.hash) box.focus({ preventScroll: true }); // hash = deep link, loads into content
-        function go() {
-          var v = box.value.trim();
-          if (!v) return;
-          if (window.__submitSearch) window.__submitSearch(v);
-          else window.__pendingSearch = v; // not ready yet — post.js replays this on init
-        }
-        if (form) form.addEventListener("submit", function (e) { e.preventDefault(); go(); }); // Enter
-        if (btn) btn.addEventListener("click", go);
-        window.__shimReady = true;
-      })();
-    </script>
 
     <p class="search-hint">Paste a CS2 inspect link for an item's float, pattern &amp; stickers — or a Steam profile to analyze a whole inventory.</p>
 
@@ -168,6 +186,156 @@
 
     <!-- Searched items stack here, newest first; each is a clone of the template below. -->
     <div id="item-card-outer"></div>
+
+    <!-- Inventory results (shown in body.mode-inventory). Merged from the old inventory page so
+         a profile search analyzes inline here instead of navigating to /inventory. -->
+    <div id="inventory-area">
+    <div id="error-display" style="display: none;"></div>
+
+    <div id="inventory-status" style="display: none;">
+      <div id="loading-message">Loading inventory...</div>
+      <div id="progress-bar">
+        <div id="progress-fill"></div>
+      </div>
+      <div id="progress-text">0 / 0 items analyzed</div>
+    </div>
+
+    <div id="inventory-summary" style="display: none;">
+      <div class="summary-top">
+        <a id="summary-profile" class="summary-profile" href="#" target="_blank" rel="noopener" style="display: none;">
+          <img id="summary-avatar" class="summary-avatar" src="" alt="" style="display: none;">
+          <span class="summary-nameblock">
+            <span id="summary-persona" class="summary-persona"></span>
+            <span id="summary-since" class="summary-since"></span>
+          </span>
+        </a>
+        <div id="summary-highlights" class="summary-highlights"></div>
+      </div>
+      <div class="rarity-bar-container">
+        <div id="rarity-bar" class="rarity-bar"></div>
+        <div id="rarity-legend" class="rarity-legend"></div>
+      </div>
+      <div id="ban-alert" class="ban-alert" role="alert" style="display: none;"></div>
+    </div>
+
+    <div id="main-layout">
+      <div id="sidebar" class="sidebar" style="display: none;">
+        <div class="sidebar-content">
+          <div class="sidebar-bar">
+            <div class="control-group search-group">
+              <input type="text" id="search-input" placeholder="Filter by name…" aria-label="Filter items by name" autocomplete="off">
+            </div>
+            <div class="sidebar-bar-row">
+              <div class="sort-section">
+                <div class="sort-controls">
+                  <div class="control-group">
+                    <label for="sort-select">Sort by:</label>
+                    <select id="sort-select">
+                      <option value="date">Date</option>
+                      <option value="name">Name</option>
+                      <option value="rarity" selected>Rarity</option>
+                      <option value="float">Float</option>
+                    </select>
+                  </div>
+                  <div class="control-group">
+                    <label for="sort-order">Order:</label>
+                    <select id="sort-order">
+                      <option value="asc">Ascending</option>
+                      <option value="desc" selected>Descending</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+              <button type="button" class="filter-toggle" id="filter-toggle" aria-expanded="false" aria-controls="sidebar-sections">
+                Filters <span class="filter-toggle-arrow" id="sidebar-arrow">▾</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="sidebar-sections" id="sidebar-sections">
+            <div class="sidebar-section">
+            <h4>Filter Options</h4>
+            <div class="control-group" role="group" aria-label="Item attributes">
+              <div class="attr-chips">
+                <button type="button" class="attr-chip" data-attr="star" aria-pressed="false" title="★ Knives &amp; Gloves only">★</button>
+                <button type="button" class="attr-chip" data-attr="stattrak" aria-pressed="false" title="StatTrak™ only">StatTrak</button>
+                <button type="button" class="attr-chip" data-attr="souvenir" aria-pressed="false" title="Souvenir only">Souvenir</button>
+                <button type="button" class="attr-chip" data-attr="special" aria-pressed="false" title="Rare patterns only (fade %, fire &amp; ice, blue gem, …)">Rare Patterns</button>
+              </div>
+            </div>
+
+            <div class="control-group" id="filter-type-group">
+              <label for="filter-type">Type:</label>
+              <select id="filter-type">
+                <option value="">All Types</option>
+              </select>
+            </div>
+
+            <div class="control-group">
+              <label for="filter-rarity">Rarity:</label>
+              <select id="filter-rarity">
+                <option value="">All Rarities</option>
+                <option value="Consumer Grade">Consumer Grade</option>
+                <option value="Industrial Grade">Industrial Grade</option>
+                <option value="Mil-Spec Grade">Mil-Spec Grade</option>
+                <option value="Restricted">Restricted</option>
+                <option value="Classified">Classified</option>
+                <option value="Covert">Covert</option>
+                <option value="Extraordinary">Extraordinary</option>
+                <option value="Contraband">Contraband</option>
+              </select>
+            </div>
+            
+            <div class="control-group">
+              <label for="filter-wear">Wear:</label>
+              <select id="filter-wear">
+                <option value="">All Wear Levels</option>
+                <option value="Factory New">Factory New</option>
+                <option value="Minimal Wear">Minimal Wear</option>
+                <option value="Field-Tested">Field-Tested</option>
+                <option value="Well-Worn">Well-Worn</option>
+                <option value="Battle-Scarred">Battle-Scarred</option>
+              </select>
+            </div>
+            
+            <div class="control-group">
+              <label for="filter-float-min">Float Range:</label>
+              <div class="float-slider-container">
+                <div class="float-slider-track">
+                  <div class="float-slider-dim" id="float-slider-dim-left"></div>
+                  <div class="float-slider-dim" id="float-slider-dim-right"></div>
+                  <input type="range" id="float-slider-min" min="0" max="1" step="0.001" value="0" aria-label="Minimum float">
+                  <input type="range" id="float-slider-max" min="0" max="1" step="0.001" value="1" aria-label="Maximum float">
+                </div>
+              </div>
+              <div class="float-range">
+                <input type="number" id="filter-float-min" step="0.001" min="0" max="1" placeholder="Min">
+                <span>to</span>
+                <input type="number" id="filter-float-max" step="0.001" min="0" max="1" placeholder="Max">
+              </div>
+            </div>
+            
+            <div class="control-group checkbox-group">
+              <label for="hide-commemorative">
+                <input type="checkbox" id="hide-commemorative" checked>
+                Hide items without a float
+              </label>
+            </div>
+
+            <button type="button" id="clear-filters" class="clear-filters">Clear filters</button>
+          </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="content-area" class="content-area">
+        <div id="grid-status" class="grid-status" aria-live="polite"></div>
+        <div id="inventory-container">
+          <div id="inventory-grid"></div>
+        </div>
+      </div>
+    </div>
+    </div>
     </div>
 
     <template id="item-card-template">
@@ -217,5 +385,55 @@
         </a>
       </div>
     </template>
+    <template id="inventory-item-template">
+      <div class="item-content">
+        <div class="item-left">
+          <div class="item-image-container">
+            <img class="item-image" data-field="image" src="" alt="Item image" loading="lazy">
+          </div>
+          <div class="item-actions">
+            <a href="#" class="icon-btn" data-field="inspect-link" title="Inspect in game" aria-label="Inspect in game">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="10.5" cy="10.5" r="5.5" fill="none" stroke="currentColor" stroke-width="2.2"/>
+                <line x1="14.8" y1="14.8" x2="20.5" y2="20.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+              </svg>
+            </a>
+            <a href="#" class="icon-btn" data-field="steam-link" title="View in Steam inventory" aria-label="View in Steam inventory" target="_blank" rel="noopener">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M13.5 4.5h6v6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+                <path d="M19.5 4.5l-8.5 8.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+                <path d="M9.5 6.5h-3a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-3" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+              </svg>
+            </a>
+          </div>
+        </div>
+        <div class="item-info">
+          <div class="item-name" data-field="name"></div>
+          <div class="item-details">
+            <div class="detail-line" data-field="float-line">
+              <span class="wear-pill" data-field="wear-pill" hidden></span>
+              <span class="detail-label" data-field="float-label">Float:</span>
+              <span class="detail-value loading-placeholder" data-field="float">Analyzing...</span>
+              <span class="float-bar" data-field="float-bar" hidden>
+                <span class="float-bar-dim" data-field="float-dim-left" hidden></span>
+                <span class="float-bar-dim" data-field="float-dim-right" hidden></span>
+                <span class="float-marker" data-field="float-marker"></span>
+              </span>
+            </div>
+            <div class="detail-line" data-field="pattern-line">
+              <span class="detail-label">Pattern:</span>
+              <span class="detail-value loading-placeholder" data-field="pattern">Analyzing...</span>
+              <span class="rarity-text" data-field="rarity"></span>
+            </div>
+          </div>
+          <div class="item-stickers" data-field="stickers" hidden></div>
+        </div>
+      </div>
+    </template>
+
+    <div id="status-outer">
+      <div id="status"></div>
+    </div>
+
   </body>
 </html>

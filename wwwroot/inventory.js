@@ -581,9 +581,8 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
     // A fresh controller starts un-aborted, so it resets the cancellation state too.
     analysisController = new AbortController();
     
-    // Show cancel button, hide analyze button
-    elements.button.style.display = 'none';
-    elements.cancelButton.style.display = 'flex';
+    // Show cancel button, hide analyze button (on whichever search box is visible)
+    setAnalyzeButtons(true);
     
     elements.errorDisplay.style.display = 'none';
     elements.status.textContent = '';
@@ -811,8 +810,7 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
     elements.errorDisplay.style.display = 'block';
   } finally {
     // Always restore button states
-    elements.button.style.display = 'flex';
-    elements.cancelButton.style.display = 'none';
+    setAnalyzeButtons(false);
     analysisController = null;
   }
 }
@@ -861,8 +859,7 @@ function resetInterface() {
   elements.status.textContent = '';
 
   // Reset button states
-  elements.button.style.display = 'flex';
-  elements.cancelButton.style.display = 'none';
+  setAnalyzeButtons(false);
 
   // Reset data
   currentOwnerSteamId = null;
@@ -907,9 +904,15 @@ function extractSteamIdFromInput(input) {
   return null;
 }
 
-// Run the inventory analysis for a raw user input (SteamID64 / profile URL / vanity). Called by
-// the early-input shim and the deep-link / queued-input paths.
-function submitSearch(userInput) {
+// Swap the search box's Analyze button for a Cancel button (and back) during an analysis.
+function setAnalyzeButtons(analyzing) {
+  if (elements.button) elements.button.style.display = analyzing ? 'none' : 'flex';
+  if (elements.cancelButton) elements.cancelButton.style.display = analyzing ? 'flex' : 'none';
+}
+
+// Run the inventory analysis for a raw user input (SteamID64 / profile URL / vanity). Exposed as
+// window.SkinInventory.run; the dispatcher (post.js) calls it when a profile is entered.
+function runInventorySearch(userInput) {
   elements.button.blur();
   userInput = (userInput || "").trim();
   if (!userInput) {
@@ -974,15 +977,9 @@ function initInventory() {
     floatSliderDimRight: document.getElementById("float-slider-dim-right")
   };
 
-  // The early-input shim (inline in inventory.html) owns the Enter/click listeners so a
-  // paste+analyze during script download isn't lost; hand it the real search and fall back to
-  // wiring here if the shim is absent.
-  window.__submitSearch = submitSearch;
-  if (!window.__shimReady) {
-    const form = document.getElementById("input");
-    if (form) form.addEventListener("submit", (e) => { e.preventDefault(); submitSearch(elements.textbox.value); });
-    elements.button.addEventListener("click", () => submitSearch(elements.textbox.value));
-  }
+  // The search bar and its #hash are owned by post.js (the dispatcher) on this shared page; here we
+  // just expose the inventory renderer for post.js to call when a profile is entered.
+  window.SkinInventory = { run: runInventorySearch };
 
   elements.cancelButton.addEventListener("click", function (event) {
     event.currentTarget.blur(); // currentTarget is the button itself, not the clicked inner <svg>
@@ -1201,29 +1198,7 @@ function initInventory() {
     this.setAttribute("aria-expanded", expanded ? "true" : "false");
   });
 
-  if (window.location.hash) {
-    const hashValue = decodeURIComponent(window.location.hash.substring(1));
-    const extractedId = extractSteamIdFromInput(hashValue);
-
-    if (extractedId) {
-      // If we can extract a SteamId64, use it directly
-      elements.textbox.value = extractedId;
-      submitSearch(extractedId);
-    } else if (hashValue && (hashValue.includes('steamcommunity.com') || !hashValue.match(/^\d+$/))) {
-      // If it looks like a URL or custom ID, try it
-      elements.textbox.value = hashValue;
-      submitSearch(hashValue);
-    }
-  } else if (window.__pendingSearch) {
-    // A paste+analyze that arrived while this script was still downloading — replay it now.
-    const queued = window.__pendingSearch;
-    window.__pendingSearch = null;
-    elements.textbox.value = queued;
-    submitSearch(queued);
-  } else {
-    // Empty landing: put the cursor in the search box (the shim already did this; harmless).
-    elements.textbox.focus({ preventScroll: true });
-  }
+  // The initial #hash / queued paste is routed by post.js (the dispatcher), not here.
 }
 
 // Exposed for unit tests under Node/CommonJS. The browser has no `module`, so this is skipped
