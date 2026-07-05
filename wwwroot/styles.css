@@ -254,17 +254,6 @@ html {
   outline-offset: 2px;
 }
 
-.github-corner svg {
-  /* --light reads against both the dark header bar and the gray page body */
-  fill: var(--light);
-  color: var(--dark);
-  position: absolute;
-  top: 0;
-  border: 0;
-  right: 0;
-}
-
-
 /* Item page: each search adds a card (mirroring an inventory grid item, plus the extra
    wear/quality/origin/id fields) to this stack, newest on top. */
 #item-card-outer {
