@@ -604,9 +604,10 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
         // The profile endpoint is authoritative for the share hash: it returns the vanity name
         // when the user has one, otherwise the SteamId64. This is the only place the hash is set.
         if (profile.hash) {
-          const desiredHash = encodeURIComponent(profile.hash);
-          if (window.location.hash.substring(1) !== desiredHash) {
-            window.location.hash = desiredHash;
+          // Canonicalise the URL to the friendly vanity via replaceState — no extra history entry.
+          const current = new URLSearchParams(location.search).get("q");
+          if (current !== profile.hash) {
+            history.replaceState({ q: profile.hash }, "", location.pathname + "?q=" + encodeURIComponent(profile.hash));
           }
         }
         // Record this profile in the shared "Recent lookups" list (post.js owns it).

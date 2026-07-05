@@ -289,7 +289,29 @@ function renderErrorCard(card, message) {
 // The real search. Parses an inspect link (or the bare reduced form) and kicks off the lookup.
 // Called by the early-input shim in index.html the moment the app is ready, and by the
 // deep-link / queued-input paths below.
-function submitSearch(rawInput) {
+// Record the active search in the URL as ?q=<value> (shareable; back/forward work via the popstate
+// handler in initSearch). The FIRST search from the empty landing (no ?q yet) REPLACES it rather
+// than stacking a second entry — so Back from that first result leaves the site instead of returning
+// to the blank landing; later searches push, so you can still step back through them. (inventory.js
+// separately replaceState's the canonical vanity in.)
+function setQuery(q) {
+  const current = new URLSearchParams(location.search).get("q");
+  if (current === q) return; // same query — no duplicate entry
+  const url = location.pathname + "?q=" + encodeURIComponent(q);
+  if (current) history.pushState({ q }, "", url);    // already on a result → new history entry
+  else history.replaceState({ q }, "", url);         // on the landing → replace it, don't stack
+}
+
+// Return to the empty landing (e.g. the user hit Back past the first search).
+function showLanding() {
+  document.body.classList.remove("mode-item", "mode-inventory");
+  document.body.classList.add("pre-search");
+  controls.textbox.value = "";
+}
+
+// fromHistory = true when replaying a URL (initial load or back/forward): render, but don't push a
+// new history entry.
+function submitSearch(rawInput, fromHistory) {
   controls.button.blur();
   const input = (rawInput || "").trim();
   // Strip either the legacy (rungame/<steamid>) or new (run/730//) inspect-link prefix.
@@ -312,17 +334,18 @@ function submitSearch(rawInput) {
 
   if (isItem) {
     const cert = reduced.toUpperCase();
+    if (!fromHistory) setQuery(cert);
     // Show the item view (hide any prior inventory) and glide out of the centered landing.
     document.body.classList.remove("pre-search", "mode-inventory");
     document.body.classList.add("mode-item");
-    window.location.hash = cert;
     post(inspectPrefix + cert, cert);
-    controls.textbox.value = ""; // clear on search, like the inventory page
+    controls.textbox.value = ""; // clear on search
   } else if (isProfile) {
-    // Inventory analysis renders INLINE on this same page now (no navigation). inventory.js owns
-    // the inventory view + sets the hash from the resolved profile.
+    if (!fromHistory) setQuery(input); // inventory.js later replaceState's the canonical vanity
+    // Inventory analysis renders INLINE on this same page (no navigation).
     document.body.classList.remove("pre-search", "mode-item");
     document.body.classList.add("mode-inventory");
+    controls.textbox.value = ""; // clear immediately, matching the item flow
     if (window.SkinInventory) window.SkinInventory.run(input);
     else window.__pendingSearch = input; // inventory.js not up yet — its init replays this
   } else {
@@ -361,10 +384,22 @@ function initSearch() {
 
   renderRecents(); // draw any stored history into the landing
 
-  if (window.location.hash) {
-    const hashURL = decodeURIComponent(window.location.hash.substring(1));
-    controls.textbox.value = hashURL;
-    submitSearch(hashURL); // classifies item vs profile and shows the right view
+  // Back/forward: re-render whatever ?q the URL now holds (or the empty landing).
+  window.addEventListener("popstate", () => {
+    const q = new URLSearchParams(location.search).get("q");
+    if (q) submitSearch(q, true);
+    else showLanding();
+  });
+
+  // The search lives in ?q=<value>. Fall back to the legacy #<value> for old links, migrating it to
+  // ?q= (via replaceState) so back/forward and sharing behave from here on.
+  let initialQuery = new URLSearchParams(location.search).get("q");
+  if (!initialQuery && location.hash.length > 1) {
+    initialQuery = decodeURIComponent(location.hash.substring(1));
+    history.replaceState({ q: initialQuery }, "", location.pathname + "?q=" + encodeURIComponent(initialQuery));
+  }
+  if (initialQuery) {
+    submitSearch(initialQuery, true); // URL already carries the query — render without pushing again
   } else if (window.__pendingSearch) {
     // A paste+search that arrived while this script was still downloading — replay it now.
     const queued = window.__pendingSearch;
