@@ -145,6 +145,92 @@ body.pre-search .examples { display: block; }
   opacity: 0.6;
 }
 
+/* "Recent lookups" — landing-only (pre-search) history rows, populated from localStorage; the host
+   carries [hidden] when empty. Each row re-runs its lookup on click; its left edge is rarity-tinted. */
+#recent-lookups {
+  max-width: 620px;
+  margin: 22px auto 0;
+}
+body:not(.pre-search) #recent-lookups { display: none; }
+
+.recents-head {
+  color: var(--text);
+  opacity: 0.5;
+  font-size: 13px;
+  text-align: center;
+  margin-bottom: 10px;
+}
+
+.recents-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.recent-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 12px;
+  background: var(--dark);
+  border: 1px solid var(--light);
+  border-left: 3px solid var(--light);
+  border-radius: 8px;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  font-family: Lato, sans-serif;
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+.recent-row:hover {
+  border-color: var(--pop);
+  transform: translateY(-1px);
+}
+
+.recent-thumb {
+  width: 46px;
+  height: 34px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.recent-thumb img {
+  max-width: 100%;
+  max-height: 34px;
+  object-fit: contain;
+}
+
+.recent-name {
+  flex: 1;
+  min-width: 0;
+  font-weight: bold;
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.recent-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-shrink: 0;
+  font-size: 13px;
+}
+.recent-wear {
+  font-size: 11px;
+  font-weight: bold;
+  opacity: 0.7;
+}
+.recent-float { font-variant-numeric: tabular-nums; }
+.recent-float.wear-fn { color: #2ecc71; }
+.recent-float.wear-mw { color: #82c91e; }
+.recent-float.wear-ft { color: #f1c40f; }
+.recent-float.wear-ww { color: #e67e22; }
+.recent-float.wear-bs { color: #e74c3c; }
+
 /* Respect reduced-motion: skip the hero entirely - the search just stays at the top. */
 @media (prefers-reduced-motion: reduce) {
   .page-shift {

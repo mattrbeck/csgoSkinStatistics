@@ -27,6 +27,117 @@ function resurface(card) {
   card.classList.add("resurfaced");
 }
 
+// ---------------------------------------------------------------------------
+// Recent lookups (localStorage-backed) — a short history shown on the empty landing so a repeat
+// visit can re-open a past item in one click. Item lookups only for now (profiles open on the
+// separate inventory page).
+// ---------------------------------------------------------------------------
+const RECENTS_KEY = "skinstats:recents:v1";
+const RECENTS_MAX = 12;
+
+// Float -> wear zone (exclusive upper bounds), so a recent row draws without the item response.
+const RECENT_WEAR_ZONES = [
+  [0.07, "fn", "FN"], [0.15, "mw", "MW"], [0.38, "ft", "FT"], [0.45, "ww", "WW"], [Infinity, "bs", "BS"],
+];
+
+function loadRecents() {
+  try {
+    const list = JSON.parse(localStorage.getItem(RECENTS_KEY) || "[]");
+    return Array.isArray(list) ? list : [];
+  } catch { return []; } // private mode / corrupt value: recents are a nicety, never required
+}
+
+function saveRecents(list) {
+  try { localStorage.setItem(RECENTS_KEY, JSON.stringify(list.slice(0, RECENTS_MAX))); } catch { /* blocked */ }
+}
+
+// Dedupe key: the same item (name + float) collapses to one row regardless of link encoding.
+function recentKey(e) { return `item:${e.name}|${e.float}`; }
+
+// Insert newest-first, dedupe (a repeat lookup moves to the front), cap, re-render.
+function upsertRecent(entry) {
+  if (!entry || !entry.value) return;
+  const key = recentKey(entry);
+  const list = loadRecents().filter((e) => recentKey(e) !== key);
+  list.unshift(entry);
+  saveRecents(list);
+  renderRecents();
+}
+
+// Capture just enough from a rendered item to redraw a rich row (thumb, name, float + wear zone).
+function addRecentItem(iteminfo, reducedLink) {
+  if (!iteminfo || !iteminfo.weapon) return;
+  let float = "", wearClass = "", wearAbbr = "";
+  if (Number(iteminfo.paintindex) > 0 && iteminfo.paintwear_float != null) {
+    const f = Number(iteminfo.paintwear_float);
+    const zone = RECENT_WEAR_ZONES.find(([max]) => f < max);
+    float = f.toFixed(4); wearClass = zone[1]; wearAbbr = zone[2];
+  }
+  upsertRecent({
+    type: "item",
+    value: reducedLink,
+    name: (iteminfo.is_knife_or_glove ? "★ " : "") + `${iteminfo.weapon} | ${iteminfo.skin}`,
+    image: iteminfo.image || "",
+    float, wearAbbr, wearClass,
+    rarityColor: (typeof rarityColorOf === "function" ? rarityColorOf(iteminfo.rarity_name) : "") || "",
+  });
+}
+
+// Build one recent row (a button that re-runs the lookup). DOM nodes only — names are remote data.
+function recentRow(entry) {
+  const row = document.createElement("button");
+  row.type = "button";
+  row.className = "recent-row";
+  row.title = entry.name;
+  if (entry.rarityColor) row.style.borderLeftColor = entry.rarityColor;
+  row.addEventListener("click", () => { controls.textbox.value = entry.value; submitSearch(entry.value); });
+
+  const thumb = document.createElement("span");
+  thumb.className = "recent-thumb";
+  if (entry.image) {
+    const img = document.createElement("img");
+    img.src = entry.image; img.alt = ""; img.loading = "lazy";
+    thumb.appendChild(img);
+  }
+  row.appendChild(thumb);
+
+  const name = document.createElement("span");
+  name.className = "recent-name";
+  name.textContent = entry.name;
+  row.appendChild(name);
+
+  if (entry.float) {
+    const meta = document.createElement("span");
+    meta.className = "recent-meta";
+    const wear = document.createElement("span");
+    wear.className = "recent-wear";
+    wear.textContent = entry.wearAbbr;
+    const fl = document.createElement("span");
+    fl.className = `recent-float wear-${entry.wearClass}`;
+    fl.textContent = entry.float;
+    meta.append(wear, fl);
+    row.appendChild(meta);
+  }
+  return row;
+}
+
+function renderRecents() {
+  const host = document.getElementById("recent-lookups");
+  if (!host) return;
+  // Item lookups only on this page; ignore any foreign entries (e.g. profile rows written by a
+  // different build sharing the storage key).
+  const list = loadRecents().filter((e) => e && e.type === "item");
+  if (!list.length) { host.hidden = true; host.replaceChildren(); return; }
+  const head = document.createElement("div");
+  head.className = "recents-head";
+  head.textContent = "Recent lookups";
+  const rows = document.createElement("div");
+  rows.className = "recents-list";
+  list.forEach((e) => rows.appendChild(recentRow(e)));
+  host.replaceChildren(head, rows);
+  host.hidden = false;
+}
+
 // Fill a freshly-cloned card with one item's data. All lookups are scoped to the card so
 // many results can coexist on the page. Built as DOM nodes, never innerHTML: the names are
 // remote data.
@@ -207,6 +318,8 @@ function initSearch() {
     });
   });
 
+  renderRecents(); // draw any stored history into the landing
+
   if (window.location.hash) {
     const hashURL = window.location.hash.substring(1);
     controls.textbox.value = hashURL;
@@ -286,6 +399,7 @@ function post(url, key) {
       try {
         populateCard(card, iteminfo, url, loadTime);
         if (assetId) cardsByAssetId.set(assetId, card);
+        addRecentItem(iteminfo, key);
       } catch (e) {
         renderErrorCard(card, "An error occurred while displaying the item data");
         throw e;

@@ -190,6 +190,10 @@
 
     <p class="search-hint">Paste a CS2 inspect link for an item's float, pattern &amp; stickers — or a Steam profile to analyze a whole inventory.</p>
 
+    <!-- Landing-only: recent item lookups (localStorage), populated by post.js. Hidden when empty
+         so "Try an example" leads on a first visit. -->
+    <div id="recent-lookups" hidden></div>
+
     <!-- Landing-only: two real inspect links to try. Clicking one runs the lookup. Hidden once a
          search has been made (body loses .pre-search). -->
     <div class="examples" id="examples">
