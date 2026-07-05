@@ -145,17 +145,36 @@ function renderErrorCard(card, message) {
 // deep-link / queued-input paths below.
 function submitSearch(rawInput) {
   controls.button.blur();
-  // Strip either the legacy (rungame/<steamid>) or new (run/730//) prefix.
-  const reduced = (rawInput || "")
+  const input = (rawInput || "").trim();
+  // Strip either the legacy (rungame/<steamid>) or new (run/730//) inspect-link prefix.
+  const reduced = input
     .replace(/^.*csgo_econ_action_preview(%20|\s+)/i, "")
     .trim();
-  if (/^[SM]\d+A\d+D\d+$/.test(reduced) || /^[0-9A-F]+$/.test(reduced)) {
+
+  // One box, two kinds of input — that's what makes the search "universal". A CS2 inspect link
+  // (an S/A/D or M/A/D command, or a long hex cert) is looked up as an item here; a Steam profile
+  // (a 17-digit id64, a steamcommunity URL, or a bare vanity) is handed to the inventory page.
+  // Order matters: a bare id64 is all digits (would match the hex test) so it's tested first, and
+  // the length>=34 guard keeps a short vanity from being mistaken for a hex cert.
+  const isItem = /^[SM]\d+A\d+D\d+$/i.test(reduced)
+    || (/^[0-9a-fA-F]+$/.test(reduced) && reduced.length >= 34);
+  const isProfile = !isItem && (
+    /^7656119\d{10}$/.test(input)
+    || /steamcommunity\.com/i.test(input)
+    || /^[A-Za-z0-9_-]{2,32}$/.test(input)
+  );
+
+  if (isItem) {
+    const cert = reduced.toUpperCase();
     document.body.classList.remove("pre-search"); // glide the search up out of its centered landing
-    window.location.hash = reduced;
-    post(inspectPrefix + reduced, reduced);
+    window.location.hash = cert;
+    post(inspectPrefix + cert, cert);
     controls.textbox.value = ""; // clear on search, like the inventory page
+  } else if (isProfile) {
+    // The inventory analyzer is a separate page; it reads the profile from the hash on load.
+    window.location.href = `/inventory#${encodeURIComponent(input)}`;
   } else {
-    controls.textbox.value = "Not a valid inspect link";
+    controls.textbox.value = "Not a valid inspect link or profile";
   }
 }
 
