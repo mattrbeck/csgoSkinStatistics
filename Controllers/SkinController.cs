@@ -300,6 +300,7 @@ namespace CSGOSkinAPI.Controllers
                 avatar = profile.Avatar,
                 trade_ban_state = profile.TradeBanState,
                 limited_account = profile.LimitedAccount,
+                since_year = profile.SinceYear,
                 // Prefer the vanity URL (/id/<vanity>) when the profile exposes one; Steam omits
                 // customURL for some profiles, so fall back to the /profiles/<id64> form.
                 profile_url = string.IsNullOrEmpty(profile.CustomUrl)
@@ -395,6 +396,9 @@ namespace CSGOSkinAPI.Controllers
             public string? Avatar { get; init; }
             public string? TradeBanState { get; init; }
             public bool LimitedAccount { get; init; }
+            // Year the account was created, parsed from <memberSince> (e.g. "July 12, 2015" -> 2015).
+            // Null when the profile feed omits the element or it can't be parsed.
+            public int? SinceYear { get; init; }
         }
 
         // Parses the public Steam profile XML feed. Both /id/<vanity>/?xml=1 and
@@ -411,6 +415,18 @@ namespace CSGOSkinAPI.Controllers
             // means the user is restricted from trading or using the market.
             var tradeBanMatch = Regex.Match(xml, @"<tradeBanState>(.*?)</tradeBanState>", RegexOptions.Singleline);
             var limitedMatch = Regex.Match(xml, @"<isLimitedAccount>(\d+)</isLimitedAccount>", RegexOptions.Singleline);
+            // memberSince is a human date string like "July 12, 2015" (occasionally wrapped in
+            // CDATA). We only surface the 4-digit year; anything else stays null so we never invent.
+            var memberSinceMatch = Regex.Match(xml, @"<memberSince>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?</memberSince>", RegexOptions.Singleline);
+            int? sinceYear = null;
+            if (memberSinceMatch.Success)
+            {
+                var yearMatch = Regex.Match(memberSinceMatch.Groups[1].Value, @"\b(19|20)\d{2}\b");
+                if (yearMatch.Success && int.TryParse(yearMatch.Value, out var y))
+                {
+                    sinceYear = y;
+                }
+            }
 
             return new ProfileInfo
             {
@@ -419,7 +435,8 @@ namespace CSGOSkinAPI.Controllers
                 Persona = nameMatch.Success ? nameMatch.Groups[1].Value : null,
                 Avatar = avatarMatch.Success ? avatarMatch.Groups[1].Value : null,
                 TradeBanState = tradeBanMatch.Success ? tradeBanMatch.Groups[1].Value : null,
-                LimitedAccount = limitedMatch.Success && limitedMatch.Groups[1].Value == "1"
+                LimitedAccount = limitedMatch.Success && limitedMatch.Groups[1].Value == "1",
+                SinceYear = sinceYear
             };
         }
 

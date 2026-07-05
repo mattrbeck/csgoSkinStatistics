@@ -230,7 +230,7 @@ function renderHighlights(processedItems) {
   const chips = [`${inventoryItems.length} CS2 items`];
   if (knives) chips.push(`${knives} knives/gloves`);
   if (stattrak) chips.push(`${stattrak} StatTrak`);
-  if (special) chips.push({ text: `${special} special`, cls: 'special' });
+  if (special) chips.push({ text: `${special} Rare Patterns`, cls: 'special' });
 
   elements.summaryHighlights.replaceChildren();
   for (const chip of chips) {
@@ -254,6 +254,11 @@ function updateProfileSummary(inventoryData) {
   } else {
     elements.summaryPersona.textContent = '';
     elements.summaryProfile.style.display = 'none';
+  }
+
+  // Account age line (from the profile feed's memberSince year); hidden when unknown.
+  if (elements.summarySince) {
+    elements.summarySince.textContent = inventoryData.since_year ? `Since ${inventoryData.since_year}` : '';
   }
 
   // Show the avatar only when we have a valid URL; never render a broken image.
@@ -936,6 +941,7 @@ function initInventory() {
     summaryProfile: document.getElementById("summary-profile"),
     summaryAvatar: document.getElementById("summary-avatar"),
     summaryPersona: document.getElementById("summary-persona"),
+    summarySince: document.getElementById("summary-since"),
     banAlert: document.getElementById("ban-alert"),
     rarityBar: document.getElementById("rarity-bar"),
     rarityLegend: document.getElementById("rarity-legend"),
