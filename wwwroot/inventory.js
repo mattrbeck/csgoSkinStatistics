@@ -14,6 +14,47 @@ fetch('float-ranges.json')
 let elements;
 let analysisController = null; // AbortController for canceling requests; its signal.aborted is the
                               // single source of truth for whether the current run was cancelled
+
+// Client-side inventory cache. A reload or a repeat search for the same profile within the TTL
+// replays the last /api/inventory response straight from sessionStorage - zero network, instant
+// render, and one fewer hit on Steam's per-IP rate limit. sessionStorage (not localStorage) so it
+// naturally clears when the tab closes and never outlives the browsing session. Best-effort: any
+// storage/serialisation failure (e.g. quota) silently falls back to the network.
+const INVENTORY_CACHE_TTL_MS = 5 * 60 * 1000;
+function inventoryCacheKey(input) {
+  return 'inv:' + String(input).trim().toLowerCase();
+}
+function readInventoryCache(input) {
+  try {
+    const raw = sessionStorage.getItem(inventoryCacheKey(input));
+    if (!raw) return null;
+    const entry = JSON.parse(raw);
+    if (!entry || typeof entry.t !== 'number' || Date.now() - entry.t > INVENTORY_CACHE_TTL_MS) {
+      sessionStorage.removeItem(inventoryCacheKey(input));
+      return null;
+    }
+    return entry.data;
+  } catch {
+    return null;
+  }
+}
+function writeInventoryCache(input, data) {
+  try {
+    sessionStorage.setItem(inventoryCacheKey(input), JSON.stringify({ t: Date.now(), data }));
+  } catch {
+    // Quota exceeded (inventories are large): drop other cached inventories and try once more, so
+    // the newest lookup wins rather than being lost to stale entries.
+    try {
+      for (let i = sessionStorage.length - 1; i >= 0; i--) {
+        const k = sessionStorage.key(i);
+        if (k && k.startsWith('inv:')) sessionStorage.removeItem(k);
+      }
+      sessionStorage.setItem(inventoryCacheKey(input), JSON.stringify({ t: Date.now(), data }));
+    } catch {
+      /* still no room; caching is best-effort, so give up silently */
+    }
+  }
+}
 const conversionBuffer = new ArrayBuffer(4);
 const conversionView = new DataView(conversionBuffer);
 
@@ -615,21 +656,28 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
       })
       .catch(() => { /* profile is non-critical; ignore failures and aborts */ });
 
-    const response = await fetch(`/api/inventory?steamid=${encodeURIComponent(userInput)}`, {
-      signal: analysisController.signal
-    });
-    // The API reports its own failures as a JSON { error } body (even with a 4xx/5xx status), so
-    // parse first. Only fall back to a status-based message when the body isn't JSON at all
-    // (e.g. a proxy error page), which would otherwise surface as an opaque SyntaxError.
-    let inventoryData;
-    try {
-      inventoryData = await response.json();
-    } catch {
-      throw new Error(response.ok ? 'Invalid response from server' : `Request failed (${response.status})`);
-    }
+    // Replay a recent response for this profile without hitting the server (and thus Steam) at all.
+    let inventoryData = readInventoryCache(userInput);
+    if (!inventoryData) {
+      const response = await fetch(`/api/inventory?steamid=${encodeURIComponent(userInput)}`, {
+        signal: analysisController.signal
+      });
+      // The API reports its own failures as a JSON { error } body (even with a 4xx/5xx status), so
+      // parse first. Only fall back to a status-based message when the body isn't JSON at all
+      // (e.g. a proxy error page), which would otherwise surface as an opaque SyntaxError.
+      try {
+        inventoryData = await response.json();
+      } catch {
+        throw new Error(response.ok ? 'Invalid response from server' : `Request failed (${response.status})`);
+      }
 
-    if (inventoryData.error) {
-      throw new Error(inventoryData.error);
+      if (inventoryData.error) {
+        throw new Error(inventoryData.error);
+      }
+
+      // Only cache genuine successes: an { error } body threw above, so reaching here means a real
+      // inventory payload worth replaying on the next reload.
+      writeInventoryCache(userInput, inventoryData);
     }
 
     // Check if cancelled after fetching inventory

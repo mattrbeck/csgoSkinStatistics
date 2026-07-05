@@ -24,6 +24,14 @@ builder.Services.AddHttpClient("steam")
         PooledConnectionLifetime = TimeSpan.FromMinutes(30),
     })
     .SetHandlerLifetime(Timeout.InfiniteTimeSpan);
+// Inventory response cache: /api/inventory results are cached by resolved SteamId64 for a few
+// minutes so reload storms (and repeat viewers of the same inventory) don't each re-hit
+// steamcommunity.com's inventory endpoint, which rate-limits per server IP. Bounded by *bytes* -
+// each entry's Size is its serialized length - so total memory can never exceed SizeLimit no
+// matter how many inventories are viewed, which matters on a small-memory host. A maxed 2000-item
+// inventory serializes to ~3 MB, so 8 MB holds a couple of large ones plus several smaller ones;
+// lower SizeLimit to tighten the footprint, raise it to cache more.
+builder.Services.AddMemoryCache(options => options.SizeLimit = 8 * 1024 * 1024);
 builder.Services.AddSingleton<SteamService>();
 builder.Services.AddSingleton<DatabaseService>();
 builder.Services.AddSingleton<ConstDataService>();

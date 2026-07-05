@@ -2,10 +2,16 @@ namespace CSGOSkinAPI.Controllers
 {
     [ApiController]
     [Route("api")]
-    public partial class SkinController(SteamService steamService, DatabaseService dbService, ConstDataService constDataService, IHttpClientFactory httpClientFactory, InventoryWarmService warmService) : ControllerBase
+    public partial class SkinController(SteamService steamService, DatabaseService dbService, ConstDataService constDataService, IHttpClientFactory httpClientFactory, InventoryWarmService warmService, IMemoryCache cache) : ControllerBase
     {
         // SteamID64 of the first individual account; anything below is not a profile id.
         private const ulong MinSteamId64 = 76561197960265729;
+
+        // How long a fetched /api/inventory response stays served from memory. Short by design:
+        // long enough to absorb a reload storm and repeat viewers, short enough that a user who
+        // just traded sees the change within a few minutes. Paired with the byte-bounded
+        // MemoryCache registered in Program.cs.
+        private static readonly TimeSpan InventoryCacheTtl = TimeSpan.FromMinutes(5);
 
         // Match on the command itself rather than the prefix, which changed from
         // the legacy "rungame/730/<steamid>/" to "run/730//" in March 2026.
@@ -92,6 +98,14 @@ namespace CSGOSkinAPI.Controllers
                 var steamId = resolvedSteamId.Value;
                 steamid = steamId.ToString(); // Use resolved SteamId64 for inventory URL
 
+                // Serve a recent copy without touching Steam. Keyed by resolved SteamId64 so that a
+                // vanity URL and the raw id (which resolve to the same account) share one entry.
+                var cacheKey = $"inv:{steamId}";
+                if (cache.TryGetValue(cacheKey, out byte[]? cachedPayload) && cachedPayload != null)
+                {
+                    return File(cachedPayload, "application/json");
+                }
+
                 using var httpClient = httpClientFactory.CreateClient("steam");
                 httpClient.Timeout = TimeSpan.FromSeconds(10);
                 
@@ -101,10 +115,21 @@ namespace CSGOSkinAPI.Controllers
                 var response = await httpClient.GetAsync(inventoryUrl);
                 if (!response.IsSuccessStatusCode)
                 {
+                    if (response.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
+                    {
+                        // Steam is throttling this server's IP for the inventory endpoint. Surface it
+                        // loudly in the logs (with Retry-After when present) so the throttle is visible.
+                        var retryAfter = response.Headers.RetryAfter?.Delta;
+                        Console.WriteLine($"Steam inventory RATE LIMITED (429) for {steamid}" +
+                            (retryAfter != null ? $"; Retry-After {retryAfter.Value.TotalSeconds:0}s" : ""));
+                        return StatusCode(StatusCodes.Status429TooManyRequests,
+                            new { error = "Steam is rate limiting inventory requests right now. Please try again in a minute." });
+                    }
                     if (response.StatusCode == System.Net.HttpStatusCode.Forbidden)
                     {
                         return BadRequest(new { error = "Inventory is private or user does not exist" });
                     }
+                    Console.WriteLine($"Steam inventory fetch for {steamid} failed: {(int)response.StatusCode} {response.StatusCode}");
                     return BadRequest(new { error = $"Failed to fetch inventory: {response.StatusCode}" });
                 }
 
@@ -240,7 +265,17 @@ namespace CSGOSkinAPI.Controllers
                 };
 
                 Console.WriteLine($"Successfully parsed {csgoItems.Count} CS2 items from {inventoryData.total} total items");
-                return Ok(result);
+
+                // Cache the exact bytes we return, keyed by resolved SteamId64. Size is the byte
+                // length so the MemoryCache's byte SizeLimit bounds total memory; expires after
+                // InventoryCacheTtl so idle entries free themselves.
+                var payload = JsonSerializer.SerializeToUtf8Bytes(result);
+                cache.Set(cacheKey, payload, new MemoryCacheEntryOptions
+                {
+                    Size = payload.Length,
+                    AbsoluteExpirationRelativeToNow = InventoryCacheTtl,
+                });
+                return File(payload, "application/json");
             }
             catch (TaskCanceledException)
             {

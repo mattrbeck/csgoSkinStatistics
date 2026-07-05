@@ -56,7 +56,16 @@ namespace CSGOSkinAPI.Services
                 $"https://steamcommunity.com/inventory/{steamid}/730/2?l=english&count=2000", cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
-                Console.WriteLine($"Inventory warm for {steamid}: fetch failed with {response.StatusCode}");
+                if (response.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
+                {
+                    var retryAfter = response.Headers.RetryAfter?.Delta;
+                    Console.WriteLine($"Inventory warm for {steamid}: Steam RATE LIMITED (429)" +
+                        (retryAfter != null ? $"; Retry-After {retryAfter.Value.TotalSeconds:0}s" : ""));
+                }
+                else
+                {
+                    Console.WriteLine($"Inventory warm for {steamid}: fetch failed with {response.StatusCode}");
+                }
                 return;
             }
 

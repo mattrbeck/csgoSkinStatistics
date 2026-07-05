@@ -5,6 +5,7 @@ global using Microsoft.AspNetCore.Diagnostics;
 global using Microsoft.AspNetCore.Mvc;
 global using Microsoft.AspNetCore.Rewrite;
 global using Microsoft.Data.Sqlite;
+global using Microsoft.Extensions.Caching.Memory;
 global using SteamKit2;
 global using SteamKit2.Authentication;
 global using SteamKit2.GC;
