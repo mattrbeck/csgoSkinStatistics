@@ -42,10 +42,12 @@ describe('renderName', () => {
     expect(el.classList.contains('souvenir')).toBe(true);
   });
 
-  test('appends the special-pattern note when present', () => {
+  test('does not fold the special-pattern note into the name (it renders as a chip after the seed)', () => {
     const el = makeNameEl();
     renderName(el, { weapon: 'Karambit', skin: 'Doppler', quality: 0, special: 'Ruby' });
-    expect(el.querySelector('.item-special').textContent).toBe('Ruby');
+    expect(el.textContent).toBe('Karambit | Doppler');
+    expect(el.querySelector('.item-special')).toBeNull();
+    expect(el.querySelector('.special-chip')).toBeNull();
   });
 
   test('renders a StatTrak badge with the kill count slide-out', () => {

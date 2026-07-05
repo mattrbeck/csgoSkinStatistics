@@ -424,10 +424,37 @@ body.mode-item #item-card-outer { display: flex; }
   border-left-color: var(--error);
 }
 
-.item-special {
-  margin-left: 6px;
-  color: var(--pop);
-  font-weight: bold;
+/* Rare-pattern chip (fade %, Ruby, blue gem, glove tier, ...): a colored dot + the
+   attribute text, shown after the Pattern seed. Border/background tint and dot fill are
+   set inline per-kind by buildSpecialChip (special-chip.js); this is just the shared shape. */
+.special-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 2px 8px 2px 6px;
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+  vertical-align: middle;
+}
+
+.special-chip__dot {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+}
+
+/* On a wide card the chip sits after the seed on one line; on a narrow one the pattern line
+   wraps it to its own line (see .card-pattern-line), and this lets the label itself wrap as a
+   last resort so a long "Blue Gem 92% / 45% mag" can never push the card off-screen. */
+.special-chip__text {
+  min-width: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
 }
 
 .stattrak-badge {
@@ -482,6 +509,8 @@ body.mode-item #item-card-outer { display: flex; }
 
 .card-pattern-line {
   font-size: 14px;
+  flex-wrap: wrap;
+  row-gap: 6px;
 }
 
 .card-rarity {

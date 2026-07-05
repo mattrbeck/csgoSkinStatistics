@@ -196,6 +196,42 @@ class InventoryItem extends HTMLElement {
         font-weight: 500;
       }
 
+      /* On a narrow card the pattern line wraps the chip to its own line instead of pushing
+         the card off-screen; the float line stays single-line (its bar handles its own width). */
+      .detail-line[data-field="pattern-line"] {
+        flex-wrap: wrap;
+        row-gap: 4px;
+      }
+
+      /* Rare-pattern chip. Border/background tint + dot fill are set inline per-kind by
+         buildSpecialChip (special-chip.js); this mirrors the light-DOM rules in styles.css. */
+      .special-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        max-width: 100%;
+        padding: 1px 8px 1px 6px;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 600;
+        line-height: 1.5;
+      }
+
+      .special-chip__dot {
+        width: 9px;
+        height: 9px;
+        flex: 0 0 auto;
+        border-radius: 50%;
+      }
+
+      /* Let the label wrap as a last resort so a long "Blue Gem 92% / 45% mag" never overflows. */
+      .special-chip__text {
+        min-width: 0;
+        color: var(--text, #ecf0f1);
+        overflow-wrap: anywhere;
+      }
+
       /* Hovering (or tapping/focusing) the float slides out the remaining precision
          digits (the shown value is truncated, not rounded, so the full float is
          short + rest); the bar yields its space as the digits expand. */
@@ -729,13 +765,8 @@ class InventoryItem extends HTMLElement {
         ? `${itemData.weapon} | ${itemData.skin}`
         : (this.itemData.name || this.itemData.market_name || itemData.weapon || '').replace(/^★\s*/, '');
       nameElement.textContent = nameText;
-      if (itemData.special) {
-        const special = document.createElement('span');
-        special.className = 'item-special';
-        special.style.cssText = 'color: var(--pop, #2ecc71); font-weight: bold; margin-left: 5px;';
-        special.textContent = itemData.special;
-        nameElement.appendChild(special);
-      }
+      // The rare-pattern note is no longer appended to the name - it renders as a chip after
+      // the Pattern seed (see below).
       if (itemData.stattrak) {
         const badge = document.createElement('span');
         badge.className = 'stattrak-badge';
@@ -835,6 +866,16 @@ class InventoryItem extends HTMLElement {
     if (patternElement && hasSkin) {
       patternElement.textContent = itemData.paintseed;
       patternElement.classList.remove('loading-placeholder');
+    }
+
+    // Rare-pattern chip (fade %, Ruby, blue gem, tier, ...) after the seed. Its dot color
+    // signals which kind of pattern this is. Rebuilt each call (sort/filter re-renders cards).
+    if (patternLine) {
+      patternLine.querySelector('.special-chip')?.remove();
+      if (hasSkin && itemData.special) {
+        const chip = buildSpecialChip(itemData.special, itemData.skin);
+        if (chip) patternElement.after(chip);
+      }
     }
 
     // Ensure inspect link is set

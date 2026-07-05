@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Rare-pattern chips - demo</title>
+    <style>
+      /* Self-contained showcase of every rare-pattern chip we render (see
+         wwwroot/special-chip.js for the live version). Open straight from disk - no server.
+         Theme vars + .special-chip rules are copied from wwwroot/styles.css. */
+      :root {
+        --gray: #1f2d3a;
+        --dark: #0f1d2a;
+        --light: #2f3d4a;
+        --text: #ecf0f1;
+        --souvenir: #ccb22f;
+      }
+
+      /* .special-chip - mirrors wwwroot/styles.css. Per-kind color is set inline by buildSpecialChip. */
+      .special-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        max-width: 100%;
+        padding: 2px 8px 2px 6px;
+        border: 1px solid rgb(255 255 255 / 14%);
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 600;
+        line-height: 1.5;
+        vertical-align: middle;
+      }
+
+      .special-chip__dot {
+        width: 9px;
+        height: 9px;
+        flex: 0 0 auto;
+        border-radius: 50%;
+      }
+
+      .special-chip__text {
+        min-width: 0;
+        color: var(--text);
+        overflow-wrap: anywhere;
+      }
+
+      body {
+        margin: 0;
+        padding: 32px 20px 64px;
+        background: #16222e;
+        color: var(--text);
+        font-family: Lato, system-ui, sans-serif;
+      }
+
+      .demo-head {
+        max-width: 1120px;
+        margin: 0 auto 28px;
+      }
+
+      .demo-head h1 {
+        margin: 0 0 6px;
+        font-size: 24px;
+      }
+
+      .demo-head p {
+        margin: 0;
+        opacity: 0.7;
+        font-size: 14px;
+      }
+
+      .demo-grid {
+        max-width: 1120px;
+        margin: 0 auto;
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+        gap: 16px;
+      }
+
+      .demo-card {
+        background: var(--gray);
+        border: 1px solid var(--light);
+        border-left: 4px solid var(--edge, var(--light));
+        border-radius: 10px;
+        padding: 14px 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+
+      .demo-thumb {
+        width: 100%;
+        height: 88px;
+        border-radius: 8px;
+        background: var(--dark);
+        display: grid;
+        place-items: center;
+        color: var(--light);
+      }
+
+      .demo-thumb svg {
+        width: 34px;
+        height: 34px;
+      }
+
+      .demo-name {
+        font-weight: 700;
+        font-size: 14px;
+      }
+
+      .demo-name .star {
+        color: var(--souvenir);
+      }
+
+      .demo-pattern {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+      }
+
+      .demo-pattern .label {
+        opacity: 0.6;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="demo-head">
+      <h1>Rare-pattern chips</h1>
+      <p>
+        Every special attribute we detect, rendered as a chip after the Pattern seed. The dot
+        color signals which kind of rare pattern it is.
+      </p>
+    </div>
+
+    <div class="demo-grid" id="grid"></div>
+
+    <script>
+      // --- Copied from wwwroot/special-chip.js (kept in sync manually for this standalone demo) ---
+      const SPECIAL_CHIP_STYLES = {
+        ruby:          { dot: '#e0224e', accent: '#e0224e' },
+        sapphire:      { dot: '#1a5fd0', accent: '#1a5fd0' },
+        emerald:       { dot: '#12b886', accent: '#12b886' },
+        'black-pearl': { dot: 'radial-gradient(circle at 32% 28%, #8b97a8, #232838 68%)', accent: '#6b7688' },
+        'blue-gem':    { dot: '#4aa8ff', accent: '#4aa8ff' },
+        fade:          { dot: 'linear-gradient(135deg, #ffe14d 0%, #ff8a3d 48%, #b04bd6 100%)', accent: '#f0993d' },
+        'amber-fade':  { dot: 'linear-gradient(135deg, #ffdf6b 0%, #ff8a1e 55%, #d1531a 100%)', accent: '#ff8a1e' },
+        'fire-ice':    { dot: 'linear-gradient(120deg, #ff5a3c 0%, #ff5a3c 42%, #4aa8ff 58%, #4aa8ff 100%)', accent: '#9a7fd0' },
+        tier:          { dot: '#dc2637', accent: '#dc2637' },
+        generic:       { dot: '#2ecc71', accent: '#2ecc71' },
+      };
+      const PHASE_COLORS = { 1: '#e35fb0', 2: '#ff4d88', 3: '#4f83ff', 4: '#2bd4c4' };
+
+      function classifySpecial(special, pattern) {
+        if (!special) return null;
+        const p = pattern || '';
+        if (/^Blue Gem/i.test(special)) return 'blue-gem';
+        if (special === 'Ruby') return 'ruby';
+        if (special === 'Sapphire') return 'sapphire';
+        if (special === 'Emerald') return 'emerald';
+        if (special === 'Black Pearl') return 'black-pearl';
+        if (/^Phase\s*\d/i.test(special)) return 'phase';
+        if (/%$/.test(special)) return p === 'Amber Fade' ? 'amber-fade' : 'fade';
+        if (p === 'Marble Fade' || /\bMax$/.test(special) || special === 'FFI') return 'fire-ice';
+        if (/^Tier\b/i.test(special) || special === 'Optimal') return 'tier';
+        return 'generic';
+      }
+
+      function hexToRgba(hex, alpha) {
+        const n = parseInt(hex.slice(1), 16);
+        return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
+      }
+
+      function buildSpecialChip(special, pattern) {
+        const kind = classifySpecial(special, pattern);
+        if (!kind) return null;
+        const style = SPECIAL_CHIP_STYLES[kind] || SPECIAL_CHIP_STYLES.generic;
+        let dotFill = style.dot;
+        let accent = style.accent;
+        if (kind === 'phase') {
+          const phase = PHASE_COLORS[(special.match(/\d/) || [])[0]] || '#8a6cff';
+          dotFill = phase;
+          accent = phase;
+        }
+        const chip = document.createElement('span');
+        chip.className = 'special-chip';
+        chip.dataset.kind = kind;
+        chip.style.borderColor = hexToRgba(accent, 0.45);
+        chip.style.background = hexToRgba(accent, 0.12);
+        const dot = document.createElement('span');
+        dot.className = 'special-chip__dot';
+        dot.style.background = dotFill;
+        dot.style.boxShadow = `0 0 5px ${hexToRgba(accent, 0.8)}`;
+        const text = document.createElement('span');
+        text.className = 'special-chip__text';
+        text.textContent = special;
+        chip.append(dot, text);
+        return chip;
+      }
+      // --- end copy ---
+
+      // [ display name, pattern (skin) name, paint seed, special string, left-edge accent ]
+      const ITEMS = [
+        ["★ Karambit | Doppler", "Doppler", 387, "Ruby", "#e0224e"],
+        ["★ Butterfly Knife | Doppler", "Doppler", 12, "Sapphire", "#1a5fd0"],
+        ["★ Karambit | Gamma Doppler", "Gamma Doppler", 5, "Emerald", "#12b886"],
+        ["★ Bayonet | Doppler", "Doppler", 441, "Black Pearl", "#6b7688"],
+        ["★ Karambit | Doppler", "Doppler", 233, "Phase 1", "#e35fb0"],
+        ["★ M9 Bayonet | Doppler", "Doppler", 71, "Phase 2", "#ff4d88"],
+        ["★ Flip Knife | Doppler", "Doppler", 604, "Phase 3", "#4f83ff"],
+        ["★ Huntsman Knife | Doppler", "Doppler", 158, "Phase 4", "#2bd4c4"],
+        ["★ Karambit | Fade", "Fade", 412, "96.4%", "#f0993d"],
+        ["★ Ursus Knife | Amber Fade", "Amber Fade", 88, "88.5%", "#ff8a1e"],
+        ["★ Karambit | Marble Fade", "Marble Fade", 16, "1st Max", "#9a7fd0"],
+        ["AK-47 | Case Hardened", "Case Hardened", 661, "Blue Gem 92% / 45% mag", "#4aa8ff"],
+        ["★ Karambit | Case Hardened", "Case Hardened", 387, "Blue Gem 88%", "#4aa8ff"],
+        ["★ Specialist Gloves | Crimson Kimono", "Crimson Kimono", 721, "Tier 1.5", "#dc2637"],
+        ["★ Specialist Gloves | Crimson Kimono", "Crimson Kimono", 33, "Optimal", "#dc2637"],
+      ];
+
+      const PLACEHOLDER = `
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="3" y="5" width="18" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="1.6" />
+          <circle cx="8.5" cy="10" r="1.6" fill="currentColor" />
+          <path d="M5 17l4.5-4.5 3 3L16 12l3 3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>`;
+
+      const grid = document.getElementById("grid");
+      for (const [name, pattern, seed, special, edge] of ITEMS) {
+        const card = document.createElement("div");
+        card.className = "demo-card";
+        card.style.setProperty("--edge", edge);
+
+        const thumb = document.createElement("div");
+        thumb.className = "demo-thumb";
+        thumb.innerHTML = PLACEHOLDER;
+
+        const body = document.createElement("div");
+
+        const nameEl = document.createElement("div");
+        nameEl.className = "demo-name";
+        if (name.startsWith("★")) {
+          nameEl.innerHTML = `<span class="star">★</span>${name.slice(1)}`;
+        } else {
+          nameEl.textContent = name;
+        }
+
+        const patternEl = document.createElement("div");
+        patternEl.className = "demo-pattern";
+        patternEl.innerHTML = `<span class="label">Pattern:</span> <span>${seed}</span>`;
+        const chip = buildSpecialChip(special, pattern);
+        if (chip) patternEl.appendChild(chip);
+
+        body.append(nameEl, patternEl);
+        card.append(thumb, body);
+        grid.appendChild(card);
+      }
+    </script>
+  </body>
+</html>

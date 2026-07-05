@@ -211,6 +211,15 @@ function populateCard(card, iteminfo, url, loadTime) {
   q(".card-seed").style.display = hasSkin ? "" : "none";
   q(".card-paintseed").textContent = iteminfo.paintseed;
 
+  // Rare-pattern chip (fade %, Ruby, blue gem, tier, ...) sits right after the seed, between
+  // "Pattern: <n>" and the rarity label. Its dot color signals which kind of pattern it is.
+  const patternLine = q(".card-pattern-line");
+  patternLine.querySelector(".special-chip")?.remove();
+  if (hasSkin && iteminfo.special) {
+    const chip = buildSpecialChip(iteminfo.special, iteminfo.skin);
+    if (chip) q(".card-seed").after(chip);
+  }
+
   // Secondary fields, always shown.
   q(".card-wear").textContent = iteminfo.wear_name || "-";
   q(".card-quality").textContent = iteminfo.quality_name || "-";
@@ -239,8 +248,9 @@ function populateCard(card, iteminfo, url, loadTime) {
   q(".card-loadtime").textContent = `Loaded in ${loadTime} seconds`;
 }
 
-// "Weapon | Skin", with the special-pattern note (fade %, Ruby, tier, ...), a StatTrak
-// badge, and the quality/knife styling.
+// "Weapon | Skin", with a StatTrak badge and the quality/knife styling. The special-pattern
+// note (fade %, Ruby, tier, ...) is no longer appended here - it renders as a chip after the
+// Pattern seed instead (see the .card-pattern-line chip above).
 function renderName(nameEl, iteminfo) {
   nameEl.className = "card-name";
   nameEl.textContent = `${iteminfo.weapon} | ${iteminfo.skin}`;
@@ -260,12 +270,6 @@ function renderName(nameEl, iteminfo) {
     nameEl.classList.add("souvenir");
   }
 
-  if (iteminfo.special) {
-    const special = document.createElement("span");
-    special.className = "item-special";
-    special.textContent = iteminfo.special;
-    nameEl.appendChild(special);
-  }
   if (iteminfo.stattrak) {
     const badge = document.createElement("span");
     badge.className = "stattrak-badge";
