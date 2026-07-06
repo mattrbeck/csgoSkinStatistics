@@ -209,8 +209,17 @@ body:not(.pre-search) #recent-lookups { display: none; }
   white-space: nowrap;
 }
 
-.recent-name {
+/* Name + rare-pattern chip share the row's flexible middle; the name truncates so the chip
+   (which never shrinks) stays visible right after it, and the meta keeps its place on the right. */
+.recent-nameblock {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.recent-name {
   min-width: 0;
   font-weight: bold;
   font-size: 14px;
@@ -467,6 +476,11 @@ body.mode-item #item-card-outer { display: flex; }
   min-width: 0;
   color: var(--text);
   overflow-wrap: anywhere;
+}
+
+/* In a recent-lookups row the chip holds its width; the name truncates around it instead. */
+.recent-nameblock .special-chip {
+  flex: 0 0 auto;
 }
 
 .stattrak-badge {

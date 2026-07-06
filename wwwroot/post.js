@@ -91,6 +91,9 @@ function addRecentItem(iteminfo, reducedLink) {
     name: (iteminfo.is_knife_or_glove ? "★ " : "") + `${iteminfo.weapon} | ${iteminfo.skin}`,
     image: iteminfo.image || "",
     float, wearAbbr, wearClass,
+    // Rare-pattern attribute + pattern name so the row can redraw the same chip the card shows.
+    special: iteminfo.special || "",
+    skin: iteminfo.skin || "",
     rarityColor: (typeof rarityColorOf === "function" ? rarityColorOf(iteminfo.rarity_name) : "") || "",
   });
 }
@@ -129,10 +132,19 @@ function recentRow(entry) {
   }
   row.appendChild(thumb);
 
+  const nameBlock = document.createElement("span");
+  nameBlock.className = "recent-nameblock";
   const name = document.createElement("span");
   name.className = "recent-name";
   name.textContent = entry.name;
-  row.appendChild(name);
+  nameBlock.appendChild(name);
+  // Rare-pattern chip (fade %, Ruby, blue gem, tier, ...) right after the name, so recents scan
+  // the same way the item/inventory cards do.
+  if (!isProfile && entry.special) {
+    const chip = buildSpecialChip(entry.special, entry.skin);
+    if (chip) nameBlock.appendChild(chip);
+  }
+  row.appendChild(nameBlock);
 
   const meta = document.createElement("span");
   meta.className = "recent-meta";
