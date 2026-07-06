@@ -174,6 +174,7 @@ body:not(.pre-search) #recent-lookups { display: none; }
   align-items: center;
   gap: 10px;
   width: 100%;
+  box-sizing: border-box; /* keep padding + border inside the 620px cap so rows don't overflow right */
   padding: 7px 12px;
   background: var(--dark);
   border: 1px solid var(--light);
