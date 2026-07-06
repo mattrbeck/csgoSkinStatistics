@@ -14,6 +14,20 @@ namespace CSGOSkinAPI.Controllers
         // MemoryCache registered in Program.cs.
         private static readonly TimeSpan InventoryCacheTtl = TimeSpan.FromMinutes(5);
 
+        // Brief negative caching so a reload storm during a Steam throttle (or against a private
+        // profile) doesn't re-hit steamcommunity.com on every request and extend the IP ban.
+        private static readonly TimeSpan NegativeInventoryCacheTtl = TimeSpan.FromSeconds(30);
+        private static readonly TimeSpan RateLimitedInventoryCacheTtl = TimeSpan.FromSeconds(60);
+
+        // Single-flight per resolved SteamId64: the first viewer of an uncached inventory does the
+        // fetch while any concurrent viewers wait on this gate and then read the freshly-cached
+        // result, instead of all K stampeding steamcommunity.com at once. Keyed by the "inv:{id}"
+        // cache key; a gate is dropped once released and idle, so the dictionary stays bounded.
+        private static readonly ConcurrentDictionary<string, SemaphoreSlim> InventoryFetchGates = new();
+
+        // A cached inventory failure. Positive results are cached as the raw response byte[].
+        private sealed record NegativeInventory(int StatusCode, string Error);
+
         // Match on the command itself rather than the prefix, which changed from
         // the legacy "rungame/730/<steamid>/" to "run/730//" in March 2026.
         [GeneratedRegex(@"csgo_econ_action_preview ([SM])(\d+)A(\d+)D(\d+)", RegexOptions.Compiled)]
@@ -83,6 +97,9 @@ namespace CSGOSkinAPI.Controllers
         [HttpGet("inventory")]
         public async Task<IActionResult> GetInventoryData([FromQuery] string steamid)
         {
+            SemaphoreSlim? gate = null;
+            string? gateKey = null;
+            var acquired = false;
             try
             {
                 if (string.IsNullOrEmpty(steamid))
@@ -99,12 +116,27 @@ namespace CSGOSkinAPI.Controllers
                 var steamId = resolvedSteamId.Value;
                 steamid = steamId.ToString(); // Use resolved SteamId64 for inventory URL
 
-                // Serve a recent copy without touching Steam. Keyed by resolved SteamId64 so that a
-                // vanity URL and the raw id (which resolve to the same account) share one entry.
+                // Serve a recent copy (or a recent failure) without touching Steam. Keyed by resolved
+                // SteamId64 so a vanity URL and the raw id (which resolve to the same account) share
+                // one entry.
                 var cacheKey = $"inv:{steamId}";
-                if (cache.TryGetValue(cacheKey, out byte[]? cachedPayload) && cachedPayload != null)
+                var cached = InventoryFromCache(cacheKey);
+                if (cached != null)
                 {
-                    return File(cachedPayload, "application/json");
+                    return cached;
+                }
+
+                // Single-flight the fetch so K concurrent first-viewers don't all stampede Steam.
+                gate = InventoryFetchGates.GetOrAdd(cacheKey, _ => new SemaphoreSlim(1, 1));
+                gateKey = cacheKey;
+                await gate.WaitAsync();
+                acquired = true;
+
+                // Re-check now we hold the gate: a concurrent first-viewer may have just populated it.
+                cached = InventoryFromCache(cacheKey);
+                if (cached != null)
+                {
+                    return cached;
                 }
 
                 using var httpClient = httpClientFactory.CreateClient("steam");
@@ -123,27 +155,32 @@ namespace CSGOSkinAPI.Controllers
                         var retryAfter = response.Headers.RetryAfter?.Delta;
                         Console.WriteLine($"Steam inventory RATE LIMITED (429) for {steamid}" +
                             (retryAfter != null ? $"; Retry-After {retryAfter.Value.TotalSeconds:0}s" : ""));
-                        return StatusCode(StatusCodes.Status429TooManyRequests,
-                            new { error = "Steam is rate limiting inventory requests right now. Please try again in a minute." });
+                        return CacheInventoryFailure(cacheKey, StatusCodes.Status429TooManyRequests,
+                            "Steam is rate limiting inventory requests right now. Please try again in a minute.",
+                            RateLimitedInventoryCacheTtl);
                     }
                     if (response.StatusCode == System.Net.HttpStatusCode.Forbidden)
                     {
-                        return BadRequest(new { error = "Inventory is private or user does not exist" });
+                        return CacheInventoryFailure(cacheKey, StatusCodes.Status400BadRequest,
+                            "Inventory is private or user does not exist", NegativeInventoryCacheTtl);
                     }
                     Console.WriteLine($"Steam inventory fetch for {steamid} failed: {(int)response.StatusCode} {response.StatusCode}");
-                    return BadRequest(new { error = $"Failed to fetch inventory: {response.StatusCode}" });
+                    return CacheInventoryFailure(cacheKey, StatusCodes.Status400BadRequest,
+                        $"Failed to fetch inventory: {response.StatusCode}", NegativeInventoryCacheTtl);
                 }
 
                 var jsonContent = await response.Content.ReadAsStringAsync();
                 if (string.IsNullOrEmpty(jsonContent))
                 {
-                    return BadRequest(new { error = "Empty response from Steam API" });
+                    return CacheInventoryFailure(cacheKey, StatusCodes.Status400BadRequest,
+                        "Empty response from Steam API", NegativeInventoryCacheTtl);
                 }
 
                 var inventoryData = JsonSerializer.Deserialize<SteamInventoryResponse>(jsonContent);
                 if (inventoryData?.assets == null || inventoryData.descriptions == null)
                 {
-                    return BadRequest(new { error = "Invalid inventory data or inventory is empty" });
+                    return CacheInventoryFailure(cacheKey, StatusCodes.Status400BadRequest,
+                        "Invalid inventory data or inventory is empty", NegativeInventoryCacheTtl);
                 }
 
                 // The Steam Community inventory response is split across three parallel arrays
@@ -320,7 +357,47 @@ namespace CSGOSkinAPI.Controllers
                 Console.WriteLine($"JSON parsing error: {ex.Message}");
                 return BadRequest(new { error = "Invalid response from Steam API" });
             }
-            // Anything else bubbles to the global handler in Program.cs (generic 500).
+            // Anything else bubbles to the global handler in Program.cs (generic 500). Note the
+            // network-failure catches above intentionally don't negative-cache: a transient blip
+            // should let the next request retry, not be pinned as an error for 30s.
+            finally
+            {
+                if (acquired && gate != null)
+                {
+                    gate.Release();
+                    // Drop the gate once it's fully released and idle, to bound the dictionary. The
+                    // key-and-value TryRemove overload only removes if it's still this same gate.
+                    if (gate.CurrentCount == 1 && gateKey != null)
+                    {
+                        InventoryFetchGates.TryRemove(new KeyValuePair<string, SemaphoreSlim>(gateKey, gate));
+                    }
+                }
+            }
+        }
+
+        // Returns a cached inventory response - the raw bytes (positive) or a stored failure
+        // (negative) - or null when nothing is cached for this key.
+        private IActionResult? InventoryFromCache(string cacheKey)
+        {
+            if (cache.TryGetValue(cacheKey, out object? entry))
+            {
+                if (entry is byte[] bytes) return File(bytes, "application/json");
+                if (entry is NegativeInventory neg) return StatusCode(neg.StatusCode, new { error = neg.Error });
+            }
+            return null;
+        }
+
+        // Caches an inventory failure briefly and returns it, so a reload storm during a throttle
+        // isn't re-fetched from Steam on every request. Size is a small constant (the MemoryCache is
+        // byte-bounded); the entry expires after ttl.
+        private IActionResult CacheInventoryFailure(string cacheKey, int statusCode, string error, TimeSpan ttl)
+        {
+            cache.Set(cacheKey, new NegativeInventory(statusCode, error), new MemoryCacheEntryOptions
+            {
+                Size = 64,
+                AbsoluteExpirationRelativeToNow = ttl,
+            });
+            return StatusCode(statusCode, new { error });
         }
 
         [HttpGet("profile")]
