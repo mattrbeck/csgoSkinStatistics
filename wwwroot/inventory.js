@@ -196,6 +196,17 @@ function setShowPrices(enabled) {
   itemElements.forEach(el => el.toggleAttribute('show-price', enabled));
 }
 
+// Reflect the sort order on the toggle button: the arrow points down for descending and flips up
+// for ascending (via CSS on data-order), and the label/title spell out the direction.
+function setOrderButton(order) {
+  const btn = elements.sortOrder;
+  if (!btn) return;
+  btn.dataset.order = order;
+  const asc = order === 'asc';
+  btn.setAttribute('aria-label', asc ? 'Sort ascending (low to high)' : 'Sort descending (high to low)');
+  btn.title = asc ? 'Ascending — click for descending' : 'Descending — click for ascending';
+}
+
 function createItemElement(item, index) {
   const itemElement = document.createElement('inventory-item');
   itemElement.id = `item-${index}`;
@@ -962,7 +973,7 @@ function resetInterface() {
 
   // Sync the controls so they don't show selections that no longer apply
   elements.sortSelect.value = currentSort.field;
-  elements.sortOrder.value = currentSort.order;
+  setOrderButton(currentSort.order);
   resetFilterControls();
 
   // Cancel any ongoing analysis
@@ -1097,14 +1108,16 @@ function initInventory() {
     // Sorting by price is pointless if the prices are hidden, so turn them on.
     if (this.value === 'price') setShowPrices(true);
 
-    // Update the order dropdown to reflect the change
-    elements.sortOrder.value = currentSort.order;
-    
+    // Reflect the field's default direction on the order toggle.
+    setOrderButton(currentSort.order);
+
     applySortAndFilter();
   });
 
-  elements.sortOrder.addEventListener("change", function() {
-    currentSort.order = this.value;
+  // Order toggle: flip ascending <-> descending on click.
+  elements.sortOrder.addEventListener("click", function() {
+    currentSort.order = currentSort.order === 'asc' ? 'desc' : 'asc';
+    setOrderButton(currentSort.order);
     applySortAndFilter();
   });
 

@@ -382,7 +382,7 @@ inventory-item {
   margin-bottom: 18px;
 }
 
-.sidebar-bar input[type="text"] {
+.search-group input[type="text"] {
   width: 100%;
   box-sizing: border-box;
   padding: 8px 12px;
@@ -393,7 +393,7 @@ inventory-item {
   font-size: 14px;
 }
 
-.sidebar-bar input[type="text"]:focus {
+.search-group input[type="text"]:focus {
   outline: none;
   border-color: var(--pop);
   box-shadow: 0 0 0 2px rgb(46 204 113 / 20%);
@@ -403,6 +403,52 @@ inventory-item {
   display: flex;
   flex-direction: column;
   gap: 15px;
+}
+
+/* Sort field + order toggle share one row, replacing the old stacked "Order:" select. */
+.sort-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+/* stylelint-disable-next-line no-descending-specificity -- the .control-group select:focus rule
+   above is unrelated; this only sets the sort field's flex sizing. */
+.sort-row select {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Square button matching the select's height (via align-items: stretch) and chrome. The arrow
+   points down for descending and flips to point up for ascending. */
+.order-toggle {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  padding: 0;
+  border: 1px solid var(--light);
+  border-radius: 4px;
+  background-color: var(--gray);
+  color: var(--text);
+  cursor: pointer;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.order-toggle:hover {
+  background-color: var(--light);
+  border-color: var(--pop);
+}
+
+.order-toggle svg {
+  width: 18px;
+  height: 18px;
+  transition: transform 0.25s ease;
+}
+
+.order-toggle[data-order="asc"] svg {
+  transform: rotate(180deg);
 }
 
 /* The flex gap above is the spacing; without this the control margin doubles it. */
@@ -537,8 +583,8 @@ inventory-item {
     padding: 0 15px;
   }
   
-  /* Sticky slim bar: the collapsed sidebar (search + sort + Filters button) pins to
-     the top so the user can re-sort, search, and open filters without scrolling up. */
+  /* Sticky slim bar: the collapsed sidebar (sort + Filters button) pins to the top so
+     the user can re-sort and open filters (name search included) without scrolling up. */
   .sidebar {
     position: sticky;
     top: 0;
@@ -555,6 +601,11 @@ inventory-item {
     padding: 12px;
     box-shadow: 0 4px 12px rgb(0 0 0 / 35%);
 
+    /* The bar is pinned to top: 0, so square its top corners - otherwise a couple pixels of
+       scrolled item content show through the rounded corners above it. Bottom stays rounded. */
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+
     /* The expanded filter panel can be taller than a phone screen; since the bar is
        sticky, anything past the viewport would be unreachable without this. */
     box-sizing: border-box;
@@ -564,7 +615,7 @@ inventory-item {
   }
 
   /* iOS Safari auto-zooms the page when focusing any text control under 16px */
-  .sidebar-bar input[type="text"],
+  .search-group input[type="text"],
   .control-group select,
   .control-group input[type="number"] {
     font-size: 16px;
@@ -617,7 +668,7 @@ inventory-item {
     background-color: var(--gray);
     color: var(--text);
     font-size: 14px;
-    font-weight: 600;
+    font-weight: 400; /* match the sort select's weight */
     cursor: pointer;
   }
 

@@ -24,6 +24,16 @@ body {
   background: var(--gray);
 }
 
+/* Form controls don't inherit the page font: they fall back to a UA default (Arial here), and
+   <select> vs <button> resolve to different faces on mobile, which read as mismatched. Pull them
+   all back to the site font. */
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
 ::selection {
   background: var(--text);
   color: var(--dark); /* dark text on the light highlight; without it selected text is invisible */

@@ -230,28 +230,27 @@
       <div id="sidebar" class="sidebar" style="display: none;">
         <div class="sidebar-content">
           <div class="sidebar-bar">
-            <div class="control-group search-group">
-              <input type="text" id="search-input" placeholder="Filter by name…" aria-label="Filter items by name" autocomplete="off">
-            </div>
             <div class="sidebar-bar-row">
               <div class="sort-section">
                 <div class="sort-controls">
                   <div class="control-group">
                     <label for="sort-select">Sort by:</label>
-                    <select id="sort-select">
-                      <option value="date">Date</option>
-                      <option value="name">Name</option>
-                      <option value="rarity" selected>Rarity</option>
-                      <option value="float">Float</option>
-                      <option value="price">Price</option>
-                    </select>
-                  </div>
-                  <div class="control-group">
-                    <label for="sort-order">Order:</label>
-                    <select id="sort-order">
-                      <option value="asc">Ascending</option>
-                      <option value="desc" selected>Descending</option>
-                    </select>
+                    <div class="sort-row">
+                      <select id="sort-select">
+                        <option value="date">Date</option>
+                        <option value="name">Name</option>
+                        <option value="rarity" selected>Rarity</option>
+                        <option value="float">Float</option>
+                        <option value="price">Price</option>
+                      </select>
+                      <button type="button" id="sort-order" class="order-toggle" data-order="desc"
+                              aria-label="Sort descending (high to low)" title="Descending — click for ascending">
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="M12 3.5v17M5.5 14 12 20.5 18.5 14" fill="none" stroke="currentColor"
+                                stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -264,6 +263,9 @@
           <div class="sidebar-sections" id="sidebar-sections">
             <div class="sidebar-section">
             <h4>Filter Options</h4>
+            <div class="control-group search-group">
+              <input type="text" id="search-input" placeholder="Filter by name…" aria-label="Filter items by name" autocomplete="off">
+            </div>
             <div class="control-group" role="group" aria-label="Item attributes">
               <div class="attr-chips">
                 <button type="button" class="attr-chip" data-attr="star" aria-pressed="false" title="★ Knives &amp; Gloves only">★</button>
@@ -274,15 +276,13 @@
             </div>
 
             <div class="control-group" id="filter-type-group">
-              <label for="filter-type">Type:</label>
-              <select id="filter-type">
+              <select id="filter-type" aria-label="Type">
                 <option value="">All Types</option>
               </select>
             </div>
 
             <div class="control-group">
-              <label for="filter-rarity">Rarity:</label>
-              <select id="filter-rarity">
+              <select id="filter-rarity" aria-label="Rarity">
                 <option value="">All Rarities</option>
                 <option value="Consumer Grade">Consumer Grade</option>
                 <option value="Industrial Grade">Industrial Grade</option>
@@ -296,8 +296,7 @@
             </div>
             
             <div class="control-group">
-              <label for="filter-wear">Wear:</label>
-              <select id="filter-wear">
+              <select id="filter-wear" aria-label="Wear">
                 <option value="">All Wear Levels</option>
                 <option value="Factory New">Factory New</option>
                 <option value="Minimal Wear">Minimal Wear</option>
@@ -308,7 +307,6 @@
             </div>
             
             <div class="control-group">
-              <label for="filter-float-min">Float Range:</label>
               <div class="float-slider-container">
                 <div class="float-slider-track">
                   <div class="float-slider-dim" id="float-slider-dim-left"></div>
@@ -318,9 +316,9 @@
                 </div>
               </div>
               <div class="float-range">
-                <input type="number" id="filter-float-min" step="0.001" min="0" max="1" placeholder="Min">
+                <input type="number" id="filter-float-min" step="0.001" min="0" max="1" placeholder="Min float" aria-label="Minimum float">
                 <span>to</span>
-                <input type="number" id="filter-float-max" step="0.001" min="0" max="1" placeholder="Max">
+                <input type="number" id="filter-float-max" step="0.001" min="0" max="1" placeholder="Max float" aria-label="Maximum float">
               </div>
             </div>
             
