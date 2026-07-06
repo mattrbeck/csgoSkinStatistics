@@ -68,9 +68,11 @@ namespace CSGOSkinAPI.Services
                     "ALTER TABLE searches ADD COLUMN killeatervalue INTEGER", connection);
                 await alterCommand.ExecuteNonQueryAsync();
             }
-            catch (SqliteException)
+            catch (SqliteException ex) when (ex.SqliteErrorCode == 1 && ex.Message.Contains("duplicate column name"))
             {
-                // Column already exists - nothing to migrate.
+                // Column already exists - the migration already ran. Any other SqliteException
+                // (I/O error, SQLITE_BUSY, corruption) is left to propagate rather than be silently
+                // mistaken for "already migrated" and surface later as a GetOrdinal failure on reads.
             }
 
 
@@ -106,9 +108,10 @@ namespace CSGOSkinAPI.Services
                         $"ALTER TABLE {tableName} ADD COLUMN wrapped_sticker INTEGER", connection);
                     await alterCommand.ExecuteNonQueryAsync();
                 }
-                catch (SqliteException)
+                catch (SqliteException ex) when (ex.SqliteErrorCode == 1 && ex.Message.Contains("duplicate column name"))
                 {
-                    // Column already exists - nothing to migrate.
+                    // Column already exists - the migration already ran. Any other SqliteException
+                    // is left to propagate rather than be silently mistaken for "already migrated".
                 }
 
                 var createIndexCommand = @$"CREATE INDEX IF NOT EXISTS itemid on {tableName} (itemid)";

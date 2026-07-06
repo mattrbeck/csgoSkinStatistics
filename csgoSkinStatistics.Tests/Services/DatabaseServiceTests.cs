@@ -58,6 +58,15 @@ public class DatabaseServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task InitializeDatabaseAsync_IsIdempotent()
+    {
+        // The ADD COLUMN migrations throw "duplicate column name" once the column exists (which it
+        // already does from the CREATE), so a second init must swallow only that and not throw.
+        await _databaseService.InitializeDatabaseAsync();
+        await _databaseService.InitializeDatabaseAsync();
+    }
+
+    [Fact]
     public async Task SaveItemAsync_ShouldSaveItemToDatabase()
     {
         await _databaseService.InitializeDatabaseAsync();
