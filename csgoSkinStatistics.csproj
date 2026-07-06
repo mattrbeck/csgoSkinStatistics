@@ -32,4 +32,10 @@
     <Content Remove="steam-tokens.json;steam-accounts.json" />
   </ItemGroup>
 
+  <!-- Marketplace WIP bundle (gitignored). Excluding it from the default item globs keeps it out of
+       the build entirely, so it isn't collected as a static web asset and can't ship until ready. -->
+  <PropertyGroup>
+    <DefaultItemExcludes>$(DefaultItemExcludes);wwwroot/market/**</DefaultItemExcludes>
+  </PropertyGroup>
+
 </Project>

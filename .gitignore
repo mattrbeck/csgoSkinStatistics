@@ -22,3 +22,7 @@ __snapshots__/
 .jest/
 # Python
 __pycache__/
+
+# Marketplace WIP: source and built bundle stay untracked until it's ready to ship.
+market-ui/
+wwwroot/market/
