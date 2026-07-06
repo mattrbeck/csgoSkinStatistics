@@ -192,7 +192,14 @@ namespace CSGOSkinAPI.Services
         public async Task<List<CEconItemPreviewDataBlock.Sticker>> GetStickersAsync(ulong itemId, bool stickersTable)
         {
             using var connection = await OpenConnectionAsync();
+            return await ReadStickersAsync(itemId, stickersTable, connection);
+        }
 
+        // Reads an item's stickers or keychains over an already-open connection, so a single-item
+        // read (GetItemAsync) or a batched one (GetItemsAsync) can pull every item's extras without
+        // opening a fresh connection per call.
+        private static async Task<List<CEconItemPreviewDataBlock.Sticker>> ReadStickersAsync(ulong itemId, bool stickersTable, SqliteConnection connection)
+        {
             const string stickersQuery = "SELECT * FROM stickers WHERE itemid = @itemid ORDER BY slot";
             const string keychainsQuery = "SELECT * FROM keychains WHERE itemid = @itemid ORDER BY slot";
             var query = stickersTable ? stickersQuery : keychainsQuery;
@@ -243,53 +250,111 @@ namespace CSGOSkinAPI.Services
             return stickers;
         }
 
+        // Maps the current `searches` row (from a SELECT *) into an item, without its stickers or
+        // keychains - callers attach those over the same connection.
+        private static CEconItemPreviewDataBlock MapSearchRow(SqliteDataReader reader)
+        {
+            var itemIdOrd = reader.GetOrdinal("itemid");
+            var defIndexOrd = reader.GetOrdinal("defindex");
+            var paintIndexOrd = reader.GetOrdinal("paintindex");
+            var rarityOrd = reader.GetOrdinal("rarity");
+            var qualityOrd = reader.GetOrdinal("quality");
+            var paintWearOrd = reader.GetOrdinal("paintwear");
+            var paintSeedOrd = reader.GetOrdinal("paintseed");
+            var inventoryOrd = reader.GetOrdinal("inventory");
+            var originOrd = reader.GetOrdinal("origin");
+            var statTrakOrd = reader.GetOrdinal("stattrak");
+            var killEaterOrd = reader.GetOrdinal("killeatervalue");
+
+            var item = new CEconItemPreviewDataBlock
+            {
+                itemid = (ulong)reader.GetInt64(itemIdOrd),
+                defindex = (uint)reader.GetInt32(defIndexOrd),
+                paintindex = (uint)reader.GetInt32(paintIndexOrd),
+                rarity = (uint)reader.GetInt32(rarityOrd),
+                quality = (uint)reader.GetInt32(qualityOrd),
+                paintwear = (uint)reader.GetInt32(paintWearOrd),
+                paintseed = (uint)reader.GetInt32(paintSeedOrd),
+                inventory = (uint)reader.GetInt64(inventoryOrd),
+                origin = (uint)reader.GetInt32(originOrd)
+            };
+            // killeatervalue non-null is both the StatTrak flag and the live kill count.
+            // Prefer the stored count; fall back to 0 for legacy rows cached before the
+            // column existed (StatTrak presence stays correct, count shows 0 until re-cached).
+            if (!reader.IsDBNull(killEaterOrd)) item.killeatervalue = (uint)reader.GetInt64(killEaterOrd);
+            else if (reader.GetInt32(statTrakOrd) == 1) item.killeatervalue = 0;
+            return item;
+        }
+
         public async Task<CEconItemPreviewDataBlock?> GetItemAsync(ulong itemId)
         {
             using var connection = await OpenConnectionAsync();
 
-            var query = "SELECT * FROM searches WHERE itemid = @itemid";
-            using var command = new SqliteCommand(query, connection);
-            command.Parameters.AddWithValue("@itemid", itemId);
-
-            using var reader = await command.ExecuteReaderAsync();
-            if (await reader.ReadAsync())
+            CEconItemPreviewDataBlock item;
+            using (var command = new SqliteCommand("SELECT * FROM searches WHERE itemid = @itemid", connection))
             {
-                var itemIdOrd = reader.GetOrdinal("itemid");
-                var defIndexOrd = reader.GetOrdinal("defindex");
-                var paintIndexOrd = reader.GetOrdinal("paintindex");
-                var rarityOrd = reader.GetOrdinal("rarity");
-                var qualityOrd = reader.GetOrdinal("quality");
-                var paintWearOrd = reader.GetOrdinal("paintwear");
-                var paintSeedOrd = reader.GetOrdinal("paintseed");
-                var inventoryOrd = reader.GetOrdinal("inventory");
-                var originOrd = reader.GetOrdinal("origin");
-                var statTrakOrd = reader.GetOrdinal("stattrak");
-                var killEaterOrd = reader.GetOrdinal("killeatervalue");
-
-                var item = new CEconItemPreviewDataBlock
+                command.Parameters.AddWithValue("@itemid", itemId);
+                using var reader = await command.ExecuteReaderAsync();
+                if (!await reader.ReadAsync())
                 {
-                    itemid = (ulong)reader.GetInt64(itemIdOrd),
-                    defindex = (uint)reader.GetInt32(defIndexOrd),
-                    paintindex = (uint)reader.GetInt32(paintIndexOrd),
-                    rarity = (uint)reader.GetInt32(rarityOrd),
-                    quality = (uint)reader.GetInt32(qualityOrd),
-                    paintwear = (uint)reader.GetInt32(paintWearOrd),
-                    paintseed = (uint)reader.GetInt32(paintSeedOrd),
-                    inventory = (uint)reader.GetInt64(inventoryOrd),
-                    origin = (uint)reader.GetInt32(originOrd)
-                };
-                // killeatervalue non-null is both the StatTrak flag and the live kill count.
-                // Prefer the stored count; fall back to 0 for legacy rows cached before the
-                // column existed (StatTrak presence stays correct, count shows 0 until re-cached).
-                if (!reader.IsDBNull(killEaterOrd)) item.killeatervalue = (uint)reader.GetInt64(killEaterOrd);
-                else if (reader.GetInt32(statTrakOrd) == 1) item.killeatervalue = 0;
-                item.stickers.AddRange(await GetStickersAsync(itemId, true));
-                item.keychains.AddRange(await GetStickersAsync(itemId, false));
-
-                return item;
+                    return null;
+                }
+                item = MapSearchRow(reader);
             }
 
-            return null;
+            // Same connection for the extras, so a single hit opens one connection instead of three.
+            item.stickers.AddRange(await ReadStickersAsync(itemId, true, connection));
+            item.keychains.AddRange(await ReadStickersAsync(itemId, false, connection));
+            return item;
+        }
+
+        // Batched sibling of GetItemAsync: fetches many cached items with their stickers and
+        // keychains over a single connection, so rendering a warmed inventory page opens one
+        // connection instead of three per asset (thousands for a full inventory). Returns a map from
+        // itemid to item; ids that aren't cached are simply absent. Order and duplicates in the
+        // input don't matter.
+        public async Task<Dictionary<ulong, CEconItemPreviewDataBlock>> GetItemsAsync(IEnumerable<ulong> itemIds)
+        {
+            var ids = new HashSet<ulong>(itemIds).ToList();
+            var result = new Dictionary<ulong, CEconItemPreviewDataBlock>();
+            if (ids.Count == 0)
+            {
+                return result;
+            }
+
+            using var connection = await OpenConnectionAsync();
+
+            // Chunk the IN (...) list so even a maxed inventory stays well under SQLite's variable
+            // limit (default 999).
+            const int chunkSize = 500;
+            for (var offset = 0; offset < ids.Count; offset += chunkSize)
+            {
+                var chunk = ids.GetRange(offset, Math.Min(chunkSize, ids.Count - offset));
+                var paramNames = new string[chunk.Count];
+                using var command = new SqliteCommand { Connection = connection };
+                for (var i = 0; i < chunk.Count; i++)
+                {
+                    paramNames[i] = $"@id{i}";
+                    command.Parameters.AddWithValue(paramNames[i], chunk[i]);
+                }
+                command.CommandText = $"SELECT * FROM searches WHERE itemid IN ({string.Join(",", paramNames)})";
+
+                using var reader = await command.ExecuteReaderAsync();
+                while (await reader.ReadAsync())
+                {
+                    var item = MapSearchRow(reader);
+                    result[item.itemid] = item;
+                }
+            }
+
+            // Attach extras for the found items over the same connection.
+            foreach (var item in result.Values)
+            {
+                item.stickers.AddRange(await ReadStickersAsync(item.itemid, true, connection));
+                item.keychains.AddRange(await ReadStickersAsync(item.itemid, false, connection));
+            }
+
+            return result;
         }
 
         public async Task SaveItemAsync(CEconItemPreviewDataBlock item)

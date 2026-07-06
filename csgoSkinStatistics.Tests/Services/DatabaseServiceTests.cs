@@ -327,6 +327,78 @@ public class DatabaseServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task GetItemsAsync_BatchFetchesItemsWithExtras()
+    {
+        await _databaseService.InitializeDatabaseAsync();
+
+        var a = new CEconItemPreviewDataBlock
+        {
+            itemid = 1001, defindex = 7, paintindex = 10, rarity = 3, quality = 4,
+            paintwear = 1065353216, paintseed = 1, inventory = 1, origin = 8, killeatervalue = 55
+        };
+        a.stickers.Add(new CEconItemPreviewDataBlock.Sticker { slot = 0, sticker_id = 5, wear = 0.1f });
+        var b = new CEconItemPreviewDataBlock
+        {
+            itemid = 1002, defindex = 9, paintindex = 20, rarity = 5, quality = 9,
+            paintwear = 1043574843, paintseed = 2, inventory = 1, origin = 8
+        };
+        b.keychains.Add(new CEconItemPreviewDataBlock.Sticker { slot = 0, sticker_id = 200, wear = 0.2f });
+
+        await _databaseService.SaveItemWithExtrasAsync(a);
+        await _databaseService.SaveItemWithExtrasAsync(b);
+
+        // Both saved ids, plus a duplicate and one that was never cached.
+        var map = await _databaseService.GetItemsAsync(new ulong[] { 1001, 1002, 1002, 9999 });
+
+        Assert.Equal(2, map.Count);
+        Assert.False(map.ContainsKey(9999));
+
+        var got = map[1001];
+        Assert.Equal(7u, got.defindex);
+        Assert.True(got.ShouldSerializekilleatervalue());
+        Assert.Equal(55u, got.killeatervalue);
+        Assert.Single(got.stickers);
+        Assert.Equal(5u, got.stickers[0].sticker_id);
+
+        Assert.Single(map[1002].keychains);
+        Assert.Equal(200u, map[1002].keychains[0].sticker_id);
+        Assert.False(map[1002].ShouldSerializekilleatervalue());
+    }
+
+    [Fact]
+    public async Task GetItemsAsync_MatchesGetItemAsync_ForOneItem()
+    {
+        await _databaseService.InitializeDatabaseAsync();
+
+        var item = new CEconItemPreviewDataBlock
+        {
+            itemid = 555, defindex = 24, paintindex = 688, rarity = 4, quality = 4,
+            paintwear = 1043574843, paintseed = 185, inventory = 2147483649, origin = 8
+        };
+        item.stickers.Add(new CEconItemPreviewDataBlock.Sticker { slot = 2, sticker_id = 4515, wear = 0f });
+        item.stickers.Add(new CEconItemPreviewDataBlock.Sticker { slot = 2, sticker_id = 4516, wear = 0f });
+        await _databaseService.SaveItemWithExtrasAsync(item);
+
+        var single = await _databaseService.GetItemAsync(555);
+        var batched = (await _databaseService.GetItemsAsync(new ulong[] { 555 }))[555];
+
+        Assert.NotNull(single);
+        Assert.Equal(single.defindex, batched.defindex);
+        Assert.Equal(single.paintseed, batched.paintseed);
+        Assert.Equal(single.stickers.Count, batched.stickers.Count);
+        Assert.Equal(
+            single.stickers.Select(s => s.sticker_id).OrderBy(x => x),
+            batched.stickers.Select(s => s.sticker_id).OrderBy(x => x));
+    }
+
+    [Fact]
+    public async Task GetItemsAsync_EmptyInput_ReturnsEmpty()
+    {
+        await _databaseService.InitializeDatabaseAsync();
+        Assert.Empty(await _databaseService.GetItemsAsync(Array.Empty<ulong>()));
+    }
+
+    [Fact]
     public async Task GetLastWarmAsync_UnknownSteamId_ReturnsNull()
     {
         await _databaseService.InitializeDatabaseAsync();

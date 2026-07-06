@@ -172,91 +172,115 @@ namespace CSGOSkinAPI.Controllers
                     .ToDictionary(ap => ap.assetid, ap => ap.asset_properties ?? [])
                     ?? [];
 
-                var csgoItems = new List<object>();
+                // Index descriptions by (classid, instanceid) once. The inspect link, tags, name and
+                // price all live on the shared description, and a per-asset FirstOrDefault over the
+                // descriptions array is O(assets x descriptions) - 2000x2000 on a maxed inventory.
+                var descriptionByClassInstance = new Dictionary<(string classid, string instanceid), SteamDescription>();
+                foreach (var d in inventoryData.descriptions)
+                {
+                    descriptionByClassInstance.TryAdd((d.classid, d.instanceid), d);
+                }
+
+                // First pass: resolve each inspectable asset's link and parsed identity, and collect
+                // the itemids that need a cache lookup (everything that didn't decode locally from a
+                // cert) so they can be fetched in one batch instead of one connection per asset.
+                var prepared = new List<(SteamAsset asset, SteamDescription description, string inspectLink,
+                    (ulong s, ulong a, ulong d, ulong m, CEconItemPreviewDataBlock? directItem)? parsed)>();
+                var idsToLookUp = new List<ulong>();
                 foreach (var asset in inventoryData.assets)
                 {
-                    var description = inventoryData.descriptions.FirstOrDefault(d =>
-                        d.classid == asset.classid && d.instanceid == asset.instanceid);
-
-                    if (description?.actions != null)
+                    if (!descriptionByClassInstance.TryGetValue((asset.classid, asset.instanceid), out var description)
+                        || description.actions == null)
                     {
-                        var inspectAction = description.actions.FirstOrDefault(a =>
-                            a.link?.Contains("csgo_econ_action_preview") == true);
+                        continue;
+                    }
 
-                        if (inspectAction?.link != null)
+                    var inspectAction = description.actions.FirstOrDefault(a =>
+                        a.link?.Contains("csgo_econ_action_preview") == true);
+                    if (inspectAction?.link == null)
+                    {
+                        continue;
+                    }
+
+                    // Fill the template placeholders described above.
+                    propsByAsset.TryGetValue(asset.assetid, out var assetProps);
+                    var inspectLink = BuildInspectLink(inspectAction.link, assetProps, steamid, asset.assetid);
+
+                    var parsed = ParseInspectUrl(inspectLink);
+                    if (parsed.HasValue && parsed.Value.directItem == null)
+                    {
+                        idsToLookUp.Add(parsed.Value.a);
+                    }
+                    prepared.Add((asset, description, inspectLink, parsed));
+                }
+
+                // One batched cache read for every non-cert item, over a single connection.
+                var cachedItems = await dbService.GetItemsAsync(idsToLookUp);
+
+                var csgoItems = new List<object>();
+                foreach (var (asset, description, inspectLink, parsed) in prepared)
+                {
+                    // Extract wear, rarity, and item type from tags
+                    var wearTag = description.tags?.FirstOrDefault(t => t.category == "Exterior");
+                    var rarityTag = description.tags?.FirstOrDefault(t => t.category == "Rarity");
+                    var qualityTag = description.tags?.FirstOrDefault(t => t.category == "Quality");
+                    var typeTag = description.tags?.FirstOrDefault(t => t.category == "Type");
+
+                    // StatTrak kill count, when Steam exposes it on the StatTrak score line
+                    // (e.g. "StatTrak™ Confirmed Kills: 1234"). Some copies only carry the
+                    // generic "This item tracks Confirmed Kills." line, which has no number.
+                    int? stattrakKills = null;
+                    var scoreLine = description.descriptions?
+                        .FirstOrDefault(l => l.name == "stattrak_score")?.value;
+                    if (scoreLine != null)
+                    {
+                        var killMatch = Regex.Match(scoreLine, @"Confirmed Kills:\s*([\d,]+)");
+                        if (killMatch.Success &&
+                            int.TryParse(killMatch.Groups[1].Value.Replace(",", ""), out var kills))
                         {
-                            // Fill the template placeholders described above.
-                            propsByAsset.TryGetValue(asset.assetid, out var assetProps);
-                            var inspectLink = BuildInspectLink(inspectAction.link, assetProps, steamid, asset.assetid);
-
-                            // Extract wear, rarity, and item type from tags
-                            var wearTag = description.tags?.FirstOrDefault(t => t.category == "Exterior");
-                            var rarityTag = description.tags?.FirstOrDefault(t => t.category == "Rarity");
-                            var qualityTag = description.tags?.FirstOrDefault(t => t.category == "Quality");
-                            var typeTag = description.tags?.FirstOrDefault(t => t.category == "Type");
-
-                            // StatTrak kill count, when Steam exposes it on the StatTrak score line
-                            // (e.g. "StatTrak™ Confirmed Kills: 1234"). Some copies only carry the
-                            // generic "This item tracks Confirmed Kills." line, which has no number.
-                            int? stattrakKills = null;
-                            var scoreLine = description.descriptions?
-                                .FirstOrDefault(l => l.name == "stattrak_score")?.value;
-                            if (scoreLine != null)
-                            {
-                                var killMatch = Regex.Match(scoreLine, @"Confirmed Kills:\s*([\d,]+)");
-                                if (killMatch.Success &&
-                                    int.TryParse(killMatch.Groups[1].Value.Replace(",", ""), out var kills))
-                                {
-                                    stattrakKills = kills;
-                                }
-                            }
-                            
-                            // Try to extract itemid from inspect link and check if we have this item in database
-                            var parsed = ParseInspectUrl(inspectLink);
-                            object? existingItemData = null;
-                            
-                            if (parsed.HasValue)
-                            {
-                                var (s, a, d, m, directItem) = parsed.Value;
-                                if (directItem != null)
-                                {
-                                    existingItemData = CreateResponse(directItem, constDataService, priceService, s, a, d, m);
-                                }
-                                else
-                                {
-                                    var existingItem = await dbService.GetItemAsync(a);
-                                    if (existingItem != null)
-                                    {
-                                        existingItemData = CreateResponse(existingItem, constDataService, priceService, s, a, d, m);
-                                    }
-                                }
-                            }
-                            
-                            csgoItems.Add(new
-                            {
-                                name = description.name ?? description.market_name ?? "Unknown Item",
-                                market_name = description.market_name,
-                                // Base price keyed on Steam's own market_hash_name (authoritative,
-                                // language-independent), so every item is priced even when it has no
-                                // decoded existing_data yet.
-                                price = BuildPrice(priceService, description.market_hash_name ?? ""),
-                                type = description.type,
-                                inspect_link = inspectLink,
-                                wear = wearTag?.localized_tag_name,
-                                rarity = rarityTag?.localized_tag_name,
-                                quality = qualityTag?.localized_tag_name,
-                                item_type = typeTag?.localized_tag_name,
-                                stattrak_kills = stattrakKills,
-                                name_color = description.name_color,
-                                icon_url = description.icon_url,
-                                icon_url_large = description.icon_url_large,
-                                assetid = asset.assetid,
-                                classid = asset.classid,
-                                instanceid = asset.instanceid,
-                                existing_data = existingItemData
-                            });
+                            stattrakKills = kills;
                         }
                     }
+
+                    // Attach decoded data: a cert decodes locally, otherwise fall back to the batched
+                    // cache hit (absent if we've never seen this itemid).
+                    object? existingItemData = null;
+                    if (parsed.HasValue)
+                    {
+                        var (s, a, d, m, directItem) = parsed.Value;
+                        if (directItem != null)
+                        {
+                            existingItemData = CreateResponse(directItem, constDataService, priceService, s, a, d, m);
+                        }
+                        else if (cachedItems.TryGetValue(a, out var existingItem))
+                        {
+                            existingItemData = CreateResponse(existingItem, constDataService, priceService, s, a, d, m);
+                        }
+                    }
+
+                    csgoItems.Add(new
+                    {
+                        name = description.name ?? description.market_name ?? "Unknown Item",
+                        market_name = description.market_name,
+                        // Base price keyed on Steam's own market_hash_name (authoritative,
+                        // language-independent), so every item is priced even when it has no
+                        // decoded existing_data yet.
+                        price = BuildPrice(priceService, description.market_hash_name ?? ""),
+                        type = description.type,
+                        inspect_link = inspectLink,
+                        wear = wearTag?.localized_tag_name,
+                        rarity = rarityTag?.localized_tag_name,
+                        quality = qualityTag?.localized_tag_name,
+                        item_type = typeTag?.localized_tag_name,
+                        stattrak_kills = stattrakKills,
+                        name_color = description.name_color,
+                        icon_url = description.icon_url,
+                        icon_url_large = description.icon_url_large,
+                        assetid = asset.assetid,
+                        classid = asset.classid,
+                        instanceid = asset.instanceid,
+                        existing_data = existingItemData
+                    });
                 }
 
                 // Profile info (avatar, persona, trade-ban) is fetched separately by the browser
