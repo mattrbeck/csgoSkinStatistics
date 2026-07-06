@@ -11,6 +11,12 @@
     <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.9" />
     <PackageReference Include="protobuf-net" Version="3.2.56" />
     <PackageReference Include="SteamKit2" Version="3.3.1" />
+    <!-- Microsoft.Data.Sqlite pulls the native SQLite through SQLitePCLRaw.lib.e_sqlite3,
+         whose whole 2.1.x line ships a SQLite with GHSA-2m69-gcr7-jv3q and has no patched
+         release. Pin the native lib forward to the 3.5x line (SQLite 3.53.3), which is
+         dependency-free native binaries with a stable provider ABI, so it drops in over the
+         classic 2.1.x provider/core and lifts the resolved version out of the vulnerable range. -->
+    <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" Version="3.53.3" />
   </ItemGroup>
 
   <ItemGroup>
