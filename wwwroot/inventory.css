@@ -37,6 +37,7 @@
 
 #inventory-summary {
   max-width: 800px;
+
   /* No top margin: the summary sits flush at the top of #inventory-area so its gap below the top
      bar matches the item card's (which sits flush in #item-card-outer). Bottom margin stays. */
   margin: 0 auto 18px;

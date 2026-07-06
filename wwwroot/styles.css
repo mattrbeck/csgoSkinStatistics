@@ -104,6 +104,7 @@ body.pre-search .examples { display: block; }
   font-family: Lato, sans-serif;
   transition: border-color 0.2s ease, transform 0.2s ease;
 }
+
 .example-item:hover {
   border-color: var(--pop);
   transform: translateY(-1px);
@@ -121,6 +122,7 @@ body.pre-search .examples { display: block; }
   flex-direction: column;
   min-width: 0;
 }
+
 .example-title {
   font-weight: bold;
   font-size: 14px;
@@ -128,6 +130,7 @@ body.pre-search .examples { display: block; }
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
 .example-sub {
   font-size: 12px;
   opacity: 0.6;
@@ -171,6 +174,7 @@ body:not(.pre-search) #recent-lookups { display: none; }
   font-family: Lato, sans-serif;
   transition: border-color 0.2s ease, transform 0.2s ease;
 }
+
 .recent-row:hover {
   border-color: var(--pop);
   transform: translateY(-1px);
@@ -184,11 +188,13 @@ body:not(.pre-search) #recent-lookups { display: none; }
   align-items: center;
   justify-content: center;
 }
+
 .recent-thumb img {
   max-width: 100%;
   max-height: 34px;
   object-fit: contain;
 }
+
 /* Profile rows: round avatar + a small "Since YYYY" / "Inventory" tag instead of float/wear. */
 .recent-thumb.avatar img {
   width: 32px;
@@ -196,6 +202,7 @@ body:not(.pre-search) #recent-lookups { display: none; }
   border-radius: 50%;
   object-fit: cover;
 }
+
 .recent-tag {
   font-size: 12px;
   opacity: 0.6;
@@ -219,6 +226,7 @@ body:not(.pre-search) #recent-lookups { display: none; }
   flex-shrink: 0;
   font-size: 13px;
 }
+
 .recent-wear {
   font-size: 11px;
   font-weight: bold;
@@ -243,7 +251,11 @@ body:not(.pre-search) #recent-lookups { display: none; }
   cursor: pointer;
   opacity: 0.85;
 }
-.recents-toggle:hover { opacity: 1; text-decoration: underline; }
+
+.recents-toggle:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
 
 /* One page, two result views. A profile search adds body.mode-inventory (post.js) to show the
    inventory area and hide the item cards; an item search uses mode-item. The landing sections
@@ -707,6 +719,7 @@ body.mode-item #item-card-outer { display: flex; }
 .sticker-chip.charm { border-color: var(--pop); }
 .sticker-chip.charm.slab { border-color: #5e98d9; }
 
+/* stylelint-disable-next-line no-descending-specificity -- unrelated to .recent-thumb.avatar img; both just end in `img` */
 .sticker-chip img {
   display: block;
   max-width: 100%;
@@ -826,6 +839,7 @@ body.pre-search #site-header { height: 176px; }   /* landing: wordmark + search 
 .logo:link, .logo:visited, .logo:hover, .logo:focus, .logo:active { color: var(--dark); }
 .logo:hover { filter: brightness(1.08); }
 .logo-mono { display: none; }
+
 /* Landing: centered near the top. Center via transform (not a left px↔% jump) so the slide is
    smooth; calc keeps left:20px fixed and shifts the wordmark to the viewport centre. */
 body.pre-search .logo {
@@ -845,6 +859,7 @@ body.pre-search .logo {
   transition: top 0.45s cubic-bezier(0.22, 1, 0.36, 1),
               width 0.45s cubic-bezier(0.22, 1, 0.36, 1);
 }
+
 body.pre-search .topbar-search {
   top: 100px;                         /* landing: below the wordmark */
   width: min(608px, 100% - 32px);
@@ -856,9 +871,10 @@ body.pre-search .topbar-search {
 
 /* Tight screens: in the results bar, shrink the wordmark to "SS" and let the search fill the rest.
    The landing keeps the full "Skin Stats" centered (it has its own row there). */
-@media (max-width: 680px) {
+@media (width <= 680px) {
   body:not(.pre-search) .logo-word { display: none; }
   body:not(.pre-search) .logo-mono { display: inline; }
+
   body:not(.pre-search) .topbar-search {
     left: 74px;
     right: 12px;
