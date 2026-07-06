@@ -110,7 +110,10 @@ namespace CSGOSkinAPI.Services
             }
 
             await dbService.RecordWarmAsync(steamid, cached);
-            Console.WriteLine($"Inventory warm for {steamid}: cached {cached} of {inventoryData.assets.Count} items");
+            // Single count=2000 page, same as the inventory endpoint: a bigger inventory is warmed
+            // only up to the first page. That's fine for a best-effort warmer, but note it.
+            var truncated = inventoryData.total > inventoryData.assets.Count ? " (inventory truncated at one page)" : "";
+            Console.WriteLine($"Inventory warm for {steamid}: cached {cached} of {inventoryData.assets.Count} items{truncated}");
         }
     }
 }

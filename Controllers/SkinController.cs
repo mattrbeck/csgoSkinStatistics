@@ -322,9 +322,16 @@ namespace CSGOSkinAPI.Controllers
 
                 // Profile info (avatar, persona, trade-ban) is fetched separately by the browser
                 // via /api/profile so item rendering never waits on Steam's profile feed.
+                //
+                // We fetch a single count=2000 page, so an inventory larger than that comes back
+                // capped while `total` still reports the full count. Flag that so the UI doesn't
+                // present the capped view as complete. (See L2 in the audit; full pagination is the
+                // fuller fix.)
+                var truncated = inventoryData.total > inventoryData.assets.Count;
                 var result = new
                 {
                     total = inventoryData.total,
+                    truncated,
                     success = 1,
                     steamid = steamId.ToString(),
                     csgo_items = csgoItems

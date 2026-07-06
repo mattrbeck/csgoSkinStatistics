@@ -834,6 +834,13 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
     // Apply the initial sort/filter (it populates filteredItems from inventoryItems).
     applySortAndFilter(false);
 
+    // Steam returns a single inventory page (max 2000 items); a larger account comes back
+    // truncated. Surface that so the on-screen items aren't mistaken for the whole inventory.
+    const truncationNote = inventoryData.truncated
+      ? ` Steam only returns part of large inventories, so some of this account's ${inventoryData.total} items aren't shown.`
+      : '';
+    if (truncationNote) elements.status.textContent = truncationNote.trim();
+
     if (itemsNeedingAnalysis.length === 0) {
       // Every item came fully resolved from the inventory response - nothing left to do.
       elements.inventoryStatus.style.display = 'none';
@@ -896,7 +903,7 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
     elements.inventoryStatus.style.display = 'none';
     const totalItems = csgoItems.length;
     const analyzedItems = itemsNeedingAnalysis.length;
-    elements.status.textContent = `Loaded ${totalItems} items (${analyzedItems} via Game Coordinator)`;
+    elements.status.textContent = `Loaded ${totalItems} items (${analyzedItems} via Game Coordinator).${truncationNote}`;
 
     // Re-apply sort and filter now that all items have detailed data
     applySortAndFilter(false);
