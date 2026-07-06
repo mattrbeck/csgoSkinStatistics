@@ -25,4 +25,11 @@
     <None Remove="csgoSkinStatistics.Tests/**" />
   </ItemGroup>
 
+  <!-- Live Steam secrets live beside the project (gitignored, never committed). The Web SDK's
+       default Content glob (**/*.json) would otherwise copy them into the publish output, so
+       exclude them explicitly. -->
+  <ItemGroup>
+    <Content Remove="steam-tokens.json;steam-accounts.json" />
+  </ItemGroup>
+
 </Project>
