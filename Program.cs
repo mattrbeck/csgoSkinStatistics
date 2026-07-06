@@ -91,6 +91,35 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<PriceService>());
 
 var app = builder.Build();
 
+// Defense-in-depth security headers on every response (via OnStarting so they apply even to the
+// error responses written by UseExceptionHandler below). The CSP is conservative but tuned to what
+// the app actually loads: same-origin scripts/styles - plus 'unsafe-inline', which the page's
+// bootstrap script and the stylesheet media-swap onload handlers still rely on - Steam CDN images,
+// and Google Fonts. frame-ancestors / X-Frame-Options block clickjacking. (See L9: if this ever
+// runs behind a proxy that already sets these, drop the middleware.)
+app.Use(async (context, next) =>
+{
+    context.Response.OnStarting(() =>
+    {
+        var headers = context.Response.Headers;
+        headers["X-Content-Type-Options"] = "nosniff";
+        headers["X-Frame-Options"] = "DENY";
+        headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
+        headers["Content-Security-Policy"] =
+            "default-src 'self'; " +
+            "script-src 'self' 'unsafe-inline'; " +
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+            "font-src 'self' https://fonts.gstatic.com; " +
+            "img-src 'self' data: https://*.steamstatic.com; " +
+            "connect-src 'self'; " +
+            "frame-ancestors 'none'; " +
+            "base-uri 'self'; " +
+            "object-src 'none'";
+        return Task.CompletedTask;
+    });
+    await next();
+});
+
 // Any unhandled exception from an endpoint becomes a generic 500 here, logged server-side. This
 // keeps internal detail (paths, SQL, library internals) out of the response and means individual
 // actions don't each need a copy-pasted catch-all.
