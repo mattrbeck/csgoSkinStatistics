@@ -284,6 +284,12 @@ body:not(.pre-search) #recent-lookups { display: none; }
 #inventory-area { display: none; }
 body.mode-inventory #inventory-area { display: block; }
 
+/* The inventory's filter bar is position:sticky, but an overflow-x:hidden <body> becomes a scroll
+   container that defeats sticky on iOS Safari (Chrome papers over it). The bar only exists in the
+   inventory view, which has no horizontal overflow to clip, so lift body's clip here — leaving it in
+   place on the landing/item views, which do rely on it. */
+body.mode-inventory { overflow-x: visible; }
+
 /* Respect reduced-motion: skip the hero entirely - the search just stays at the top. */
 @media (prefers-reduced-motion: reduce) {
   .page-shift {
