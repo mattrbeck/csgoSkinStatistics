@@ -112,15 +112,28 @@ function addRecentProfile(profile) {
   });
 }
 
-// Build one recent row (a button that re-runs the lookup). DOM nodes only — names are remote data.
+// True when a click on a link should be left to the browser (open in a new tab/window) rather than
+// intercepted for the in-page render: modifier-held clicks, or any non-primary button (e.g. middle).
+function shouldLetBrowserOpen(e) {
+  return e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey;
+}
+
+// Build one recent row (a real link that re-runs the lookup). DOM nodes only — names are remote data.
+// It's an <a href="?q=…"> so cmd/ctrl/middle-click opens the lookup in a new tab; a plain click is
+// intercepted for the in-page render.
 function recentRow(entry) {
   const isProfile = entry.type === "profile";
-  const row = document.createElement("button");
-  row.type = "button";
+  const row = document.createElement("a");
+  row.href = "?q=" + encodeURIComponent(entry.value);
   row.className = isProfile ? "recent-row recent-profile" : "recent-row";
   row.title = entry.name;
   if (entry.rarityColor) row.style.borderLeftColor = entry.rarityColor;
-  row.addEventListener("click", () => { controls.textbox.value = entry.value; submitSearch(entry.value); });
+  row.addEventListener("click", (e) => {
+    if (shouldLetBrowserOpen(e)) return; // new-tab/window click — let the browser follow the href
+    e.preventDefault();
+    controls.textbox.value = entry.value;
+    submitSearch(entry.value);
+  });
 
   const thumb = document.createElement("span");
   thumb.className = isProfile ? "recent-thumb avatar" : "recent-thumb";
@@ -397,9 +410,12 @@ function initSearch() {
     controls.button.addEventListener("click", () => submitSearch(controls.textbox.value));
   }
 
-  // "Try an example" tiles on the landing pre-fill the box and run the lookup.
+  // "Try an example" tiles are real links (?q=…); a plain click runs the lookup in-page, while
+  // cmd/ctrl/middle-click falls through to the browser and opens it in a new tab.
   document.querySelectorAll(".example-item[data-value]").forEach((el) => {
-    el.addEventListener("click", () => {
+    el.addEventListener("click", (e) => {
+      if (shouldLetBrowserOpen(e)) return;
+      e.preventDefault();
       controls.textbox.value = el.dataset.value;
       submitSearch(el.dataset.value);
     });

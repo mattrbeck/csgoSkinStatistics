@@ -111,6 +111,7 @@ body.pre-search .examples { display: block; }
   color: var(--text);
   cursor: pointer;
   text-align: left;
+  text-decoration: none;
   font-family: Lato, sans-serif;
   transition: border-color 0.2s ease, transform 0.2s ease;
 }
@@ -181,6 +182,7 @@ body:not(.pre-search) #recent-lookups { display: none; }
   color: var(--text);
   cursor: pointer;
   text-align: left;
+  text-decoration: none;
   font-family: Lato, sans-serif;
   transition: border-color 0.2s ease, transform 0.2s ease;
 }
