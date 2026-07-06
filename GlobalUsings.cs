@@ -3,7 +3,9 @@
 // SDK's implicit usings.)
 global using Microsoft.AspNetCore.Diagnostics;
 global using Microsoft.AspNetCore.Mvc;
+global using Microsoft.AspNetCore.RateLimiting;
 global using Microsoft.AspNetCore.Rewrite;
+global using System.Threading.RateLimiting;
 global using Microsoft.Data.Sqlite;
 global using Microsoft.Extensions.Caching.Memory;
 global using SteamKit2;

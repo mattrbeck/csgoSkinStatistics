@@ -40,6 +40,43 @@ builder.Services.AddHttpClient("skinport")
 // inventory serializes to ~3 MB, so 8 MB holds a couple of large ones plus several smaller ones;
 // lower SizeLimit to tighten the footprint, raise it to cache more.
 builder.Services.AddMemoryCache(options => options.SizeLimit = 8 * 1024 * 1024);
+// Per-client-IP rate limiting on the API. Every uncached /api, /api/inventory and /api/profile
+// call can trigger an outbound steamcommunity.com request, so an unthrottled client could relay
+// traffic through our egress IP until Steam 429-bans it. A token bucket per IP bounds that while
+// staying comfortably above the ~10 req/s a single inventory analysis makes (the client paces its
+// per-item lookups 100ms apart). Limits live in the RateLimiting config section so they can be
+// tuned without a redeploy. Only the API carries the "api" policy; static files are never limited.
+var rateLimitConfig = builder.Configuration.GetSection("RateLimiting");
+var tokenLimit = rateLimitConfig.GetValue("TokenLimit", 40);
+var tokensPerPeriod = rateLimitConfig.GetValue("TokensPerPeriod", 20);
+var replenishmentSeconds = rateLimitConfig.GetValue("ReplenishmentPeriodSeconds", 1.0);
+var queueLimit = rateLimitConfig.GetValue("QueueLimit", 10);
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy("api", httpContext =>
+    {
+        // Partition by client IP. A single key ("unknown") for IP-less requests is deliberate:
+        // it caps that whole bucket rather than letting them each get their own allowance.
+        var clientIp = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+        return RateLimitPartition.GetTokenBucketLimiter(clientIp, _ => new TokenBucketRateLimiterOptions
+        {
+            TokenLimit = tokenLimit,
+            TokensPerPeriod = tokensPerPeriod,
+            ReplenishmentPeriod = TimeSpan.FromSeconds(replenishmentSeconds),
+            QueueLimit = queueLimit,
+            QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+            AutoReplenishment = true,
+        });
+    });
+    options.OnRejected = async (context, cancellationToken) =>
+    {
+        context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+        Console.WriteLine($"Rate limited {context.HttpContext.Connection.RemoteIpAddress} on {context.HttpContext.Request.Path}");
+        await context.HttpContext.Response.WriteAsJsonAsync(
+            new { error = "Too many requests. Please slow down and try again shortly." }, cancellationToken);
+    };
+});
 builder.Services.AddSingleton<SteamService>();
 builder.Services.AddSingleton<DatabaseService>();
 builder.Services.AddSingleton<ConstDataService>();
@@ -78,6 +115,7 @@ app.UseDefaultFiles(); // Must be before UseStaticFiles
 app.UseStaticFiles();
 
 app.UseRouting();
+app.UseRateLimiter();
 app.MapControllers();
 
 // Initialize database on startup

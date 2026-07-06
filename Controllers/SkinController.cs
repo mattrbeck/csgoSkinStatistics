@@ -2,6 +2,7 @@ namespace CSGOSkinAPI.Controllers
 {
     [ApiController]
     [Route("api")]
+    [EnableRateLimiting("api")]
     public partial class SkinController(SteamService steamService, DatabaseService dbService, ConstDataService constDataService, IHttpClientFactory httpClientFactory, InventoryWarmService warmService, IMemoryCache cache, PriceService priceService) : ControllerBase
     {
         // SteamID64 of the first individual account; anything below is not a profile id.
