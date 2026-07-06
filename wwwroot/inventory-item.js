@@ -104,11 +104,18 @@ class InventoryItem extends HTMLElement {
         min-width: 0;
       }
 
+      .item-head {
+        margin-bottom: 8px;
+      }
+
+      /* The name flows full-width and the price floats into the top-right corner: a short name
+         sits beside it, a long name flows underneath it, and the price is never squeezed out of a
+         flex row the way it was when the name column got narrow. */
       .item-name {
         font-weight: bold;
         font-size: 15px;
         color: var(--text, #ecf0f1);
-        margin: 0 0 8px 0;
+        margin: 0;
         word-wrap: break-word;
       }
       
@@ -201,6 +208,23 @@ class InventoryItem extends HTMLElement {
       .detail-line[data-field="pattern-line"] {
         flex-wrap: wrap;
         row-gap: 4px;
+      }
+
+      /* Skinport price tag, top-right of the card. Hidden by default, revealed only when the
+         "Show prices" filter is on (host gets show-price) AND we have a price for this item
+         (.has-price). The $ makes the number self-describing, so no "Price:" label. */
+      .price-tag {
+        display: none;
+        float: right;
+        margin-left: 8px;
+        color: var(--price, #7fdca4);
+        font-weight: 600;
+        font-size: 14px;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+      :host([show-price]) .price-tag.has-price {
+        display: inline;
       }
 
       /* Rare-pattern chip. Border/background tint + dot fill are set inline per-kind by
@@ -605,6 +629,23 @@ class InventoryItem extends HTMLElement {
       const rarity = this.itemData.rarity;
       rarityElement.textContent = (rarity && rarity !== 'Unknown') ? rarity : '';
       rarityElement.style.color = rarityColorOf(rarity);
+    }
+
+    // Skinport suggested price, top-right (the CSS gates visibility on the show-price host
+    // attribute; .has-price keeps it hidden for items we have no price for).
+    const priceTag = this.shadowRoot.querySelector('[data-field="price"]');
+    if (priceTag) {
+      const price = this.itemData.price;
+      const cents = price && price.suggested;
+      if (cents != null) {
+        // A leading "~" marks an approximate value (a price that aged out of Skinport's feed, or
+        // the nearest wear of the same skin when the exact variant was never listed).
+        priceTag.textContent = (price.approximate ? '~' : '') + formatPriceCents(cents);
+        priceTag.classList.add('has-price');
+      } else {
+        priceTag.textContent = '';
+        priceTag.classList.remove('has-price');
+      }
     }
 
     if (inspectElement) {

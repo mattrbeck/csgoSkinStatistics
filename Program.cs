@@ -24,6 +24,14 @@ builder.Services.AddHttpClient("steam")
         PooledConnectionLifetime = TimeSpan.FromMinutes(30),
     })
     .SetHandlerLifetime(Timeout.InfiniteTimeSpan);
+// Skinport's /v1/items feed is Brotli-only (a request without Accept-Encoding: br 406s), so this
+// client auto-negotiates and decompresses it. AutomaticDecompression.All includes Brotli and adds
+// the Accept-Encoding header itself.
+builder.Services.AddHttpClient("skinport")
+    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+    {
+        AutomaticDecompression = System.Net.DecompressionMethods.All,
+    });
 // Inventory response cache: /api/inventory results are cached by resolved SteamId64 for a few
 // minutes so reload storms (and repeat viewers of the same inventory) don't each re-hit
 // steamcommunity.com's inventory endpoint, which rate-limits per server IP. Bounded by *bytes* -
@@ -39,6 +47,10 @@ builder.Services.AddSingleton<ConstDataService>();
 // hosted service that drains the queue.
 builder.Services.AddSingleton<InventoryWarmService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<InventoryWarmService>());
+// Skinport base prices: exposed as itself (controllers look prices up) and as the hosted service
+// that refreshes them a few times a day.
+builder.Services.AddSingleton<PriceService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<PriceService>());
 
 var app = builder.Build();
 

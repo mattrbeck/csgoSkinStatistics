@@ -177,9 +177,29 @@ function isKnifeOrGlove(defindex) {
   return (defindex >= 500 && defindex < 600) || defindex >= 5000;
 }
 
+// Format integer cents as a price, e.g. 4288 -> "$42.88" (thousands separated). Prices come from
+// Skinport's USD feed, so the symbol is fixed for now. Read by inventory-item.js and post.js too.
+function formatPriceCents(cents) {
+  if (cents == null) return '';
+  return '$' + (cents / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// Whether the "Show prices" filter is on; mirrored onto each card as the show-price attribute so
+// the (shadow-DOM) price line's visibility is pure CSS. Off by default to keep cards compact.
+let showPricesEnabled = false;
+
+// Turn the per-card price display on/off: keep the flag, the checkbox, and every card's show-price
+// attribute in sync. Shared by the checkbox and the Price sort (which switches it on).
+function setShowPrices(enabled) {
+  showPricesEnabled = enabled;
+  if (elements.showPrices) elements.showPrices.checked = enabled;
+  itemElements.forEach(el => el.toggleAttribute('show-price', enabled));
+}
+
 function createItemElement(item, index) {
   const itemElement = document.createElement('inventory-item');
   itemElement.id = `item-${index}`;
+  itemElement.toggleAttribute('show-price', showPricesEnabled);
   itemElement.setItemData(item, index);
   return itemElement;
 }
@@ -273,11 +293,20 @@ function renderHighlights(processedItems) {
   if (stattrak) chips.push(`${stattrak} StatTrak`);
   if (special) chips.push({ text: `${special} Rare Patterns`, cls: 'special' });
 
+  // Total Skinport value, summed over the items we have a suggested price for (some items
+  // aren't priced, so it's a floor). Shown first as the headline number for the inventory.
+  const totalCents = inventoryItems.reduce(
+    (sum, it) => sum + ((it.steamData && it.steamData.price && it.steamData.price.suggested) || 0), 0);
+  if (totalCents > 0) {
+    chips.unshift({ text: formatPriceCents(totalCents), cls: 'value', title: 'Total Skinport value of priced items' });
+  }
+
   elements.summaryHighlights.replaceChildren();
   for (const chip of chips) {
     const el = document.createElement('span');
     el.className = typeof chip === 'string' ? 'highlight-chip' : `highlight-chip ${chip.cls}`;
     el.textContent = typeof chip === 'string' ? chip : chip.text;
+    if (typeof chip !== 'string' && chip.title) el.title = chip.title;
     elements.summaryHighlights.appendChild(el);
   }
 }
@@ -358,6 +387,15 @@ function sortItems(items, field, order) {
         if (valueA === null || valueB === null) {
           if (valueA === valueB) return 0;
           return valueA === null ? 1 : -1;
+        }
+        break;
+      case 'price':
+        valueA = a.steamData && a.steamData.price ? a.steamData.price.suggested : null;
+        valueB = b.steamData && b.steamData.price ? b.steamData.price.suggested : null;
+        // Unpriced items sink to the end in both directions (same as float above).
+        if (valueA == null || valueB == null) {
+          if (valueA == valueB) return 0;
+          return valueA == null ? 1 : -1;
         }
         break;
       case 'date':
@@ -889,7 +927,7 @@ function resetFilterControls() {
   elements.filterFloatMax.value = '';
   elements.floatSliderMin.value = 0;
   elements.floatSliderMax.value = 1;
-  elements.hideCommemorative.checked = true;
+  elements.showNoFloat.checked = false;
   elements.attrChips.forEach(chip => chip.setAttribute('aria-pressed', 'false'));
   updateSliderVisual();
 }
@@ -1010,6 +1048,7 @@ function initInventory() {
     gridStatus: document.getElementById("grid-status"),
 
     // Control elements
+    showPrices: document.getElementById("show-prices"),
     searchInput: document.getElementById("search-input"),
     sortSelect: document.getElementById("sort-select"),
     sortOrder: document.getElementById("sort-order"),
@@ -1020,7 +1059,7 @@ function initInventory() {
     filterWear: document.getElementById("filter-wear"),
     filterFloatMin: document.getElementById("filter-float-min"),
     filterFloatMax: document.getElementById("filter-float-max"),
-    hideCommemorative: document.getElementById("hide-commemorative"),
+    showNoFloat: document.getElementById("show-no-float"),
     clearFilters: document.getElementById("clear-filters"),
     // Float slider elements
     floatSliderMin: document.getElementById("float-slider-min"),
@@ -1050,10 +1089,14 @@ function initInventory() {
         currentSort.order = 'asc';
         break;
       case 'rarity':
+      case 'price':
         currentSort.order = 'desc';
         break;
     }
-    
+
+    // Sorting by price is pointless if the prices are hidden, so turn them on.
+    if (this.value === 'price') setShowPrices(true);
+
     // Update the order dropdown to reflect the change
     elements.sortOrder.value = currentSort.order;
     
@@ -1198,9 +1241,17 @@ function initInventory() {
   });
 
   // Auto-apply filter when checkbox is toggled
-  elements.hideCommemorative.addEventListener("change", function() {
-    currentFilters.hideCommemorative = this.checked;
+  // "Show items without a float" is the inverse of the internal hide flag: off (default) hides
+  // the no-paint items, on reveals them. Kept off by default to match the "Show prices" toggle.
+  elements.showNoFloat.addEventListener("change", function() {
+    currentFilters.hideCommemorative = !this.checked;
     applySortAndFilter();
+  });
+
+  // Show/hide the per-card price line. Purely a display toggle (not a filter), so it just flips
+  // the show-price attribute on every card and lets the shadow-DOM CSS do the rest.
+  elements.showPrices.addEventListener("change", function() {
+    setShowPrices(this.checked);
   });
 
   // Initialize slider visual

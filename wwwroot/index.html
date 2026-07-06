@@ -243,6 +243,7 @@
                       <option value="name">Name</option>
                       <option value="rarity" selected>Rarity</option>
                       <option value="float">Float</option>
+                      <option value="price">Price</option>
                     </select>
                   </div>
                   <div class="control-group">
@@ -324,9 +325,13 @@
             </div>
             
             <div class="control-group checkbox-group">
-              <label for="hide-commemorative">
-                <input type="checkbox" id="hide-commemorative" checked>
-                Hide items without a float
+              <label for="show-no-float">
+                <input type="checkbox" id="show-no-float">
+                Show items without a float
+              </label>
+              <label for="show-prices">
+                <input type="checkbox" id="show-prices">
+                Show prices
               </label>
             </div>
 
@@ -416,7 +421,10 @@
           </div>
         </div>
         <div class="item-info">
-          <div class="item-name" data-field="name"></div>
+          <div class="item-head">
+            <span class="price-tag" data-field="price"></span>
+            <div class="item-name" data-field="name"></div>
+          </div>
           <div class="item-details">
             <div class="detail-line" data-field="float-line">
               <span class="wear-pill" data-field="wear-pill" hidden></span>

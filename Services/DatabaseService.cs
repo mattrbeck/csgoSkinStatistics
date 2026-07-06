@@ -127,6 +127,66 @@ namespace CSGOSkinAPI.Services
                 )";
             using var warmsCommand = new SqliteCommand(createWarmsTableCommand, connection);
             await warmsCommand.ExecuteNonQueryAsync();
+
+            // Skinport base prices, keyed by market_hash_name (the same key the item's decoded name
+            // and Steam's inventory descriptions use). Persisted so a restart serves last-known
+            // prices immediately while PriceService refreshes in the background. Unlike `searches`,
+            // these are time-varying, hence the separate table and the shared updated_at stamp.
+            var createPricesTableCommand = @"
+                CREATE TABLE IF NOT EXISTS prices (
+                    market_hash_name TEXT PRIMARY KEY NOT NULL,
+                    min_cents INTEGER,
+                    suggested_cents INTEGER,
+                    updated_at TEXT NOT NULL
+                )";
+            using var pricesCommand = new SqliteCommand(createPricesTableCommand, connection);
+            await pricesCommand.ExecuteNonQueryAsync();
+        }
+
+        // Load the whole persisted price map, each row carrying its own last-seen time (updated_at
+        // is per item, refreshed only when that item is in the feed). Empty when never populated.
+        public async Task<Dictionary<string, (int? MinCents, int? SuggestedCents, DateTime UpdatedAt)>> LoadPricesAsync()
+        {
+            using var connection = await OpenConnectionAsync();
+
+            using var command = new SqliteCommand(
+                "SELECT market_hash_name, min_cents, suggested_cents, updated_at FROM prices", connection);
+            using var reader = await command.ExecuteReaderAsync();
+
+            var prices = new Dictionary<string, (int?, int?, DateTime)>(StringComparer.Ordinal);
+            while (await reader.ReadAsync())
+            {
+                var name = reader.GetString(0);
+                int? min = reader.IsDBNull(1) ? null : reader.GetInt32(1);
+                int? suggested = reader.IsDBNull(2) ? null : reader.GetInt32(2);
+                var updatedAt = DateTime.Parse(reader.GetString(3), null, DateTimeStyles.RoundtripKind);
+                prices[name] = (min, suggested, updatedAt);
+            }
+            return prices;
+        }
+
+        // Upsert the current Skinport feed. Items in the feed are (re)written with updatedAt; items
+        // NOT in the feed are left untouched, so a delisted variant keeps its last-known value and
+        // ages naturally (PriceService flags it approximate once it's over a week stale).
+        public async Task SavePricesAsync(IReadOnlyDictionary<string, (int? MinCents, int? SuggestedCents)> prices, DateTime updatedAt)
+        {
+            using var connection = await OpenConnectionAsync();
+            using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync();
+
+            const string upsert = @"INSERT OR REPLACE INTO prices (market_hash_name, min_cents, suggested_cents, updated_at)
+                VALUES (@name, @min, @suggested, @updated_at)";
+            var stamp = updatedAt.ToString("o");
+            foreach (var (name, price) in prices)
+            {
+                using var command = new SqliteCommand(upsert, connection, transaction);
+                command.Parameters.AddWithValue("@name", name);
+                command.Parameters.AddWithValue("@min", (object?)price.MinCents ?? DBNull.Value);
+                command.Parameters.AddWithValue("@suggested", (object?)price.SuggestedCents ?? DBNull.Value);
+                command.Parameters.AddWithValue("@updated_at", stamp);
+                await command.ExecuteNonQueryAsync();
+            }
+
+            await transaction.CommitAsync();
         }
 
         public async Task<List<CEconItemPreviewDataBlock.Sticker>> GetStickersAsync(ulong itemId, bool stickersTable)

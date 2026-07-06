@@ -171,6 +171,13 @@
   border: 1px solid var(--pop);
 }
 
+/* Total inventory value - the headline number, tinted the same green as the per-card prices. */
+.highlight-chip.value {
+  color: #7fdca4;
+  border: 1px solid rgb(127 220 164 / 50%);
+  font-variant-numeric: tabular-nums;
+}
+
 .float-range span {
   color: var(--text);
   font-size: 14px;
@@ -293,8 +300,9 @@ inventory-item {
 
 .checkbox-group {
   display: flex;
-  flex-direction: row; /* .control-group is a column; align-items would center us horizontally */
-  align-items: center;
+  flex-direction: column; /* one checkbox per row, left-aligned within the column control-group */
+  align-items: flex-start;
+  gap: 8px;
 }
 
 .checkbox-group label {

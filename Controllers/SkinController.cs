@@ -2,7 +2,7 @@ namespace CSGOSkinAPI.Controllers
 {
     [ApiController]
     [Route("api")]
-    public partial class SkinController(SteamService steamService, DatabaseService dbService, ConstDataService constDataService, IHttpClientFactory httpClientFactory, InventoryWarmService warmService, IMemoryCache cache) : ControllerBase
+    public partial class SkinController(SteamService steamService, DatabaseService dbService, ConstDataService constDataService, IHttpClientFactory httpClientFactory, InventoryWarmService warmService, IMemoryCache cache, PriceService priceService) : ControllerBase
     {
         // SteamID64 of the first individual account; anything below is not a profile id.
         private const ulong MinSteamId64 = 76561197960265729;
@@ -39,7 +39,7 @@ namespace CSGOSkinAPI.Controllers
 
                 if (directItem != null)
                 {
-                    return Ok(CreateResponse(directItem, constDataService, s, a, d, m));
+                    return Ok(CreateResponse(directItem, constDataService, priceService, s, a, d, m));
                 }
             }
 
@@ -54,7 +54,7 @@ namespace CSGOSkinAPI.Controllers
             var existingItem = await dbService.GetItemAsync(a);
             if (existingItem != null)
             {
-                return Ok(CreateResponse(existingItem, constDataService, s, a, d, m));
+                return Ok(CreateResponse(existingItem, constDataService, priceService, s, a, d, m));
             }
 
             // A classic S-form link that missed the cache still goes through the GC below,
@@ -76,7 +76,7 @@ namespace CSGOSkinAPI.Controllers
             }
 
             await dbService.SaveItemWithExtrasAsync(itemInfo);
-            return Ok(CreateResponse(itemInfo, constDataService, s, a, d, m));
+            return Ok(CreateResponse(itemInfo, constDataService, priceService, s, a, d, m));
         }
 
         [HttpGet("inventory")]
@@ -219,14 +219,14 @@ namespace CSGOSkinAPI.Controllers
                                 var (s, a, d, m, directItem) = parsed.Value;
                                 if (directItem != null)
                                 {
-                                    existingItemData = CreateResponse(directItem, constDataService, s, a, d, m);
+                                    existingItemData = CreateResponse(directItem, constDataService, priceService, s, a, d, m);
                                 }
                                 else
                                 {
                                     var existingItem = await dbService.GetItemAsync(a);
                                     if (existingItem != null)
                                     {
-                                        existingItemData = CreateResponse(existingItem, constDataService, s, a, d, m);
+                                        existingItemData = CreateResponse(existingItem, constDataService, priceService, s, a, d, m);
                                     }
                                 }
                             }
@@ -235,6 +235,10 @@ namespace CSGOSkinAPI.Controllers
                             {
                                 name = description.name ?? description.market_name ?? "Unknown Item",
                                 market_name = description.market_name,
+                                // Base price keyed on Steam's own market_hash_name (authoritative,
+                                // language-independent), so every item is priced even when it has no
+                                // decoded existing_data yet.
+                                price = BuildPrice(priceService, description.market_hash_name ?? ""),
                                 type = description.type,
                                 inspect_link = inspectLink,
                                 wear = wearTag?.localized_tag_name,
@@ -560,12 +564,13 @@ namespace CSGOSkinAPI.Controllers
             return (s, a, d, m, null);
         }
 
-        private static object CreateResponse(CEconItemPreviewDataBlock item, ConstDataService constDataService, ulong s, ulong a, ulong d, ulong m)
+        private static object CreateResponse(CEconItemPreviewDataBlock item, ConstDataService constDataService, PriceService priceService, ulong s, ulong a, ulong d, ulong m)
         {
             var itemInfo = constDataService.GetItemInformation(item);
-            
+
             return new
             {
+                price = BuildPrice(priceService, itemInfo.MarketHashName),
                 item.itemid,
                 item.defindex,
                 item.paintindex,
@@ -602,6 +607,26 @@ namespace CSGOSkinAPI.Controllers
                 a,
                 d,
                 m
+            };
+        }
+
+        // Skinport base price for a market_hash_name, or null when we have nothing to show. May be
+        // approximate (a value that aged out of the feed, or the nearest wear of the same skin) -
+        // the client prefixes a "~" then. Cents keep the value exact; the client formats it.
+        private static object? BuildPrice(PriceService priceService, string marketHashName)
+        {
+            var price = priceService.Resolve(marketHashName);
+            if (price == null || price.SuggestedCents == null)
+            {
+                return null;
+            }
+            return new
+            {
+                min = price.MinCents,
+                suggested = price.SuggestedCents,
+                currency = PriceService.Currency,
+                source = "skinport",
+                approximate = price.Approximate,
             };
         }
 
