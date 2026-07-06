@@ -434,8 +434,16 @@ function initSearch() {
   // ?q= (via replaceState) so back/forward and sharing behave from here on.
   let initialQuery = new URLSearchParams(location.search).get("q");
   if (!initialQuery && location.hash.length > 1) {
-    initialQuery = decodeURIComponent(location.hash.substring(1));
-    history.replaceState({ q: initialQuery }, "", location.pathname + "?q=" + encodeURIComponent(initialQuery));
+    try {
+      initialQuery = decodeURIComponent(location.hash.substring(1));
+      history.replaceState({ q: initialQuery }, "", location.pathname + "?q=" + encodeURIComponent(initialQuery));
+    } catch {
+      // A malformed percent-encoding in the hash (e.g. #%E0%A4%A) throws URIError. The inline
+      // script already stripped .pre-search on seeing a hash, so fall back to the empty landing
+      // instead of leaving a blank results view.
+      initialQuery = null;
+      showLanding();
+    }
   }
   if (initialQuery) {
     submitSearch(initialQuery, true); // URL already carries the query — render without pushing again
@@ -533,6 +541,10 @@ function post(url, key) {
     .catch(() => {
       reveal();
       renderErrorCard(card, "Failed to load item details");
+      // A one-off network blip shouldn't be resurfaced for the rest of the session the way a
+      // server-reported error intentionally is. Drop the cached card so a re-search retries the
+      // fetch. (The assetid twin is only set on success, so there's nothing to clear here.)
+      cardsByInput.delete(key);
     });
 }
 
