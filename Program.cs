@@ -141,12 +141,17 @@ _ = Task.Run(async () =>
 // Initialize ConstDataService (loads const.json)
 var constDataService = app.Services.GetRequiredService<ConstDataService>();
 
-// Handle Ctrl-C gracefully
-Console.CancelKeyPress += (sender, e) =>
+// Disconnect from Steam as part of the host's graceful shutdown (which Ctrl-C / SIGTERM already
+// trigger) rather than from a Console.CancelKeyPress handler. The old handler tore Steam down and
+// let the process die *around* the host, skipping request draining and hosted-service stop - and
+// could dispose an account's RateLimitSemaphore out from under an in-flight GC request. Running on
+// ApplicationStopping means the server has stopped accepting requests and in-flight ones have
+// drained first.
+var lifetime = app.Services.GetRequiredService<IHostApplicationLifetime>();
+lifetime.ApplicationStopping.Register(() =>
 {
-    Console.WriteLine("\nReceived Ctrl-C, disconnecting from Steam...");
+    Console.WriteLine("Application stopping, disconnecting from Steam...");
     steamService.Disconnect();
-    e.Cancel = false;
-};
+});
 
 app.Run();
