@@ -669,8 +669,10 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
   try {
     document.body.classList.remove('pre-search'); // glide the search up out of its centered landing
 
-    // A fresh controller starts un-aborted, so it resets the cancellation state too.
-    analysisController = new AbortController();
+    // Capture this run's controller in a local so every signal read and UI-ownership check below
+    // refers to *this* invocation, never whatever later search may have replaced the module-level
+    // analysisController. A fresh controller starts un-aborted, so it resets the cancellation state.
+    const controller = analysisController = new AbortController();
     
     // Show cancel button, hide analyze button (on whichever search box is visible)
     setAnalyzeButtons(true);
@@ -687,10 +689,13 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
     // Fetch profile info (avatar, persona, trade-ban) in parallel and populate the header when
     // it arrives. This is intentionally not awaited so item rendering never waits on Steam's
     // profile feed; the summary block is hidden until items load, so early/late arrival is fine.
-    fetch(`/api/profile?steamid=${encodeURIComponent(userInput)}`, { signal: analysisController.signal })
+    fetch(`/api/profile?steamid=${encodeURIComponent(userInput)}`, { signal: controller.signal })
       .then(r => r.json())
       .then(profile => {
         if (!profile || !profile.success) return;
+        // A newer search may have taken over between this fetch resolving and this handler
+        // running; don't paint a stale profile over its header.
+        if (analysisController !== controller) return;
         updateProfileSummary(profile);
         // The profile endpoint is authoritative for the share hash: it returns the vanity name
         // when the user has one, otherwise the SteamId64. This is the only place the hash is set.
@@ -710,7 +715,7 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
     let inventoryData = readInventoryCache(userInput);
     if (!inventoryData) {
       const response = await fetch(`/api/inventory?steamid=${encodeURIComponent(userInput)}`, {
-        signal: analysisController.signal
+        signal: controller.signal
       });
       // The API reports its own failures as a JSON { error } body (even with a 4xx/5xx status), so
       // parse first. Only fall back to a status-based message when the body isn't JSON at all
@@ -731,7 +736,7 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
     }
 
     // Check if cancelled after fetching inventory
-    if (analysisController.signal.aborted) {
+    if (controller.signal.aborted) {
       throw new Error('Analysis was cancelled');
     }
 
@@ -846,7 +851,7 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
     // Process remaining items asynchronously for detailed analysis
     for (let i = 0; i < itemsNeedingAnalysis.length; i++) {
       // Check for cancellation before processing each item
-      if (analysisController.signal.aborted) {
+      if (controller.signal.aborted) {
         throw new Error('Analysis was cancelled');
       }
 
@@ -858,7 +863,7 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
 
       try {
         const itemResponse = await fetch(`/api?${new URLSearchParams({url: item.inspect_link})}`, {
-          signal: analysisController.signal
+          signal: controller.signal
         });
         const itemData = await itemResponse.json();
 
@@ -898,21 +903,30 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
     
   } catch (error) {
     console.error('Error analyzing inventory:', error);
-    elements.inventoryStatus.style.display = 'none';
-    
-    // Handle different types of errors
-    if (error.name === 'AbortError' || error.message === 'Analysis was cancelled') {
-      elements.errorDisplay.textContent = 'Analysis was cancelled';
-      elements.status.textContent = 'Analysis cancelled by user';
-    } else {
-      // textContent, not innerHTML: the message can echo server-provided strings
-      elements.errorDisplay.textContent = error.message;
+
+    // Only paint this run's failure if it's still the active run. A newer search may have taken
+    // over (which aborts this one), and its fresh UI - loading status, results - must not be
+    // stomped by this run's cancellation/error banner.
+    if (analysisController === controller) {
+      elements.inventoryStatus.style.display = 'none';
+
+      // Handle different types of errors
+      if (error.name === 'AbortError' || error.message === 'Analysis was cancelled') {
+        elements.errorDisplay.textContent = 'Analysis was cancelled';
+        elements.status.textContent = 'Analysis cancelled by user';
+      } else {
+        // textContent, not innerHTML: the message can echo server-provided strings
+        elements.errorDisplay.textContent = error.message;
+      }
+      elements.errorDisplay.style.display = 'block';
     }
-    elements.errorDisplay.style.display = 'block';
   } finally {
-    // Always restore button states
-    setAnalyzeButtons(false);
-    analysisController = null;
+    // Only restore shared button/controller state if no newer run has taken over; otherwise this
+    // run would clear the active run's Cancel button and null out its live controller.
+    if (analysisController === controller) {
+      setAnalyzeButtons(false);
+      analysisController = null;
+    }
   }
 }
 
