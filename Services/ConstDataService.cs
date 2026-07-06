@@ -12,6 +12,10 @@ namespace CSGOSkinAPI.Services
         // paint seed (weapon-specific). Loaded from blue-gem.json in the constructor.
         private readonly Dictionary<string, Dictionary<string, Dictionary<string, BlueGemPattern>>> _blueGem;
 
+        // Fade catalogue: pattern ("Fade"/"Amber Fade"/"Acid Fade") -> weapon -> percentage per paint
+        // seed (index 0..1000). Loaded from fade.json in the constructor.
+        private readonly Dictionary<string, Dictionary<string, double[]>> _fade;
+
         private readonly ConstData _constData;
         private readonly StickerCatalog _stickers;
         private readonly Dictionary<string, string> _skinImages;
@@ -38,6 +42,14 @@ namespace CSGOSkinAPI.Services
             _blueGem = File.Exists("blue-gem.json")
                 ? JsonSerializer.Deserialize<Dictionary<string, Dictionary<string, Dictionary<string, BlueGemPattern>>>>(
                       File.ReadAllText("blue-gem.json"), JsonOptions) ?? []
+                : [];
+
+            // Built by scripts/update_fade.js from chescos/csgo-fade-percentage-calculator's MIT
+            // generated tables (the rotation-accurate percentages CSFloat & co. use). Optional —
+            // absence just means Fade / Amber Fade / Acid Fade items go unlabelled.
+            _fade = File.Exists("fade.json")
+                ? JsonSerializer.Deserialize<Dictionary<string, Dictionary<string, double[]>>>(
+                      File.ReadAllText("fade.json"), JsonOptions) ?? []
                 : [];
         }
 
@@ -79,13 +91,13 @@ namespace CSGOSkinAPI.Services
                     special = ConstData.FireIceNames[fireiceIndex];
                 }
             }
-            else if (pattern == "Fade" && _constData.Fades?.ContainsKey(weaponType) == true)
+            // Fade / Amber Fade / Acid Fade all share one per-weapon seed -> % table (fade.json). A
+            // paintseed outside 0..1000 comes only from a crafted cert; it falls through unlabelled.
+            else if (_fade.TryGetValue(pattern, out var fadeByWeapon)
+                && fadeByWeapon.TryGetValue(weaponType, out var fadeTable)
+                && paintseed >= 0 && paintseed < fadeTable.Length)
             {
-                special = GetFadePercent(paintseed, _constData.Fades[weaponType]) + "%";
-            }
-            else if (pattern == "Amber Fade" && _constData.AmberFades?.ContainsKey(weaponType) == true)
-            {
-                special = GetFadePercent(paintseed, _constData.AmberFades[weaponType]) + "%";
+                special = fadeTable[paintseed].ToString("0.#", CultureInfo.InvariantCulture) + "%";
             }
             else if ((pattern == "Doppler" || pattern == "Gamma Doppler") && _constData.Doppler?.ContainsKey(paintindex.ToString()) == true)
             {
@@ -132,25 +144,6 @@ namespace CSGOSkinAPI.Services
                 marketHashName += $" | {pattern} ({wearName})";
             }
             return marketHashName;
-        }
-
-        private double GetFadePercent(int paintseed, bool reversed)
-        {
-            const int minimumFadePercent = 80;
-            // paintseed comes from the (attacker-controllable) item cert; a value outside the
-            // pattern table would otherwise throw IndexOutOfRange.
-            if (paintseed < 0 || paintseed >= _constData.FadeOrder!.Length)
-            {
-                return 0;
-            }
-            var fadeIndex = _constData.FadeOrder[paintseed];
-            if (reversed)
-            {
-                fadeIndex = 1000 - fadeIndex;
-            }
-            var actualFadePercent = (double)fadeIndex / 1001;
-            var scaledFadePercent = Math.Round(minimumFadePercent + actualFadePercent * (100 - minimumFadePercent), 1);
-            return scaledFadePercent;
         }
 
         private string GetWeaponName(uint defIndex, bool warnIfMissing = true)

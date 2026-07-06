@@ -20,6 +20,7 @@ const SPECIAL_CHIP_STYLES = {
   'blue-gem':    { dot: '#4aa8ff', accent: '#4aa8ff' },  // Case Hardened blue gem - light blue
   fade:          { dot: 'linear-gradient(135deg, #ffe14d 0%, #ff8a3d 48%, #b04bd6 100%)', accent: '#f0993d' },
   'amber-fade':  { dot: 'linear-gradient(135deg, #ffdf6b 0%, #ff8a1e 55%, #d1531a 100%)', accent: '#ff8a1e' },
+  'acid-fade':   { dot: 'linear-gradient(135deg, #dbe64f 0%, #7fae2b 52%, #3f6f1f 100%)', accent: '#8fbf3a' },
   'fire-ice':    { dot: 'linear-gradient(120deg, #ff5a3c 0%, #ff5a3c 42%, #4aa8ff 58%, #4aa8ff 100%)', accent: '#9a7fd0' },
   tier:          { dot: '#dc2637', accent: '#dc2637' },  // Crimson Kimono glove tier - crimson
   generic:       { dot: '#2ecc71', accent: '#2ecc71' },  // fallback (the old accent green)
@@ -40,8 +41,12 @@ function classifySpecial(special, pattern) {
   if (special === 'Emerald') return 'emerald';
   if (special === 'Black Pearl') return 'black-pearl';
   if (/^Phase\s*\d/i.test(special)) return 'phase';
-  // Fades read as a percentage; the pattern name splits the amber palette from the rest.
-  if (/%$/.test(special)) return p === 'Amber Fade' ? 'amber-fade' : 'fade';
+  // Fades read as a percentage; the pattern name picks the amber / acid palette off the classic one.
+  if (/%$/.test(special)) {
+    if (p === 'Amber Fade') return 'amber-fade';
+    if (p === 'Acid Fade') return 'acid-fade';
+    return 'fade';
+  }
   // Marble Fade "Fire & Ice" tiers: "1st Max" ... "10th Max", "FFI".
   if (p === 'Marble Fade' || /\bMax$/.test(special) || special === 'FFI') return 'fire-ice';
   // Glove finish tiers (Crimson Kimono etc.): "Tier 1.5", "Optimal".

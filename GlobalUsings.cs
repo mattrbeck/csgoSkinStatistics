@@ -12,6 +12,7 @@ global using SteamKit2.GC;
 global using SteamKit2.GC.CSGO.Internal;
 global using SteamKit2.Internal;
 global using System.Collections.Concurrent;
+global using System.Globalization;
 global using System.Text.Json;
 global using System.Threading.Channels;
 global using System.Text.Json.Serialization;

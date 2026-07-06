@@ -30,10 +30,6 @@ namespace CSGOSkinAPI.Models
     {
         public Dictionary<string, string>? Items { get; set; }
         public Dictionary<string, string>? Skins { get; set; }
-        public Dictionary<string, bool>? Fades { get; set; }
-        public Dictionary<string, bool>? AmberFades { get; set; }
-        [JsonPropertyName("fade_order")]
-        public int[]? FadeOrder { get; set; }
         public string[]? Fireice { get; set; }
         [JsonPropertyName("fireice_order")]
         public int[]? FireiceOrder { get; set; }

@@ -72,12 +72,6 @@ public class ModelsTests
                 { "179", "Redline" },
                 { "38", "Blaze" }
             },
-            Fades = new Dictionary<string, bool>
-            {
-                { "Karambit", false },
-                { "Butterfly Knife", true }
-            },
-            FadeOrder = new[] { 0, 1, 2, 3, 4, 5 },
             Fireice = new[] { "Karambit", "M9 Bayonet" },
             FireiceOrder = new[] { 0, 1, 2, 3 },
             Doppler = new Dictionary<string, string>
@@ -100,9 +94,6 @@ public class ModelsTests
         Assert.Equal("AK-47", deserialized.Items["7"]);
         Assert.Equal(2, deserialized.Skins.Count);
         Assert.Equal("Redline", deserialized.Skins["179"]);
-        Assert.Equal(2, deserialized.Fades.Count);
-        Assert.False(deserialized.Fades["Karambit"]);
-        Assert.Equal(6, deserialized.FadeOrder.Length);
         Assert.Equal(2, deserialized.Fireice.Length);
         Assert.Equal(4, deserialized.FireiceOrder.Length);
         Assert.Equal(2, deserialized.Doppler.Count);

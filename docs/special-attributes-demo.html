@@ -145,6 +145,7 @@
         'blue-gem':    { dot: '#4aa8ff', accent: '#4aa8ff' },
         fade:          { dot: 'linear-gradient(135deg, #ffe14d 0%, #ff8a3d 48%, #b04bd6 100%)', accent: '#f0993d' },
         'amber-fade':  { dot: 'linear-gradient(135deg, #ffdf6b 0%, #ff8a1e 55%, #d1531a 100%)', accent: '#ff8a1e' },
+        'acid-fade':   { dot: 'linear-gradient(135deg, #dbe64f 0%, #7fae2b 52%, #3f6f1f 100%)', accent: '#8fbf3a' },
         'fire-ice':    { dot: 'linear-gradient(120deg, #ff5a3c 0%, #ff5a3c 42%, #4aa8ff 58%, #4aa8ff 100%)', accent: '#9a7fd0' },
         tier:          { dot: '#dc2637', accent: '#dc2637' },
         generic:       { dot: '#2ecc71', accent: '#2ecc71' },
@@ -160,7 +161,11 @@
         if (special === 'Emerald') return 'emerald';
         if (special === 'Black Pearl') return 'black-pearl';
         if (/^Phase\s*\d/i.test(special)) return 'phase';
-        if (/%$/.test(special)) return p === 'Amber Fade' ? 'amber-fade' : 'fade';
+        if (/%$/.test(special)) {
+          if (p === 'Amber Fade') return 'amber-fade';
+          if (p === 'Acid Fade') return 'acid-fade';
+          return 'fade';
+        }
         if (p === 'Marble Fade' || /\bMax$/.test(special) || special === 'FFI') return 'fire-ice';
         if (/^Tier\b/i.test(special) || special === 'Optimal') return 'tier';
         return 'generic';
@@ -209,8 +214,9 @@
         ["★ M9 Bayonet | Doppler", "Doppler", 71, "Phase 2", "#ff4d88"],
         ["★ Flip Knife | Doppler", "Doppler", 604, "Phase 3", "#4f83ff"],
         ["★ Huntsman Knife | Doppler", "Doppler", 158, "Phase 4", "#2bd4c4"],
-        ["★ Karambit | Fade", "Fade", 412, "96.4%", "#f0993d"],
+        ["★ Karambit | Fade", "Fade", 412, "100%", "#f0993d"],
         ["★ Ursus Knife | Amber Fade", "Amber Fade", 88, "88.5%", "#ff8a1e"],
+        ["SSG 08 | Acid Fade", "Acid Fade", 2, "91.2%", "#8fbf3a"],
         ["★ Karambit | Marble Fade", "Marble Fade", 16, "1st Max", "#9a7fd0"],
         ["AK-47 | Case Hardened", "Case Hardened", 661, "Blue Gem 92% / 45% mag", "#4aa8ff"],
         ["★ Karambit | Case Hardened", "Case Hardened", 387, "Blue Gem 88%", "#4aa8ff"],

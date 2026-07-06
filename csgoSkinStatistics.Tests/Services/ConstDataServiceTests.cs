@@ -139,47 +139,49 @@ public class ConstDataServiceTests : IDisposable
             Skins = new Dictionary<string, string>
             {
                 { "38", "Fade" }
-            },
-            Fades = new Dictionary<string, bool>
-            {
-                { "Karambit", false }
-            },
-            FadeOrder = Enumerable.Range(0, 1001).ToArray()
+            }
         };
 
         var json = JsonSerializer.Serialize(testData);
         File.WriteAllText("const.json", json);
+
+        // Fade percentages now come from fade.json (scripts/update_fade.js) as a per-weapon
+        // seed -> % table, not a shared rank table.
+        var fadeTable = new double[1001];
+        fadeTable[500] = 92.7;
+        WriteFadeJson(new() { ["Fade"] = new() { ["Karambit"] = fadeTable } });
 
         var service = new ConstDataService();
         var item = new CEconItemPreviewDataBlock
         {
             defindex = 42,
             paintindex = 38,
-            paintseed = 500 // Middle fade
+            paintseed = 500
         };
 
         var result = service.GetItemInformation(item);
 
         Assert.Equal("Karambit", result.Type);
         Assert.Equal("Fade", result.Name);
-        Assert.Contains("%", result.Special); // Should contain percentage
+        Assert.Equal("92.7%", result.Special);
 
         // Cleanup
         File.Delete("const.json");
+        File.Delete("fade.json");
     }
 
     [Fact]
     public void GetItemInformation_FadeWithOutOfRangePaintseed_DoesNotThrow()
     {
-        // A crafted item cert can carry a paintseed beyond the fade table; it must not throw.
+        // A crafted item cert can carry a paintseed beyond the fade table; it must not throw, and it
+        // falls through unlabelled rather than reporting a bogus percentage.
         var testData = new ConstData
         {
             Items = new Dictionary<string, string> { { "42", "Karambit" } },
-            Skins = new Dictionary<string, string> { { "38", "Fade" } },
-            Fades = new Dictionary<string, bool> { { "Karambit", false } },
-            FadeOrder = Enumerable.Range(0, 1001).ToArray()
+            Skins = new Dictionary<string, string> { { "38", "Fade" } }
         };
         File.WriteAllText("const.json", JsonSerializer.Serialize(testData));
+        WriteFadeJson(new() { ["Fade"] = new() { ["Karambit"] = new double[1001] } });
 
         var service = new ConstDataService();
         var item = new CEconItemPreviewDataBlock { defindex = 42, paintindex = 38, paintseed = 999999 };
@@ -187,10 +189,14 @@ public class ConstDataServiceTests : IDisposable
         var result = service.GetItemInformation(item);
 
         Assert.Equal("Fade", result.Name);
-        Assert.Equal("0%", result.Special);
+        Assert.Equal("", result.Special);
 
         File.Delete("const.json");
+        File.Delete("fade.json");
     }
+
+    private static void WriteFadeJson(Dictionary<string, Dictionary<string, double[]>> fade)
+        => File.WriteAllText("fade.json", JsonSerializer.Serialize(fade));
 
     [Fact]
     public void GetItemInformation_MarbleFadeWithOutOfRangePaintseed_DoesNotThrow()
