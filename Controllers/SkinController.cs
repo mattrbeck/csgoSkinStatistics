@@ -527,6 +527,13 @@ namespace CSGOSkinAPI.Controllers
                     Console.WriteLine($"Hex payload too long: {url}");
                     return null;
                 }
+                // The regex matches odd-length runs too, which Convert.FromHexString rejects with a
+                // FormatException - guard it so a bad link is a 400, not an unhandled 500.
+                if (hexValue.Length % 2 != 0)
+                {
+                    Console.WriteLine($"Hex payload has odd length: {url}");
+                    return null;
+                }
                 var rawBytes = Convert.FromHexString(hexValue);
                 // Need at least the leading byte, one protobuf byte, and the 4-byte checksum.
                 if (rawBytes.Length < 6)
@@ -544,14 +551,34 @@ namespace CSGOSkinAPI.Controllers
                 }
                 // Drop the leading xor byte and the trailing 4 checksum bytes
                 var hexBytes = rawBytes[1..^4];
-                using var hexStream = new MemoryStream(hexBytes);
-                var itemInfoProto = Serializer.Deserialize<CEconItemPreviewDataBlock>(hexStream);
+                CEconItemPreviewDataBlock itemInfoProto;
+                try
+                {
+                    using var hexStream = new MemoryStream(hexBytes);
+                    itemInfoProto = Serializer.Deserialize<CEconItemPreviewDataBlock>(hexStream);
+                }
+                catch (Exception ex)
+                {
+                    // Valid hex that isn't a valid CEconItemPreviewDataBlock (garbage, or a
+                    // truncated/mis-typed protobuf) throws here - map it to a 400, not a 500.
+                    Console.WriteLine($"Failed to decode inspect cert payload: {ex.Message}");
+                    return null;
+                }
                 return (0, itemInfoProto.itemid, 0, 0, itemInfoProto);
             }
 
-            ulong s = 0, a, d, m = 0;
+            // TryParse, not Parse: the regex caps nothing, so a caller can supply a >20-digit run
+            // that overflows ulong. Treat that as a malformed link (null -> 400) rather than letting
+            // the OverflowException surface as a 500.
+            ulong s = 0, m = 0;
             var firstParam = match.Groups[1].Value;
-            var firstValue = ulong.Parse(match.Groups[2].Value);
+            if (!ulong.TryParse(match.Groups[2].Value, out var firstValue) ||
+                !ulong.TryParse(match.Groups[3].Value, out var a) ||
+                !ulong.TryParse(match.Groups[4].Value, out var d))
+            {
+                Console.WriteLine($"Inspect URL has out-of-range numeric fields: {url}");
+                return null;
+            }
             if (firstParam == "S")
             {
                 s = firstValue;
@@ -560,8 +587,6 @@ namespace CSGOSkinAPI.Controllers
             {
                 m = firstValue;
             }
-            a = ulong.Parse(match.Groups[3].Value);
-            d = ulong.Parse(match.Groups[4].Value);
             return (s, a, d, m, null);
         }
 

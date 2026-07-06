@@ -57,6 +57,33 @@ public class ParseSteamInputTests
         Assert.Null(SkinController.ParseInspectUrl(url));
     }
 
+    [Fact]
+    public void ParseInspectUrl_OddLengthHexPayload_ReturnsNull()
+    {
+        // The hex regex matches odd-length runs, which Convert.FromHexString would reject with a
+        // FormatException. It must come back null (-> 400), not throw (-> 500).
+        var url = "steam://rungame/730/0/+csgo_econ_action_preview ABC";
+        Assert.Null(SkinController.ParseInspectUrl(url));
+    }
+
+    [Fact]
+    public void ParseInspectUrl_GarbageHexPayload_ReturnsNull()
+    {
+        // Valid, even-length hex that decodes to a malformed protobuf (here: xor key 0x00, then a
+        // length-delimited field header claiming more bytes than remain) must not throw.
+        var url = "steam://rungame/730/0/+csgo_econ_action_preview 000A0500000000";
+        Assert.Null(SkinController.ParseInspectUrl(url));
+    }
+
+    [Fact]
+    public void ParseInspectUrl_OverlongNumericFields_ReturnsNull()
+    {
+        // A numeric field longer than ulong can hold would overflow ulong.Parse; TryParse maps it
+        // to null (-> 400) instead of an unhandled OverflowException (-> 500).
+        var url = "steam://rungame/730/0/+csgo_econ_action_preview S76561198123456789A123456789012345678901D67890";
+        Assert.Null(SkinController.ParseInspectUrl(url));
+    }
+
     [Theory]
     [InlineData("mattrb", true)]
     [InlineData("a-b_c123", true)]
