@@ -49,8 +49,15 @@ describe('Inventory Item Sorting', () => {
     expect(getRarityValue('Consumer Grade')).toBe(1);
     expect(getRarityValue('Restricted')).toBe(4);
     expect(getRarityValue('Covert')).toBe(6);
-    expect(getRarityValue('Extraordinary')).toBe(8);
+    expect(getRarityValue('Extraordinary')).toBe(7);
+    expect(getRarityValue('Contraband')).toBe(8);
     expect(getRarityValue('Unknown')).toBe(0);
+  });
+
+  // Matches the in-game inventory sort: Covert < Extraordinary (knives/gloves) < Contraband (Howl).
+  test('top rarities sort in in-game order', () => {
+    expect(getRarityValue('Extraordinary')).toBeGreaterThan(getRarityValue('Covert'));
+    expect(getRarityValue('Contraband')).toBeGreaterThan(getRarityValue('Extraordinary'));
   });
 
   test('getRarityValue should rank sticker/music/agent tiers by their color', () => {

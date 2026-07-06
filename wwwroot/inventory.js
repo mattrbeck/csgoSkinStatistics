@@ -376,9 +376,10 @@ function sortItems(items, field, order) {
 // Rarity -> Steam color, shared by the item cards and the inventory summary bar.
 // RARITY_COLORS + rarityColorOf live in decals.js (shared with the item page).
 
-// Rarity -> sort tier. Tiers follow the Steam rarity colors (see RARITY_COLORS), so a
-// "High Grade" music kit sorts with the blue Mil-Spec weapons, not the light-blue
-// Industrial ones. Knives/gloves (Extraordinary) stay above Contraband on top.
+// Rarity -> sort tier. Tiers follow the in-game rarity ladder, so a "High Grade" music
+// kit sorts with the blue Mil-Spec weapons, not the light-blue Industrial ones. The top
+// of the ladder mirrors the in-game inventory sort: Covert (red weapons) < Extraordinary
+// (knives/gloves, also red in-game) < Contraband (the gold M4A4 Howl, alone at the top).
 function getRarityValue(rarity) {
   const rarityOrder = {
     'Consumer Grade': 1,   // gray
@@ -395,8 +396,8 @@ function getRarityValue(rarity) {
     'Superior': 5,
     'Covert': 6,           // red
     'Master': 6,
-    'Contraband': 7,       // gold
-    'Extraordinary': 8     // knives/gloves
+    'Extraordinary': 7,    // red (knives/gloves) - above Covert weapons
+    'Contraband': 8        // gold - the M4A4 Howl, alone on top
   };
   return rarityOrder[rarity] || 0;
 }
