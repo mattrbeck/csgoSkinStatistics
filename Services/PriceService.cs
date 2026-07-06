@@ -33,6 +33,11 @@ namespace CSGOSkinAPI.Services
 
         private static readonly TimeSpan RefreshInterval = TimeSpan.FromHours(6);
         private static readonly TimeSpan MaxStalenessBeforeStartupFetch = TimeSpan.FromHours(6);
+        // Cold start with a failing feed: retry on this escalating backoff (last value repeats)
+        // instead of the full RefreshInterval, so a transient outage doesn't leave the site with no
+        // prices at all for 6h. Only used while we've never successfully loaded any prices.
+        private static readonly TimeSpan[] ColdStartBackoff =
+            [TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(15)];
         // A kept value older than this is shown with a leading "~" (approximate).
         private static readonly TimeSpan StaleThreshold = TimeSpan.FromDays(7);
 
@@ -129,6 +134,7 @@ namespace CSGOSkinAPI.Services
                 Console.WriteLine($"Failed to load persisted prices: {ex.Message}");
             }
 
+            var coldStartAttempts = 0;
             while (!stoppingToken.IsCancellationRequested)
             {
                 var age = _updatedAtUtc == null ? TimeSpan.MaxValue : DateTime.UtcNow - _updatedAtUtc.Value;
@@ -137,9 +143,25 @@ namespace CSGOSkinAPI.Services
                     await RefreshAsync(stoppingToken);
                 }
 
+                // If we've still never loaded any prices, the feed is failing on a cold start; retry
+                // soon on the escalating backoff rather than going dark for the full interval. Once a
+                // load succeeds, fall back to the normal cadence.
+                TimeSpan delay;
+                if (_updatedAtUtc == null)
+                {
+                    delay = ColdStartBackoff[Math.Min(coldStartAttempts, ColdStartBackoff.Length - 1)];
+                    coldStartAttempts++;
+                    Console.WriteLine($"Skinport prices still unavailable; retrying in {delay.TotalMinutes:0} min.");
+                }
+                else
+                {
+                    delay = RefreshInterval;
+                    coldStartAttempts = 0;
+                }
+
                 try
                 {
-                    await Task.Delay(RefreshInterval, stoppingToken);
+                    await Task.Delay(delay, stoppingToken);
                 }
                 catch (OperationCanceledException)
                 {
