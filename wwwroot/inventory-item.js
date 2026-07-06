@@ -249,7 +249,7 @@ class InventoryItem extends HTMLElement {
         border-radius: 50%;
       }
 
-      /* Let the label wrap as a last resort so a long "Blue Gem 92% / 45% mag" never overflows. */
+      /* Let the label wrap as a last resort so a long "92% / 45% mag" never overflows. */
       .special-chip__text {
         min-width: 0;
         color: var(--text, #ecf0f1);

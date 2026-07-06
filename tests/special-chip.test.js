@@ -30,10 +30,12 @@ describe('classifySpecial', () => {
     expect(classifySpecial('88.5%', 'Amber Fade')).toBe('amber-fade');
   });
 
-  test('blue gem is matched before the fade percentage rule', () => {
-    // Both "Blue Gem 92%" and a fade "%" end in '%'; blue gem must win.
-    expect(classifySpecial('Blue Gem 92%', 'Case Hardened')).toBe('blue-gem');
-    expect(classifySpecial('Blue Gem 92% / 45% mag', 'Case Hardened')).toBe('blue-gem');
+  test('blue gem is matched by pattern, before the fade percentage rule', () => {
+    // A blue-gem "%" would read as a fade by the generic '%' rule, so the pattern must win.
+    expect(classifySpecial('92%', 'Case Hardened')).toBe('blue-gem');
+    expect(classifySpecial('92% / 45% mag', 'Case Hardened')).toBe('blue-gem');
+    expect(classifySpecial('45% mag', 'Case Hardened')).toBe('blue-gem');
+    expect(classifySpecial('88%', 'Heat Treated')).toBe('blue-gem');
   });
 
   test('unknown attributes fall back to the generic kind', () => {

@@ -155,7 +155,7 @@
       function classifySpecial(special, pattern) {
         if (!special) return null;
         const p = pattern || '';
-        if (/^Blue Gem/i.test(special)) return 'blue-gem';
+        if (p === 'Case Hardened' || p === 'Heat Treated') return 'blue-gem';
         if (special === 'Ruby') return 'ruby';
         if (special === 'Sapphire') return 'sapphire';
         if (special === 'Emerald') return 'emerald';
@@ -218,8 +218,8 @@
         ["★ Ursus Knife | Amber Fade", "Amber Fade", 88, "88.5%", "#ff8a1e"],
         ["SSG 08 | Acid Fade", "Acid Fade", 2, "91.2%", "#8fbf3a"],
         ["★ Karambit | Marble Fade", "Marble Fade", 16, "1st Max", "#9a7fd0"],
-        ["AK-47 | Case Hardened", "Case Hardened", 661, "Blue Gem 92% / 45% mag", "#4aa8ff"],
-        ["★ Karambit | Case Hardened", "Case Hardened", 387, "Blue Gem 88%", "#4aa8ff"],
+        ["AK-47 | Case Hardened", "Case Hardened", 661, "92% / 45% mag", "#4aa8ff"],
+        ["★ Karambit | Case Hardened", "Case Hardened", 387, "88%", "#4aa8ff"],
         ["★ Specialist Gloves | Crimson Kimono", "Crimson Kimono", 721, "Tier 1.5", "#dc2637"],
         ["★ Specialist Gloves | Crimson Kimono", "Crimson Kimono", 33, "Optimal", "#dc2637"],
       ];

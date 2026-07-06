@@ -4,7 +4,7 @@
 // (ruby-red, sapphire-blue, blue-gem light-blue, fade gradient, ...).
 //
 // The server sends the attribute as a flat string (`special`, e.g. "Ruby", "Tier 1.5",
-// "96.4%", "Blue Gem 92% / 45% mag") plus the pattern name (`skin`, e.g. "Fade",
+// "96.4%", "92% / 45% mag") plus the pattern name (`skin`, e.g. "Fade",
 // "Amber Fade", "Marble Fade"). We classify that pair into a themed "kind" here so the two
 // render sites - and the demo page - all draw the chip identically. Loaded before
 // inventory-item.js/post.js (all `defer`), so `buildSpecialChip` is a plain global.
@@ -30,12 +30,13 @@ const SPECIAL_CHIP_STYLES = {
 const PHASE_COLORS = { 1: '#e35fb0', 2: '#ff4d88', 3: '#4f83ff', 4: '#2bd4c4' };
 
 // Classify a (special, pattern) pair into a chip kind, or null when there's nothing to show.
-// Order matters: "Blue Gem 92%" and a fade "%" both end in '%', so blue gem is checked first.
+// Case Hardened / Heat Treated carry a blue-gem "%", which would otherwise read as a fade by the
+// generic '%' rule below, so they're identified by pattern first.
 function classifySpecial(special, pattern) {
   if (!special) return null;
   const p = pattern || '';
 
-  if (/^Blue Gem/i.test(special)) return 'blue-gem';
+  if (p === 'Case Hardened' || p === 'Heat Treated') return 'blue-gem';
   if (special === 'Ruby') return 'ruby';
   if (special === 'Sapphire') return 'sapphire';
   if (special === 'Emerald') return 'emerald';

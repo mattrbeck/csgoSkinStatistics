@@ -230,14 +230,14 @@ namespace CSGOSkinAPI.Services
                 if (gem.Pb >= 38.4)
                 {
                     return mag > 30
-                        ? $"Blue Gem {Pct(gem.Pb)}% / {Pct(mag)}% mag"
-                        : $"Blue Gem {Pct(gem.Pb)}%";
+                        ? $"{Pct(gem.Pb)}% / {Pct(mag)}% mag"
+                        : $"{Pct(gem.Pb)}%";
                 }
-                return mag > 30 ? $"Blue Gem {Pct(mag)}% mag" : "";
+                return mag > 30 ? $"{Pct(mag)}% mag" : "";
             }
 
             // Knives + other guns: judged on the playside.
-            return gem.Pb >= 30 ? $"Blue Gem {Pct(gem.Pb)}%" : "";
+            return gem.Pb >= 30 ? $"{Pct(gem.Pb)}%" : "";
         }
 
         private static bool IsKnifeOrGlove(uint defindex)
