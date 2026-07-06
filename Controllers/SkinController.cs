@@ -83,6 +83,15 @@ namespace CSGOSkinAPI.Controllers
                 warmService.Enqueue(s);
             }
 
+            // An itemid (a) of 0 - or a request naming neither an owner (s) nor a market listing (m)
+            // - can't identify an item to the GC. Worse, a==0 pollutes SteamService's pending-request
+            // map (keyed by itemid), where any unrelated null-iteminfo response resolves key 0.
+            // Reject before touching the GC.
+            if (a == 0 || (s == 0 && m == 0))
+            {
+                return BadRequest(new { error = "Invalid inspect parameters" });
+            }
+
             var itemInfo = await steamService.GetItemInfoAsync(s, a, d, m);
             if (itemInfo == null)
             {
