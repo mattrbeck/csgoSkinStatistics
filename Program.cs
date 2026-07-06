@@ -122,9 +122,21 @@ app.MapControllers();
 var dbService = app.Services.GetRequiredService<DatabaseService>();
 await dbService.InitializeDatabaseAsync();
 
-// Initialize Steam connection
+// Initialize Steam connection. Supervised: a boot-time failure (bad credentials, Steam outage)
+// is logged rather than left as an unobserved exception, and ConnectAsync resets its running flag
+// on failure so the on-demand reconnect in GetItemInfoAsync retries on the next lookup.
 var steamService = app.Services.GetRequiredService<SteamService>();
-_ = steamService.ConnectAsync();
+_ = Task.Run(async () =>
+{
+    try
+    {
+        await steamService.ConnectAsync();
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Initial Steam connection failed: {ex.Message}");
+    }
+});
 
 // Initialize ConstDataService (loads const.json)
 var constDataService = app.Services.GetRequiredService<ConstDataService>();

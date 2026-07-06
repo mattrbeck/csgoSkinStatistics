@@ -10,6 +10,9 @@ namespace CSGOSkinAPI.Services
         private readonly ConcurrentDictionary<ulong, List<TaskCompletionSource<CEconItemPreviewDataBlock?>>> _pendingRequests = new();
         private int _currentAccountIndex = 0;
         private readonly object _accountSelectionLock = new();
+        // Serializes ConnectAsync so concurrent lookups (each calling it via the !_isRunning guard)
+        // don't each spawn a fresh set of per-account callback loops.
+        private readonly SemaphoreSlim _connectLock = new(1, 1);
 
 
         public SteamService()
@@ -291,57 +294,87 @@ namespace CSGOSkinAPI.Services
 
         public async Task ConnectAsync()
         {
-            Console.WriteLine($"ConnectAsync called - connecting {_accountManagers.Count} Steam accounts");
-            _isRunning = true;
-
-            // Connect all accounts
-            var connectionTasks = _accountManagers.Select(ConnectAccount).ToArray();
-
-            // Start callback managers for all accounts
-            foreach (var accountManager in _accountManagers)
+            await _connectLock.WaitAsync();
+            try
             {
-                _ = Task.Run(() =>
+                // A concurrent caller may already have brought an account up (the on-demand guard
+                // in GetItemInfoAsync fires ConnectAsync from every lookup while !_isRunning).
+                if (_isRunning && _accountManagers.Any(am => am.IsConnected && am.IsLoggedIn))
                 {
-                    Console.WriteLine($"[{accountManager.Account.Username}] Starting callback manager loop");
-                    while (_isRunning)
-                    {
-                        // A throw from a callback handler (e.g. a malformed GC message) must not
-                        // escape and kill this loop - that would silently take the account offline
-                        // (no logons, reconnects, or GC responses) until the process restarts. Log
-                        // and keep pumping.
-                        try
-                        {
-                            accountManager.Manager.RunWaitCallbacks(TimeSpan.FromSeconds(1));
-                        }
-                        catch (Exception ex)
-                        {
-                            Console.WriteLine($"[{accountManager.Account.Username}] Callback loop error: {ex.Message}");
-                        }
-                    }
-                    Console.WriteLine($"[{accountManager.Account.Username}] Callback manager loop ended");
-                });
-            }
-
-            // Wait for at least one account to be ready
-            var timeout = DateTime.UtcNow.AddSeconds(15);
-            while (DateTime.UtcNow < timeout)
-            {
-                if (_accountManagers.Any(am => am.IsConnected && am.IsLoggedIn))
-                {
-                    Console.WriteLine("At least one Steam account connected successfully");
                     return;
                 }
-                Console.WriteLine("Waiting for account connections...");
-                await Task.Delay(1000);
-            }
 
-            var connectedCount = _accountManagers.Count(am => am.IsConnected && am.IsLoggedIn);
-            if (connectedCount == 0)
+                Console.WriteLine($"ConnectAsync called - connecting {_accountManagers.Count} Steam accounts");
+
+                // The callback loops must pump while we connect (the Connected/LoggedOn callbacks are
+                // what establish the session), so _isRunning has to be set before they start. Spawn a
+                // fresh set only when we weren't already pumping, so a retry after a failed connect
+                // doesn't stack duplicate loops on top of live ones.
+                var alreadyPumping = _isRunning;
+                _isRunning = true;
+
+                if (!alreadyPumping)
+                {
+                    foreach (var accountManager in _accountManagers)
+                    {
+                        _ = Task.Run(() =>
+                        {
+                            Console.WriteLine($"[{accountManager.Account.Username}] Starting callback manager loop");
+                            while (_isRunning)
+                            {
+                                // A throw from a callback handler (e.g. a malformed GC message) must
+                                // not escape and kill this loop - that would silently take the account
+                                // offline (no logons, reconnects, or GC responses) until the process
+                                // restarts. Log and keep pumping.
+                                try
+                                {
+                                    accountManager.Manager.RunWaitCallbacks(TimeSpan.FromSeconds(1));
+                                }
+                                catch (Exception ex)
+                                {
+                                    Console.WriteLine($"[{accountManager.Account.Username}] Callback loop error: {ex.Message}");
+                                }
+                            }
+                            Console.WriteLine($"[{accountManager.Account.Username}] Callback manager loop ended");
+                        });
+                    }
+                }
+
+                // Kick off (re)connection of every account.
+                foreach (var accountManager in _accountManagers)
+                {
+                    _ = ConnectAccount(accountManager);
+                }
+
+                // Wait for at least one account to be ready
+                var timeout = DateTime.UtcNow.AddSeconds(15);
+                while (DateTime.UtcNow < timeout)
+                {
+                    if (_accountManagers.Any(am => am.IsConnected && am.IsLoggedIn))
+                    {
+                        Console.WriteLine("At least one Steam account connected successfully");
+                        return;
+                    }
+                    Console.WriteLine("Waiting for account connections...");
+                    await Task.Delay(1000);
+                }
+
+                var connectedCount = _accountManagers.Count(am => am.IsConnected && am.IsLoggedIn);
+                if (connectedCount == 0)
+                {
+                    // Reset _isRunning (which stops the loops we just started) so the on-demand guard
+                    // in GetItemInfoAsync retries on the next lookup rather than leaving the service
+                    // "running" but permanently disconnected, 404ing every GC request forever.
+                    _isRunning = false;
+                    throw new Exception("Failed to connect any Steam accounts");
+                }
+
+                Console.WriteLine($"Steam service started with {connectedCount}/{_accountManagers.Count} accounts connected");
+            }
+            finally
             {
-                throw new Exception("Failed to connect any Steam accounts");
+                _connectLock.Release();
             }
-
-            Console.WriteLine($"Steam service started with {connectedCount}/{_accountManagers.Count} accounts connected");
         }
 
         private async Task ConnectAccount(SteamAccountManager accountManager)
