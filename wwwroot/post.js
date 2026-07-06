@@ -96,6 +96,7 @@ function addRecentItem(iteminfo, reducedLink) {
 }
 
 // Record a resolved Steam profile. Called by inventory.js once /api/profile comes back.
+// eslint-disable-next-line no-unused-vars -- called by inventory.js (a separate <script>)
 function addRecentProfile(profile) {
   if (!profile || !profile.hash) return;
   upsertRecent({
