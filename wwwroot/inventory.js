@@ -666,14 +666,15 @@ function reorderAnalysisQueue() {
 }
 
 async function analyzeInventory(userInput, resolvedSteamId = null) {
+  // Capture this run's controller in a local so every signal read and UI-ownership check below
+  // refers to *this* invocation, never whatever later search may have replaced the module-level
+  // analysisController. A fresh controller starts un-aborted, so it resets the cancellation state.
+  // Declared outside the try so it stays in scope for the catch/finally ownership checks.
+  const controller = analysisController = new AbortController();
+
   try {
     document.body.classList.remove('pre-search'); // glide the search up out of its centered landing
 
-    // Capture this run's controller in a local so every signal read and UI-ownership check below
-    // refers to *this* invocation, never whatever later search may have replaced the module-level
-    // analysisController. A fresh controller starts un-aborted, so it resets the cancellation state.
-    const controller = analysisController = new AbortController();
-    
     // Show cancel button, hide analyze button (on whichever search box is visible)
     setAnalyzeButtons(true);
     
@@ -1344,7 +1345,12 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     uint32ToFloat32, normalizeSearchText, nameSortKey, getItemFloat, matchesSearch,
     getWearFromFloat, getRarityFromNumber, isStarItem, isKnifeOrGlove,
-    sortItems, getRarityValue, filterItems, validateSteamId, extractSteamIdFromInput
+    sortItems, getRarityValue, filterItems, validateSteamId, extractSteamIdFromInput,
+    // Exposed for the re-search race test: it drives analyzeInventory/cancelAnalysis directly and
+    // injects a lightweight `elements` so it can assert a superseded run never touches shared state.
+    analyzeInventory, cancelAnalysis,
+    __setElements: (e) => { elements = e; },
+    __getAnalysisController: () => analysisController,
   };
 }
 
