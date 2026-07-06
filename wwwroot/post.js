@@ -439,6 +439,13 @@ function initSearch() {
 // a genuinely slow lookup (e.g. a Game Coordinator round trip) shows it.
 const LOADING_DELAY_MS = 200;
 
+// Re-record a resurfaced card's item in Recent lookups so re-viewing a cached item moves it back
+// to the top, matching a fresh fetch (which records via addRecentItem) and the profile flow. Error
+// cards carry no _iteminfo and are skipped, so they never enter recents.
+function recordRecentFromCard(card, key) {
+  if (card && card._iteminfo) addRecentItem(card._iteminfo, key);
+}
+
 // Each search shows a single card, replacing whatever item was there before. The card starts
 // invisible until there's something to show - the result, or, if the lookup runs long, a loading
 // state. Repeat searches (including back/forward) resurface the cached card - result or error -
@@ -447,6 +454,7 @@ function post(url, key) {
   const seen = cardsByInput.get(key);
   if (seen) {
     resurface(seen);
+    recordRecentFromCard(seen, key); // a re-view moves the item up in Recent lookups
     return;
   }
 
@@ -490,6 +498,7 @@ function post(url, key) {
         card.remove();
         cardsByInput.set(key, twin);
         resurface(twin);
+        recordRecentFromCard(twin, key);
         return;
       }
 
@@ -498,6 +507,7 @@ function post(url, key) {
       try {
         populateCard(card, iteminfo, url, loadTime);
         if (assetId) cardsByAssetId.set(assetId, card);
+        card._iteminfo = iteminfo; // stash so a later re-view (from cache) can re-record it
         addRecentItem(iteminfo, key);
       } catch (e) {
         renderErrorCard(card, "An error occurred while displaying the item data");
