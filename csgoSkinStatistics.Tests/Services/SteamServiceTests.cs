@@ -184,4 +184,94 @@ public class SteamServiceTests : IDisposable
         Assert.Equal("testuser", deserialized.Username);
         Assert.Equal("testpass", deserialized.Password);
     }
+
+    // --- Pending-request coalescing (the itemid -> waiters map that de-dupes concurrent GC
+    // lookups). Exercises the real bookkeeping methods; no Steam connection is involved. ---
+
+    private static SteamService CreateServiceWithOneAccount()
+    {
+        File.WriteAllText("steam-accounts.json",
+            JsonSerializer.Serialize(new List<SteamAccount> { new() { Username = "u", Password = "p" } }));
+        return new SteamService();
+    }
+
+    private static TaskCompletionSource<CEconItemPreviewDataBlock?> NewWaiter() =>
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    [Fact]
+    public void JoinOrCreatePendingRequest_FirstCallerLeads_RestWait()
+    {
+        var svc = CreateServiceWithOneAccount();
+
+        Assert.True(svc.JoinOrCreatePendingRequest(5, NewWaiter()));   // creator -> leader
+        Assert.False(svc.JoinOrCreatePendingRequest(5, NewWaiter()));  // joins in-flight -> waiter
+        Assert.False(svc.JoinOrCreatePendingRequest(5, NewWaiter()));
+    }
+
+    [Fact]
+    public async Task ResolvePendingRequest_WakesLeaderAndEveryWaiter()
+    {
+        var svc = CreateServiceWithOneAccount();
+        var leader = NewWaiter();
+        var waiter = NewWaiter();
+        svc.JoinOrCreatePendingRequest(9, leader);
+        svc.JoinOrCreatePendingRequest(9, waiter);
+
+        var item = new CEconItemPreviewDataBlock { itemid = 9 };
+        svc.ResolvePendingRequest(9, item);
+
+        Assert.Same(item, await leader.Task);
+        Assert.Same(item, await waiter.Task);
+    }
+
+    [Fact]
+    public void JoinAfterResolve_BecomesFreshLeader()
+    {
+        // M4: resolution removes the entry from the map before resolving, so a caller arriving
+        // after the response leads a new request instead of orphaning itself on the drained list.
+        var svc = CreateServiceWithOneAccount();
+        var first = NewWaiter();
+        Assert.True(svc.JoinOrCreatePendingRequest(7, first));
+
+        svc.ResolvePendingRequest(7, new CEconItemPreviewDataBlock { itemid = 7 });
+
+        Assert.True(svc.JoinOrCreatePendingRequest(7, NewWaiter())); // entry gone -> leads again
+    }
+
+    [Fact]
+    public async Task ResolvePendingRequest_IsIdempotentAndToleratesAlreadyCompletedWaiters()
+    {
+        // H2: a duplicate GC response (or a waiter already settled by its coalesced-timeout) must
+        // not throw - TrySetResult, not SetResult - or the callback loop would die.
+        var svc = CreateServiceWithOneAccount();
+        var settled = NewWaiter();
+        svc.JoinOrCreatePendingRequest(3, settled);
+        settled.TrySetResult(null); // pretend this waiter already completed
+
+        var item = new CEconItemPreviewDataBlock { itemid = 3 };
+        svc.ResolvePendingRequest(3, item); // resolves a list holding an already-completed waiter
+        svc.ResolvePendingRequest(3, item); // entry already gone: no-op
+
+        Assert.Null(await settled.Task); // keeps its first result
+    }
+
+    [Fact]
+    public void JoinOrCreatePendingRequest_UnderContention_ElectsExactlyOneLeader()
+    {
+        var svc = CreateServiceWithOneAccount();
+        const ulong id = 42;
+        var waiters = Enumerable.Range(0, 64).Select(_ => NewWaiter()).ToArray();
+
+        var leaders = 0;
+        Parallel.ForEach(waiters, w =>
+        {
+            if (svc.JoinOrCreatePendingRequest(id, w)) Interlocked.Increment(ref leaders);
+        });
+
+        Assert.Equal(1, leaders);
+
+        // Every concurrent caller lands on the one list, so a single response wakes them all.
+        svc.ResolvePendingRequest(id, new CEconItemPreviewDataBlock { itemid = id });
+        Assert.All(waiters, w => Assert.True(w.Task.IsCompleted));
+    }
 }

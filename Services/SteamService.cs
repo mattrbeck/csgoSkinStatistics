@@ -86,25 +86,22 @@ namespace CSGOSkinAPI.Services
 
             var jobId = a; // Use A (itemid) parameter as Job ID
 
-            // Check if request is already pending
-            if (_pendingRequests.ContainsKey(jobId))
+            // RunContinuationsAsynchronously so that the SetResult in ResolvePendingRequest (called
+            // on the GC callback thread while holding the pending list's lock) never runs a waiter's
+            // continuation inline under that lock.
+            var tcs = new TaskCompletionSource<CEconItemPreviewDataBlock?>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            // Coalesce concurrent lookups of the same itemid: the first caller creates the pending
+            // list and becomes the leader that drives the GC request(s); everyone else joins the
+            // list and just waits for the leader's response. The join is atomic, so - unlike a
+            // check-then-act on ContainsKey - a caller can never slip past the check just as the
+            // response removes the entry and then orphan itself on a list nobody drives.
+            if (!JoinOrCreatePendingRequest(jobId, tcs))
             {
                 Console.WriteLine($"Request for itemid {jobId} already pending, waiting for existing request...");
-                var tcs = new TaskCompletionSource<CEconItemPreviewDataBlock?>();
-                _pendingRequests.AddOrUpdate(jobId,
-                    [tcs],
-                    (key, existingList) =>
-                    {
-                        lock (existingList)
-                        {
-                            existingList.Add(tcs);
-                        }
-                        return existingList;
-                    });
 
-                // Bound the wait: if the leader request never completes - or a race left this
-                // waiter on a list nobody is driving - return null instead of hanging forever.
-                // The window covers the leader's own 2s-per-account retry budget plus slack.
+                // Bound the wait: if the leader never completes, return null instead of hanging
+                // forever. The window covers the leader's own 2s-per-account retry budget plus slack.
                 var coalescedTimeout = Task.Delay(TimeSpan.FromSeconds(10));
                 if (await Task.WhenAny(tcs.Task, coalescedTimeout) == coalescedTimeout)
                 {
@@ -115,42 +112,95 @@ namespace CSGOSkinAPI.Services
                 return await tcs.Task;
             }
 
-            // Try up to 3 accounts or all available accounts
-            var maxRetries = Math.Min(3, _accountManagers.Count);
-            var attemptedAccounts = new HashSet<int>();
-
-            for (int attempt = 0; attempt < maxRetries; attempt++)
+            // Leader: drive the request across up to 3 accounts, all resolving the one tcs. On any
+            // exit the leader's tcs is pulled from the pending list; a late GC response then finds
+            // the entry already gone and is simply logged.
+            try
             {
-                var accountManager = GetNextAvailableAccount(attemptedAccounts);
-                if (accountManager == null)
+                var maxRetries = Math.Min(3, _accountManagers.Count);
+                var attemptedAccounts = new HashSet<int>();
+
+                for (int attempt = 0; attempt < maxRetries; attempt++)
                 {
-                    Console.WriteLine("No available accounts for request");
-                    return null;
+                    var accountManager = GetNextAvailableAccount(attemptedAccounts);
+                    if (accountManager == null)
+                    {
+                        Console.WriteLine("No available accounts for request");
+                        break;
+                    }
+
+                    attemptedAccounts.Add(_accountManagers.IndexOf(accountManager));
+
+                    if (!accountManager.IsConnected || !accountManager.IsLoggedIn)
+                    {
+                        Console.WriteLine($"[{accountManager.Account.Username}] Account not ready, trying next account...");
+                        continue;
+                    }
+
+                    try
+                    {
+                        await SendGCRequest(accountManager, s, a, d, m, jobId);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[{accountManager.Account.Username}] Failed to send GC request: {ex.Message}");
+                        continue; // try next account
+                    }
+
+                    var timeoutTask = Task.Delay(TimeSpan.FromSeconds(2));
+                    if (await Task.WhenAny(tcs.Task, timeoutTask) != timeoutTask)
+                    {
+                        return await tcs.Task; // GC responded (success or null item)
+                    }
+
+                    Console.WriteLine($"[{accountManager.Account.Username}] Request timed out for job {jobId}, trying next account...");
                 }
 
-                attemptedAccounts.Add(_accountManagers.IndexOf(accountManager));
-
-                if (!accountManager.IsConnected || !accountManager.IsLoggedIn)
-                {
-                    Console.WriteLine($"[{accountManager.Account.Username}] Account not ready, trying next account...");
-                    continue;
-                }
-
-                var result = await TryGCRequestWithAccount(accountManager, s, a, d, m, jobId);
-                if (result != null)
-                {
-                    return result; // Success
-                }
-
-                Console.WriteLine($"[{accountManager.Account.Username}] Request timed out for job {jobId}, trying next account...");
+                Console.WriteLine($"All account attempts failed for itemid {jobId}");
+                return null;
             }
+            finally
+            {
+                RemovePendingRequest(jobId, tcs);
+            }
+        }
 
-            Console.WriteLine($"All {maxRetries} account attempts failed for itemid {jobId}");
-            return null;
+        // Atomically join jobId's pending-waiter list, creating it when this is the first caller.
+        // Returns true when this caller created the list (and is therefore the leader that must
+        // drive the GC request); false when it joined an in-flight request as a waiter.
+        //
+        // The list is re-checked under its own lock so a waiter can never attach to a list that
+        // ResolvePendingRequest has already pulled from the dictionary: such a caller finds the
+        // entry stale and loops to create a fresh leader entry instead of orphaning its TCS on a
+        // list nobody will resolve (which would stall it to a spurious timeout).
+        internal bool JoinOrCreatePendingRequest(ulong jobId, TaskCompletionSource<CEconItemPreviewDataBlock?> tcs)
+        {
+            var newList = new List<TaskCompletionSource<CEconItemPreviewDataBlock?>> { tcs };
+            while (true)
+            {
+                var list = _pendingRequests.GetOrAdd(jobId, newList);
+                if (ReferenceEquals(list, newList))
+                {
+                    return true; // we created it -> leader
+                }
+
+                lock (list)
+                {
+                    // Attach only while this list is still the live dictionary entry. Resolution
+                    // removes the entry before resolving under this same lock, so a stale list
+                    // means the request already completed and we must retry as a new leader.
+                    if (_pendingRequests.TryGetValue(jobId, out var current) && ReferenceEquals(current, list))
+                    {
+                        list.Add(tcs);
+                        return false; // joined as waiter
+                    }
+                }
+                // Stale list; loop and retry.
+            }
         }
 
         // Removes one waiter from a job's pending list, dropping the job entry when it was the last.
-        private void RemovePendingRequest(ulong jobId, TaskCompletionSource<CEconItemPreviewDataBlock?> tcs)
+        internal void RemovePendingRequest(ulong jobId, TaskCompletionSource<CEconItemPreviewDataBlock?> tcs)
         {
             if (_pendingRequests.TryGetValue(jobId, out var list))
             {
@@ -165,41 +215,24 @@ namespace CSGOSkinAPI.Services
             }
         }
 
-        private async Task<CEconItemPreviewDataBlock?> TryGCRequestWithAccount(SteamAccountManager accountManager, ulong s, ulong a, ulong d, ulong m, ulong jobId)
+        // Resolves every waiter on a job's pending list with the GC's result. Removal is atomic
+        // with resolution: the list is pulled from the dictionary *first* and only then resolved
+        // under its lock, so a waiter joining concurrently either attaches before the removal (and
+        // is resolved here) or finds the entry gone and retries as a fresh leader - it can never be
+        // orphaned on a list about to be dropped. TrySetResult (not SetResult) keeps a duplicate
+        // response, or a waiter already completed by a coalesced-timeout, from throwing and killing
+        // the callback loop.
+        internal void ResolvePendingRequest(ulong itemId, CEconItemPreviewDataBlock? item)
         {
-            var tcs = new TaskCompletionSource<CEconItemPreviewDataBlock?>();
-
-            _pendingRequests.AddOrUpdate(jobId,
-                [tcs],
-                (key, existingList) =>
+            if (_pendingRequests.TryRemove(itemId, out var pendingList))
+            {
+                lock (pendingList)
                 {
-                    lock (existingList)
+                    foreach (var tcs in pendingList)
                     {
-                        existingList.Add(tcs);
+                        tcs.TrySetResult(item);
                     }
-                    return existingList;
-                });
-
-            try
-            {
-                await SendGCRequest(accountManager, s, a, d, m, jobId);
-
-                var timeoutTask = Task.Delay(TimeSpan.FromSeconds(2));
-                var completedTask = await Task.WhenAny(tcs.Task, timeoutTask);
-
-                if (completedTask == timeoutTask)
-                {
-                    RemovePendingRequest(jobId, tcs);
-                    return null; // Timeout - will try next account
                 }
-
-                return await tcs.Task; // Success or GC returned null
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[{accountManager.Account.Username}] Failed to send GC request: {ex.Message}");
-                RemovePendingRequest(jobId, tcs);
-                return null; // Exception - will try next account
             }
         }
 
@@ -272,7 +305,18 @@ namespace CSGOSkinAPI.Services
                     Console.WriteLine($"[{accountManager.Account.Username}] Starting callback manager loop");
                     while (_isRunning)
                     {
-                        accountManager.Manager.RunWaitCallbacks(TimeSpan.FromSeconds(1));
+                        // A throw from a callback handler (e.g. a malformed GC message) must not
+                        // escape and kill this loop - that would silently take the account offline
+                        // (no logons, reconnects, or GC responses) until the process restarts. Log
+                        // and keep pumping.
+                        try
+                        {
+                            accountManager.Manager.RunWaitCallbacks(TimeSpan.FromSeconds(1));
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"[{accountManager.Account.Username}] Callback loop error: {ex.Message}");
+                        }
                     }
                     Console.WriteLine($"[{accountManager.Account.Username}] Callback manager loop ended");
                 });
@@ -466,7 +510,7 @@ namespace CSGOSkinAPI.Services
                 var response = new ClientGCMsgProtobuf<CMsgGCCStrike15_v2_Client2GCEconPreviewDataBlockResponse>(callback.Message);
                 var responseItemId = response.Body.iteminfo?.itemid ?? 0;
 
-                if (_pendingRequests.TryGetValue(responseItemId, out var pendingList))
+                if (_pendingRequests.ContainsKey(responseItemId))
                 {
                     CEconItemPreviewDataBlock? item = null;
                     if (response.Body.iteminfo != null)
@@ -478,16 +522,9 @@ namespace CSGOSkinAPI.Services
                         Console.WriteLine($"[{accountManager.Account.Username}] No item info in response");
                     }
 
-                    // Resolve all pending requests for this itemid
-                    lock (pendingList)
-                    {
-                        Console.WriteLine($"[{accountManager.Account.Username}] Resolving {pendingList.Count} pending requests for itemid {responseItemId}");
-                        foreach (var tcs in pendingList)
-                        {
-                            tcs.SetResult(item);
-                        }
-                    }
-                    _pendingRequests.TryRemove(responseItemId, out _);
+                    // Pull the pending list from the dictionary and resolve every waiter on it
+                    // atomically (see ResolvePendingRequest).
+                    ResolvePendingRequest(responseItemId, item);
                 }
                 else
                 {
