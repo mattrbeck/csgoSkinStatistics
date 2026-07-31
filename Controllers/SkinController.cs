@@ -780,6 +780,9 @@ namespace CSGOSkinAPI.Controllers
             {
                 s.sticker_id,
                 s.wear,
+                rotation = s.ShouldSerializerotation() ? s.rotation : (float?)null,
+                offset_x = s.ShouldSerializeoffset_x() ? s.offset_x : (float?)null,
+                offset_y = s.ShouldSerializeoffset_y() ? s.offset_y : (float?)null,
                 name = kit?.Name ?? "",
                 image = kit?.Image ?? "",
             };
@@ -799,6 +802,9 @@ namespace CSGOSkinAPI.Controllers
                 {
                     k.sticker_id,
                     k.wear,
+                    offset_x = k.ShouldSerializeoffset_x() ? k.offset_x : (float?)null,
+                    offset_y = k.ShouldSerializeoffset_y() ? k.offset_y : (float?)null,
+                    pattern = k.ShouldSerializepattern() ? k.pattern : (uint?)null,
                     name = sealedKit?.Name ?? "",
                     image = sealedKit?.Image ?? "",
                     slab = true,
@@ -811,6 +817,9 @@ namespace CSGOSkinAPI.Controllers
             {
                 k.sticker_id,
                 k.wear,
+                offset_x = k.ShouldSerializeoffset_x() ? k.offset_x : (float?)null,
+                offset_y = k.ShouldSerializeoffset_y() ? k.offset_y : (float?)null,
+                pattern = k.ShouldSerializepattern() ? k.pattern : (uint?)null,
                 name = kit?.Name ?? "",
                 image = kit?.Image ?? "",
                 slab = false,
