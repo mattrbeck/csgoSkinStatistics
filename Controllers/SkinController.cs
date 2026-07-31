@@ -466,6 +466,26 @@ namespace CSGOSkinAPI.Controllers
             });
         }
 
+        // Longest prefix of an untrusted value we will put in a log line.
+        private const int MaxLoggedLength = 200;
+
+        // Renders an untrusted request value for the log. Control characters become '?' so a caller
+        // cannot embed CR/LF and forge whole log lines (which would let them fake entries for other
+        // requests, or bury their own), and the value is clipped so a request-sized string can't
+        // flood the log.
+        internal static string ForLog(string? value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return "(empty)";
+            }
+
+            var clipped = value.Length > MaxLoggedLength
+                ? string.Concat(value.AsSpan(0, MaxLoggedLength), "...(truncated)")
+                : value;
+            return new string([.. clipped.Select(c => char.IsControl(c) ? '?' : c)]);
+        }
+
         // A 17-digit id64 in the "76561…" individual-account block. Checked numerically rather
         // than by formatting the value to a string twice.
         private static bool IsValidSteamId64(ulong steamId) =>
@@ -474,8 +494,13 @@ namespace CSGOSkinAPI.Controllers
         // Steam vanity names are letters, digits, underscores and hyphens. Validating before the
         // name is interpolated into a steamcommunity.com URL keeps an attacker from injecting path
         // segments, a different host, or query parameters into our server-side fetch (SSRF).
-        internal static bool IsValidVanity(string vanity) =>
-            Regex.IsMatch(vanity, @"^[A-Za-z0-9_-]{2,32}$");
+        //
+        // \z, not $: in .NET `$` also matches immediately *before* a trailing newline, so the old
+        // pattern accepted "name\n" - which then travelled on into the fetch URL and the logs.
+        [GeneratedRegex(@"\A[A-Za-z0-9_-]{2,32}\z")]
+        private static partial Regex VanityRegex();
+
+        internal static bool IsValidVanity(string vanity) => VanityRegex().IsMatch(vanity);
 
         // Classifies a user input - a raw SteamId64, a profiles/<id64> URL, an id/<vanity> URL,
         // or a bare vanity name - into either a known SteamId64 or a vanity that still needs a
@@ -535,12 +560,12 @@ namespace CSGOSkinAPI.Controllers
                     return steamId;
                 }
 
-                Console.WriteLine($"Failed to resolve custom URL '{customUrl}' to SteamId64");
+                Console.WriteLine($"Failed to resolve custom URL '{ForLog(customUrl)}' to SteamId64");
                 return null;
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error resolving custom URL '{customUrl}': {ex.Message}");
+                Console.WriteLine($"Error resolving custom URL '{ForLog(customUrl)}': {ex.Message}");
                 return null;
             }
         }
@@ -614,7 +639,13 @@ namespace CSGOSkinAPI.Controllers
         {
             var link = Regex.Replace(actionLink, @"%propid:(\d+)%", m =>
             {
-                var pid = int.Parse(m.Groups[1].Value);
+                // TryParse, not Parse: the regex caps nothing, so a digit run longer than int can
+                // hold would throw OverflowException here and surface as a 500 for the whole
+                // inventory. An unparseable id is left as-is, like one with no matching property.
+                if (!int.TryParse(m.Groups[1].Value, out var pid))
+                {
+                    return m.Value;
+                }
                 var prop = assetProps?.FirstOrDefault(p => p.propertyid == pid);
                 return prop?.string_value ?? prop?.int_value ?? prop?.float_value ?? m.Value;
             });
@@ -632,7 +663,7 @@ namespace CSGOSkinAPI.Controllers
                 var hexMatch = InspectUrlHexRegex().Match(decodedUrl);
                 if (!hexMatch.Success)
                 {
-                    Console.WriteLine($"Failed to decode URL: {url}");
+                    Console.WriteLine($"Failed to decode URL: {ForLog(url)}");
                     return null;
                 }
                 var hexValue = hexMatch.Groups[1].Value;
@@ -641,21 +672,21 @@ namespace CSGOSkinAPI.Controllers
                 // request thread.
                 if (hexValue.Length > 2048)
                 {
-                    Console.WriteLine($"Hex payload too long: {url}");
+                    Console.WriteLine($"Hex payload too long: {ForLog(url)}");
                     return null;
                 }
                 // The regex matches odd-length runs too, which Convert.FromHexString rejects with a
                 // FormatException - guard it so a bad link is a 400, not an unhandled 500.
                 if (hexValue.Length % 2 != 0)
                 {
-                    Console.WriteLine($"Hex payload has odd length: {url}");
+                    Console.WriteLine($"Hex payload has odd length: {ForLog(url)}");
                     return null;
                 }
                 var rawBytes = Convert.FromHexString(hexValue);
                 // Need at least the leading byte, one protobuf byte, and the 4-byte checksum.
                 if (rawBytes.Length < 6)
                 {
-                    Console.WriteLine($"Hex payload too short: {url}");
+                    Console.WriteLine($"Hex payload too short: {ForLog(url)}");
                     return null;
                 }
                 // As of March 2026 the payload is XOR-obfuscated with its first byte
@@ -693,7 +724,7 @@ namespace CSGOSkinAPI.Controllers
                 !ulong.TryParse(match.Groups[3].Value, out var a) ||
                 !ulong.TryParse(match.Groups[4].Value, out var d))
             {
-                Console.WriteLine($"Inspect URL has out-of-range numeric fields: {url}");
+                Console.WriteLine($"Inspect URL has out-of-range numeric fields: {ForLog(url)}");
                 return null;
             }
             if (firstParam == "S")
