@@ -727,7 +727,7 @@ namespace CSGOSkinAPI.Controllers
                 // The decoded cert/GC item carries the live kill count for free (proto field
                 // 10); null for non-StatTrak items. Cached items keep it via the killeatervalue
                 // column (see below) - older cached rows that predate that column report null.
-                stattrak_kills = item.ShouldSerializekilleatervalue() ? item.killeatervalue : (uint?)null,
+                stattrak_kills = item.StatTrakKills(),
                 souvenir = itemInfo.IsSouvenir,
                 market_hash_name = itemInfo.MarketHashName,
                 special = itemInfo.Special,
@@ -773,16 +773,16 @@ namespace CSGOSkinAPI.Controllers
             };
         }
 
-        private static object MakeStickerDto(CEconItemPreviewDataBlock.Sticker s, ConstDataService constData)
+        internal static object MakeStickerDto(CEconItemPreviewDataBlock.Sticker s, ConstDataService constData)
         {
             var kit = constData.ResolveSticker(s.sticker_id);
             return new
             {
                 s.sticker_id,
                 s.wear,
-                rotation = s.ShouldSerializerotation() ? s.rotation : (float?)null,
-                offset_x = s.ShouldSerializeoffset_x() ? s.offset_x : (float?)null,
-                offset_y = s.ShouldSerializeoffset_y() ? s.offset_y : (float?)null,
+                rotation = s.Rotation(),
+                offset_x = s.OffsetX(),
+                offset_y = s.OffsetY(),
                 name = kit?.Name ?? "",
                 image = kit?.Image ?? "",
             };
@@ -792,38 +792,21 @@ namespace CSGOSkinAPI.Controllers
         // it; the sealed sticker's id rides in proto field 12 (see StickerSlab). When present we
         // display the sealed sticker (the slab container itself isn't in our keychain catalog)
         // and flag it, so the client can mark it as a slab.
-        private static object MakeKeychainDto(CEconItemPreviewDataBlock.Sticker k, ConstDataService constData)
+        internal static object MakeKeychainDto(CEconItemPreviewDataBlock.Sticker k, ConstDataService constData)
         {
             var wrapped = StickerSlab.GetWrappedStickerId(k);
-            if (wrapped != 0)
-            {
-                var sealedKit = constData.ResolveSticker(wrapped);
-                return new
-                {
-                    k.sticker_id,
-                    k.wear,
-                    offset_x = k.ShouldSerializeoffset_x() ? k.offset_x : (float?)null,
-                    offset_y = k.ShouldSerializeoffset_y() ? k.offset_y : (float?)null,
-                    pattern = k.ShouldSerializepattern() ? k.pattern : (uint?)null,
-                    name = sealedKit?.Name ?? "",
-                    image = sealedKit?.Image ?? "",
-                    slab = true,
-                    wrapped_sticker = wrapped,
-                };
-            }
-
-            var kit = constData.ResolveKeychain(k.sticker_id);
+            var kit = wrapped != 0 ? constData.ResolveSticker(wrapped) : constData.ResolveKeychain(k.sticker_id);
             return new
             {
                 k.sticker_id,
                 k.wear,
-                offset_x = k.ShouldSerializeoffset_x() ? k.offset_x : (float?)null,
-                offset_y = k.ShouldSerializeoffset_y() ? k.offset_y : (float?)null,
-                pattern = k.ShouldSerializepattern() ? k.pattern : (uint?)null,
+                offset_x = k.OffsetX(),
+                offset_y = k.OffsetY(),
+                pattern = k.Pattern(),
                 name = kit?.Name ?? "",
                 image = kit?.Image ?? "",
-                slab = false,
-                wrapped_sticker = 0u,
+                slab = wrapped != 0,
+                wrapped_sticker = wrapped,
             };
         }
     }
