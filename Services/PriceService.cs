@@ -116,23 +116,7 @@ namespace CSGOSkinAPI.Services
         {
             // Serve the persisted snapshot straight away (even if stale) so prices are live from the
             // first request while the network refresh runs.
-            try
-            {
-                var persisted = await dbService.LoadPricesAsync();
-                if (persisted.Count > 0)
-                {
-                    _prices = persisted.ToDictionary(
-                        kv => kv.Key,
-                        kv => new SkinPrice(kv.Value.MinCents, kv.Value.SuggestedCents, kv.Value.UpdatedAt),
-                        StringComparer.Ordinal);
-                    _updatedAtUtc = persisted.Values.Max(v => v.UpdatedAt);
-                    Console.WriteLine($"Loaded {persisted.Count} persisted Skinport prices (latest {_updatedAtUtc:u}).");
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Failed to load persisted prices: {ex.Message}");
-            }
+            await LoadPersistedPricesAsync();
 
             var coldStartAttempts = 0;
             while (!stoppingToken.IsCancellationRequested)
@@ -170,7 +154,31 @@ namespace CSGOSkinAPI.Services
             }
         }
 
-        private async Task RefreshAsync(CancellationToken cancellationToken)
+        // Populate the in-memory map from the DB snapshot. A failure here is non-fatal: the refresh
+        // below will repopulate from the feed. internal so tests can drive the load path directly
+        // rather than through the background loop's timing.
+        internal async Task LoadPersistedPricesAsync()
+        {
+            try
+            {
+                var persisted = await dbService.LoadPricesAsync();
+                if (persisted.Count > 0)
+                {
+                    _prices = persisted.ToDictionary(
+                        kv => kv.Key,
+                        kv => new SkinPrice(kv.Value.MinCents, kv.Value.SuggestedCents, kv.Value.UpdatedAt),
+                        StringComparer.Ordinal);
+                    _updatedAtUtc = persisted.Values.Max(v => v.UpdatedAt);
+                    Console.WriteLine($"Loaded {persisted.Count} persisted Skinport prices (latest {_updatedAtUtc:u}).");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Failed to load persisted prices: {ex.Message}");
+            }
+        }
+
+        internal async Task RefreshAsync(CancellationToken cancellationToken)
         {
             try
             {
