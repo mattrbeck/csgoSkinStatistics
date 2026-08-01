@@ -11,8 +11,8 @@ module.exports = {
   coverageReporters: ['text', 'lcov', 'html', 'json'],
   // Coverage ratchet. These are floors, not goals.
   //
-  // Measured 2026-07-31 (`npx jest --coverage`, 7 suites / 90 tests):
-  //   statements 24.06%  branches 26.21%  functions 27.05%  lines 24.14%
+  // Measured 2026-08-01 (`npx jest --coverage`, 8 suites / 171 tests):
+  //   statements 40.66%  branches 44.33%  functions 36.47%  lines 41.78%
   // The floors below sit ~2 points under those numbers so ordinary variation
   // (a skipped test, a helper moving between files) cannot redden a healthy build.
   //
@@ -25,13 +25,15 @@ module.exports = {
   // jest without --coverage), so it enforced nothing for the whole life of the
   // repo. A 22% gate that runs beats a 70% gate that does not.
   //
-  // Biggest single win available: wwwroot/inventory-item.js (949 lines) is at 0%.
+  // wwwroot/inventory-item.js went 0% -> ~98% on 2026-08-01, which is what moved the global
+  // numbers here. Biggest single win still available: wwwroot/post.js (the single-item page)
+  // at ~13%.
   coverageThreshold: {
     global: {
-      branches: 24,
-      functions: 25,
-      lines: 22,
-      statements: 22
+      branches: 42,
+      functions: 34,
+      lines: 39,
+      statements: 38
     }
   },
   verbose: true,

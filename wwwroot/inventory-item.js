@@ -947,3 +947,9 @@ class InventoryItem extends HTMLElement {
 
 // Register the custom element
 customElements.define('inventory-item', InventoryItem);
+
+// Exposed for unit tests under Node/CommonJS. The browser has no `module`, so this is skipped
+// there and the class stays reachable only through the registered <inventory-item> tag.
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { InventoryItem };
+}
