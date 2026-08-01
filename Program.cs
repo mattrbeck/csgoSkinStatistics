@@ -263,6 +263,11 @@ app.UseRouting();
 app.UseRateLimiter();
 app.MapControllers();
 
+// The boot and shutdown lines below. A fixed category rather than app.Logger, whose category is
+// the application name: everything this app logs is then under CSGOSkinAPI.*, which is what makes
+// that one key in appsettings.json a complete knob for the app's own output.
+var startupLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("CSGOSkinAPI.Startup");
+
 // Initialize database on startup
 var dbService = app.Services.GetRequiredService<DatabaseService>();
 await dbService.InitializeDatabaseAsync();
@@ -279,7 +284,7 @@ _ = Task.Run(async () =>
     }
     catch (Exception ex)
     {
-        app.Logger.LogError(ex, "Initial Steam connection failed");
+        startupLogger.LogError(ex, "Initial Steam connection failed");
     }
 });
 
@@ -295,7 +300,7 @@ var constDataService = app.Services.GetRequiredService<ConstDataService>();
 var lifetime = app.Services.GetRequiredService<IHostApplicationLifetime>();
 lifetime.ApplicationStopping.Register(() =>
 {
-    app.Logger.LogInformation("Application stopping, disconnecting from Steam...");
+    startupLogger.LogInformation("Application stopping, disconnecting from Steam...");
     steamService.Disconnect();
 });
 
