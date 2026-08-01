@@ -385,8 +385,7 @@ namespace CSGOSkinAPI.Services
             command.Parameters.AddWithValue("@origin", item.origin);
             command.Parameters.AddWithValue("@stattrak", item.ShouldSerializekilleatervalue() ? 1 : 0);
             // The live kill count when present, so cache hits keep it (not just the flag).
-            command.Parameters.AddWithValue("@killeatervalue",
-                item.ShouldSerializekilleatervalue() ? item.killeatervalue : DBNull.Value);
+            command.Parameters.AddWithValue("@killeatervalue", DbValue(item.StatTrakKills()));
 
             await command.ExecuteNonQueryAsync();
         }
@@ -429,6 +428,12 @@ namespace CSGOSkinAPI.Services
             await transaction.CommitAsync();
         }
 
+        // An optional proto field (see StickerFields) binds as its value when present and as SQL
+        // NULL when absent, so the round-trip through ReadStickersAsync restores exactly what the
+        // wire carried - "absent" never comes back as a real 0.
+        private static object DbValue<T>(T? value) where T : struct
+            => value.HasValue ? value.Value : DBNull.Value;
+
         private static async Task ClearExtrasAsync(ulong itemId, SqliteConnection connection, SqliteTransaction transaction)
         {
             foreach (var table in new[] { "stickers", "keychains" })
@@ -456,14 +461,14 @@ namespace CSGOSkinAPI.Services
                 insertCommand.Parameters.AddWithValue("@slot", item.slot);
                 insertCommand.Parameters.AddWithValue("@sticker_id", item.sticker_id);
                 insertCommand.Parameters.AddWithValue("@wear", item.wear);
-                insertCommand.Parameters.AddWithValue("@scale", item.ShouldSerializescale() ? item.scale : DBNull.Value);
-                insertCommand.Parameters.AddWithValue("@rotation", item.ShouldSerializerotation() ? item.rotation : DBNull.Value);
-                insertCommand.Parameters.AddWithValue("@tint_id", item.ShouldSerializetint_id() ? item.tint_id : DBNull.Value);
-                insertCommand.Parameters.AddWithValue("@offset_x", item.ShouldSerializeoffset_x() ? item.offset_x : DBNull.Value);
-                insertCommand.Parameters.AddWithValue("@offset_y", item.ShouldSerializeoffset_y() ? item.offset_y : DBNull.Value);
-                insertCommand.Parameters.AddWithValue("@offset_z", item.ShouldSerializeoffset_z() ? item.offset_z : DBNull.Value);
-                insertCommand.Parameters.AddWithValue("@pattern", item.ShouldSerializepattern() ? item.pattern : DBNull.Value);
-                insertCommand.Parameters.AddWithValue("@highlight_reel", item.ShouldSerializehighlight_reel() ? item.highlight_reel : DBNull.Value);
+                insertCommand.Parameters.AddWithValue("@scale", DbValue(item.Scale()));
+                insertCommand.Parameters.AddWithValue("@rotation", DbValue(item.Rotation()));
+                insertCommand.Parameters.AddWithValue("@tint_id", DbValue(item.TintId()));
+                insertCommand.Parameters.AddWithValue("@offset_x", DbValue(item.OffsetX()));
+                insertCommand.Parameters.AddWithValue("@offset_y", DbValue(item.OffsetY()));
+                insertCommand.Parameters.AddWithValue("@offset_z", DbValue(item.OffsetZ()));
+                insertCommand.Parameters.AddWithValue("@pattern", DbValue(item.Pattern()));
+                insertCommand.Parameters.AddWithValue("@highlight_reel", DbValue(item.HighlightReel()));
                 // Sticker Slab's sealed sticker id, carried in the unmodeled proto field 12.
                 var wrapped = StickerSlab.GetWrappedStickerId(item);
                 insertCommand.Parameters.AddWithValue("@wrapped_sticker", wrapped != 0 ? wrapped : DBNull.Value);
