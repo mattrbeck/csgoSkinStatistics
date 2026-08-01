@@ -1,11 +1,10 @@
 using System.Text.Json;
-using CSGOSkinAPI.Models;
 using CSGOSkinAPI.Services;
 using ProtoBuf;
 using SteamKit2.GC.CSGO.Internal;
 using Xunit;
 
-namespace csgoSkinStatistics.Tests.Controllers;
+namespace csgoSkinStatistics.Tests.Services;
 
 // These tests resolve real decal names, so the fixture takes the shipped stickers.json. It is a few
 // MB, so parse it once and share the service across every test in the class.
@@ -20,10 +19,10 @@ public sealed class ConstDataFixture : IDisposable
     public void Dispose() => _catalogs.Dispose();
 }
 
-// Exercises the real ItemResponse DTO builders and inspect-URL parser through InternalsVisibleTo.
-// These assert on the serialized JSON rather than the anonymous types, because the JSON *is* the
-// contract: the browser reads these field names straight off the response.
-public class SkinControllerUnitTests(ConstDataFixture fixture) : IClassFixture<ConstDataFixture>
+// Exercises the real ItemResponse DTO builders - MakeStickerDto and MakeKeychainDto - through
+// InternalsVisibleTo. These assert on the serialized JSON rather than the anonymous types, because
+// the JSON *is* the contract: the browser reads these field names straight off the response.
+public class ItemResponseTests(ConstDataFixture fixture) : IClassFixture<ConstDataFixture>
 {
     private readonly ConstDataService _constData = fixture.Service;
 
@@ -226,113 +225,5 @@ public class SkinControllerUnitTests(ConstDataFixture fixture) : IClassFixture<C
         Assert.Equal(
             JsonSerializer.Serialize(ItemResponse.MakeKeychainDto(fresh, _constData)),
             JsonSerializer.Serialize(ItemResponse.MakeKeychainDto(reloaded, _constData)));
-    }
-
-    // --- inspect URL parsing -----------------------------------------------------------
-
-    [Fact]
-    public void ParseInspectUrl_ClassicOwnerLink_ReturnsOwnerAssetAndD()
-    {
-        var url = "steam://rungame/730/76561202255233023/+csgo_econ_action_preview%20S76561198123456789A12345D67890";
-
-        var parsed = InspectLink.ParseInspectUrl(url);
-
-        Assert.NotNull(parsed);
-        var (s, a, d, m, directItem) = parsed.Value;
-        Assert.Equal(76561198123456789UL, s);
-        Assert.Equal(12345UL, a);
-        Assert.Equal(67890UL, d);
-        Assert.Equal(0UL, m);
-        Assert.Null(directItem); // an S-form link carries no item data; it needs the GC or the cache
-    }
-
-    [Fact]
-    public void ParseInspectUrl_MarketLink_PopulatesMNotS()
-    {
-        var url = "steam://rungame/730/76561202255233023/+csgo_econ_action_preview%20M1A12345D67890";
-
-        var parsed = InspectLink.ParseInspectUrl(url);
-
-        Assert.NotNull(parsed);
-        var (s, a, d, m, _) = parsed.Value;
-        Assert.Equal(0UL, s);
-        Assert.Equal(1UL, m);
-        Assert.Equal(12345UL, a);
-        Assert.Equal(67890UL, d);
-    }
-
-    [Fact]
-    public void ParseInspectUrl_ShortPrefixForm_StillParses()
-    {
-        // The prefix changed from "rungame/730/<steamid>/" to "run/730//" in March 2026; the parser
-        // matches on the command, not the prefix, so both forms have to work.
-        var parsed = InspectLink.ParseInspectUrl(
-            "steam://run/730//+csgo_econ_action_preview%20S76561198123456789A12345D67890");
-
-        Assert.NotNull(parsed);
-        Assert.Equal(12345UL, parsed.Value.a);
-    }
-
-    [Fact]
-    public void ParseInspectUrl_NotAnInspectLink_ReturnsNull()
-    {
-        Assert.Null(InspectLink.ParseInspectUrl("https://example.com/not-a-link"));
-    }
-
-    // --- inventory inspect-link templating ---------------------------------------------
-
-    [Fact]
-    public void BuildInspectLink_SubstitutesOwnerAndAsset()
-    {
-        var link = InspectLink.BuildInspectLink(
-            "steam://rungame/730/%owner_steamid%/+csgo_econ_action_preview S%owner_steamid%A%assetid%D123",
-            assetProps: null,
-            ownerSteamId: "76561198123456789",
-            assetId: "519");
-
-        Assert.Equal(
-            "steam://rungame/730/76561198123456789/+csgo_econ_action_preview S76561198123456789A519D123",
-            link);
-    }
-
-    [Fact]
-    public void BuildInspectLink_SubstitutesTheItemCertificateProperty()
-    {
-        // propid 6 is the self-contained cert; once substituted the link decodes with no GC call.
-        var props = new List<SteamAssetProperty>
-        {
-            new() { propertyid = 6, string_value = "00DEADBEEF" },
-        };
-
-        var link = InspectLink.BuildInspectLink(
-            "steam://run/730//+csgo_econ_action_preview %propid:6%", props, "76561198123456789", "519");
-
-        Assert.Equal("steam://run/730//+csgo_econ_action_preview 00DEADBEEF", link);
-    }
-
-    [Fact]
-    public void BuildInspectLink_UnresolvedPlaceholderIsLeftIntact()
-    {
-        // An asset with no matching property must leave the placeholder alone rather than splice in
-        // an empty string, so the link visibly fails to parse instead of silently pointing at junk.
-        var link = InspectLink.BuildInspectLink(
-            "steam://run/730//+csgo_econ_action_preview %propid:6%", [], "76561198123456789", "519");
-
-        Assert.Equal("steam://run/730//+csgo_econ_action_preview %propid:6%", link);
-    }
-
-    // --- steam id parsing boundaries ---------------------------------------------------
-
-    [Theory]
-    [InlineData("7656119812345678")]      // 16 digits - too short for an id64
-    [InlineData("765611981234567890")]    // 18 digits - too long
-    [InlineData("86561198123456789")]     // right length, outside the individual-account block
-    public void ParseSteamInput_OutOfRangeNumericId_IsNotTreatedAsAnId(string input)
-    {
-        var (steamId64, vanity) = SteamProfile.ParseSteamInput(input);
-
-        Assert.Null(steamId64);
-        // An all-digit input is never a vanity name either, so it resolves to nothing.
-        Assert.Null(vanity);
     }
 }
