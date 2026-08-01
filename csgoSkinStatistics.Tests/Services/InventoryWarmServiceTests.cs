@@ -438,8 +438,10 @@ public class InventoryWarmServiceTests : IDisposable
         // pair both assets with the first description and cache nothing.
         //
         // NOTE: this pins the (classid, instanceid) pairing, not how it is looked up. The per-asset
-        // FirstOrDefault scan is O(assets x descriptions) and is owned by a later wave; a
-        // dictionary keyed on the same pair must keep this test green.
+        // FirstOrDefault scan it was written against is gone - the pairing now happens once, in the
+        // SteamInventoryDocument shared with the /api/inventory endpoint - and this test passed
+        // unchanged across that move, which is exactly what it is here to do. It stays because the
+        // pairing is what matters to the warmer, whoever owns the lookup.
         var db = await NewDbAsync();
         var masked = new CEconItemPreviewDataBlock { itemid = 42001, defindex = 7, paintindex = 282, paintseed = 1 };
         var certified = new CEconItemPreviewDataBlock { itemid = 42002, defindex = 7, paintindex = 282, paintseed = 2 };

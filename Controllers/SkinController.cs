@@ -173,13 +173,10 @@ namespace CSGOSkinAPI.Controllers
                     return cached;
                 }
 
-                using var httpClient = httpClientFactory.CreateClient("steam");
-                httpClient.Timeout = TimeSpan.FromSeconds(10);
-                
-                var inventoryUrl = $"https://steamcommunity.com/inventory/{steamid}/730/2?l=english&count=2000";
-                _logger.LogDebug("Fetching inventory for {SteamId} from {InventoryUrl}", steamId, inventoryUrl);
-                
-                var response = await httpClient.GetAsync(inventoryUrl);
+                _logger.LogDebug("Fetching inventory for {SteamId} from {InventoryUrl}",
+                    steamId, SteamInventoryDocument.BuildUrl(steamid));
+
+                var response = await SteamInventoryDocument.FetchAsync(httpClientFactory, steamid);
                 if (!response.IsSuccessStatusCode)
                 {
                     if (response.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
@@ -221,73 +218,29 @@ namespace CSGOSkinAPI.Controllers
                         "Empty response from Steam API", NegativeInventoryCacheTtl);
                 }
 
-                var inventoryData = JsonSerializer.Deserialize<SteamInventoryResponse>(jsonContent);
-                if (inventoryData?.assets == null || inventoryData.descriptions == null)
+                // Stitching Steam's three parallel arrays into one inspect link per copy is shared
+                // with InventoryWarmService - see SteamInventoryDocument for the shape of the
+                // response, what the link template's placeholders mean, and why the description
+                // index is keyed on (classid, instanceid).
+                var inventory = SteamInventoryDocument.TryParse(jsonContent);
+                if (inventory == null)
                 {
                     return CacheInventoryFailure(cacheKey, StatusCodes.Status400BadRequest,
                         "Invalid inventory data or inventory is empty", NegativeInventoryCacheTtl);
                 }
 
-                // The Steam Community inventory response is split across three parallel arrays
-                // that we have to stitch together to build a usable inspect link per item:
+                // First pass: parse each inspectable asset's link and collect the itemids that need
+                // a cache lookup (everything that didn't decode locally from a cert) so they can be
+                // fetched in one batch instead of one connection per asset.
                 //
-                //   {
-                //     "assets":          [ { "assetid": "519...", "classid": "799...", "instanceid": "302..." }, ... ],
-                //     "descriptions":    [ { "classid": "799...", "instanceid": "302...",   // shared by all assets of this kind
-                //                            "actions": [ { "link": "steam://run/730//+csgo_econ_action_preview%20%propid:6%" } ],
-                //                            "tags": [...] }, ... ],
-                //     "asset_properties":[ { "assetid": "519...",                            // per-asset, only for items that have them
-                //                            "asset_properties": [ { "propertyid": 6, "string_value": "352581D6EDF7..." }, ... ] }, ... ]
-                //   }
-                //
-                // The inspect link lives on the *description* (shared by every copy of that skin), so it can't
-                // embed per-asset data directly. Instead Steam templates it with placeholders we must fill in:
-                //   - %owner_steamid% / %assetid% -> identify which copy in whose inventory (the classic S..A..D.. form)
-                //   - %propid:N%                  -> the value of property N in *this asset's* asset_properties entry.
-                // For skins, propid 6 ("Item Certificate") is a self-contained, XOR-obfuscated hex payload; once
-                // substituted in, the link becomes the hex form that ParseInspectUrl decodes directly into full
-                // item data with no Game Coordinator round-trip. (Fixed items like music kits skip the templating
-                // and ship the hex inline, so they need no substitution at all.)
-                //
-                // Build assetid -> properties up front so the per-item loop can resolve %propid:N% in O(1).
-                var propsByAsset = inventoryData.asset_properties?
-                    .ToDictionary(ap => ap.assetid, ap => ap.asset_properties ?? [])
-                    ?? [];
-
-                // Index descriptions by (classid, instanceid) once. The inspect link, tags, name and
-                // price all live on the shared description, and a per-asset FirstOrDefault over the
-                // descriptions array is O(assets x descriptions) - 2000x2000 on a maxed inventory.
-                var descriptionByClassInstance = new Dictionary<(string classid, string instanceid), SteamDescription>();
-                foreach (var d in inventoryData.descriptions)
-                {
-                    descriptionByClassInstance.TryAdd((d.classid, d.instanceid), d);
-                }
-
-                // First pass: resolve each inspectable asset's link and parsed identity, and collect
-                // the itemids that need a cache lookup (everything that didn't decode locally from a
-                // cert) so they can be fetched in one batch instead of one connection per asset.
+                // Parsed here, not in the shared walk, because these links are logged under this
+                // controller's separate CSGOSkinAPI.InspectLinks category; the warmer logs its own
+                // parse failures under its own.
                 var prepared = new List<(SteamAsset asset, SteamDescription description, string inspectLink,
                     (ulong s, ulong a, ulong d, ulong m, CEconItemPreviewDataBlock? directItem)? parsed)>();
                 var idsToLookUp = new List<ulong>();
-                foreach (var asset in inventoryData.assets)
+                foreach (var (asset, description, inspectLink) in inventory.InspectableAssets(steamid))
                 {
-                    if (!descriptionByClassInstance.TryGetValue((asset.classid, asset.instanceid), out var description)
-                        || description.actions == null)
-                    {
-                        continue;
-                    }
-
-                    var inspectAction = description.actions.FirstOrDefault(a =>
-                        a.link?.Contains("csgo_econ_action_preview") == true);
-                    if (inspectAction?.link == null)
-                    {
-                        continue;
-                    }
-
-                    // Fill the template placeholders described above.
-                    propsByAsset.TryGetValue(asset.assetid, out var assetProps);
-                    var inspectLink = BuildInspectLink(inspectAction.link, assetProps, steamid, asset.assetid);
-
                     var parsed = ParseInspectUrl(inspectLink, _inspectLogger);
                     if (parsed.HasValue && parsed.Value.directItem == null)
                     {
@@ -372,11 +325,10 @@ namespace CSGOSkinAPI.Controllers
                 // capped while `total` still reports the full count. Flag that so the UI doesn't
                 // present the capped view as complete. (See L2 in the audit; full pagination is the
                 // fuller fix.)
-                var truncated = inventoryData.total > inventoryData.assets.Count;
                 var result = new
                 {
-                    total = inventoryData.total,
-                    truncated,
+                    total = inventory.Total,
+                    truncated = inventory.Truncated,
                     success = 1,
                     steamid = steamId.ToString(),
                     csgo_items = csgoItems
@@ -384,7 +336,7 @@ namespace CSGOSkinAPI.Controllers
 
                 _logger.LogDebug(
                     "Successfully parsed {ParsedCount} CS2 items from {TotalCount} total items",
-                    csgoItems.Count, inventoryData.total);
+                    csgoItems.Count, inventory.Total);
 
                 // Cache the exact bytes we return, keyed by resolved SteamId64. Size is the byte
                 // length so the MemoryCache's byte SizeLimit bounds total memory; expires after

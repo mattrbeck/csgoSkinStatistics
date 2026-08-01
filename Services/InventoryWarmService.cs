@@ -51,10 +51,8 @@ namespace CSGOSkinAPI.Services
             // are throttled too instead of being retried on every subsequent miss.
             await dbService.RecordWarmAsync(steamid, 0);
 
-            using var httpClient = httpClientFactory.CreateClient("steam");
-            httpClient.Timeout = TimeSpan.FromSeconds(10);
-            var response = await httpClient.GetAsync(
-                $"https://steamcommunity.com/inventory/{steamid}/730/2?l=english&count=2000", cancellationToken);
+            var response = await SteamInventoryDocument.FetchAsync(
+                httpClientFactory, steamid.ToString(), cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
                 if (response.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
@@ -83,38 +81,29 @@ namespace CSGOSkinAPI.Services
                 return;
             }
 
-            var inventoryData = JsonSerializer.Deserialize<SteamInventoryResponse>(
+            // Shared with the /api/inventory endpoint (see SteamInventoryDocument): the fetch, the
+            // deserialize, the two per-asset indexes and the walk over inspectable assets are the
+            // same work for both, and the description lookup inside it is a dictionary hit rather
+            // than the per-asset scan of the descriptions array this method used to do.
+            var document = SteamInventoryDocument.TryParse(
                 await response.Content.ReadAsStringAsync(cancellationToken));
-            if (inventoryData?.assets == null || inventoryData.descriptions == null)
+            if (document == null)
             {
                 logger.LogDebug("Inventory warm for {SteamId}: empty or invalid inventory", steamid);
                 return;
             }
 
-            var propsByAsset = inventoryData.asset_properties?
-                .ToDictionary(ap => ap.assetid, ap => ap.asset_properties ?? [])
-                ?? [];
-
             var cached = 0;
-            foreach (var asset in inventoryData.assets)
+            foreach (var (_, _, inspectLink) in document.InspectableAssets(steamid.ToString()))
             {
-                var description = inventoryData.descriptions.FirstOrDefault(d =>
-                    d.classid == asset.classid && d.instanceid == asset.instanceid);
-                var actionLink = description?.actions?.FirstOrDefault(a =>
-                    a.link?.Contains("csgo_econ_action_preview") == true)?.link;
-                if (actionLink == null)
-                {
-                    continue;
-                }
-
-                propsByAsset.TryGetValue(asset.assetid, out var assetProps);
-                var inspectLink = Controllers.SkinController.BuildInspectLink(
-                    actionLink, assetProps, steamid.ToString(), asset.assetid);
-
                 // Only certificate-bearing items decode locally (directItem != null);
                 // legacy S/A/D links parse but would need the GC, so they are skipped.
                 // SaveItemWithExtrasAsync additionally guards the itemid==0 non-paint
                 // types that cannot be keyed.
+                //
+                // Parsed here rather than in the shared walk because the endpoint parses the same
+                // link under its own CSGOSkinAPI.InspectLinks logger, and a malformed link found
+                // by the warmer belongs in this service's log, not that one.
                 var directItem = Controllers.SkinController.ParseInspectUrl(inspectLink, logger)?.directItem;
                 if (directItem != null && directItem.itemid != 0)
                 {
@@ -126,11 +115,10 @@ namespace CSGOSkinAPI.Services
             await dbService.RecordWarmAsync(steamid, cached);
             // Single count=2000 page, same as the inventory endpoint: a bigger inventory is warmed
             // only up to the first page. That's fine for a best-effort warmer, but note it.
-            var truncated = inventoryData.total > inventoryData.assets.Count;
             logger.LogInformation(
                 "Inventory warm for {SteamId}: cached {CachedCount} of {AssetCount} items "
                 + "(truncated at one page: {Truncated})",
-                steamid, cached, inventoryData.assets.Count, truncated);
+                steamid, cached, document.Assets.Count, document.Truncated);
         }
     }
 }
