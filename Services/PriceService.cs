@@ -7,8 +7,10 @@ namespace CSGOSkinAPI.Services
     public record SkinPrice(int? MinCents, int? SuggestedCents, DateTime UpdatedAtUtc);
 
     // A resolved price for a lookup: the cents plus whether it's approximate. Approximate is true
-    // when the exact variant has aged out of the feed (>1 week) or when we fell back to the nearest
-    // wear of the same skin because the exact variant was never listed.
+    // when the exact variant has aged out of the feed (>1 week) or when we fell back to an adjacent
+    // wear of the same skin because the exact variant was never listed. In the fallback case the
+    // cents can be an average of the two neighbouring wears, and so correspond to no real listing -
+    // which is the whole reason the flag has to travel with the number.
     public record PriceResult(int? MinCents, int? SuggestedCents, bool Approximate);
 
     // Skinport base pricing. Skinport's free, no-auth /v1/items endpoint returns the entire CS2
@@ -23,9 +25,9 @@ namespace CSGOSkinAPI.Services
     //
     // The feed only carries variants that have actually listed on Skinport, so odd wears / StatTrak
     // combos are often absent. We fill those two ways: a value that drops out of the feed is kept
-    // (and shown approximate once it's over a week stale), and a variant that was never listed falls
-    // back to the nearest wear of the same skin (also approximate). A kept value is preferred over a
-    // nearest-wear guess.
+    // (and shown approximate once it's over a week stale), and a variant that was never listed
+    // borrows from an adjacent wear of the same skin (also approximate). A kept value is preferred
+    // over an adjacent-wear guess. The borrow is capped at one wear tier - see NearestWear.
     public class PriceService(IHttpClientFactory httpClientFactory, DatabaseService dbService) : BackgroundService
     {
         public const string Currency = "USD";
@@ -41,8 +43,8 @@ namespace CSGOSkinAPI.Services
         // A kept value older than this is shown with a leading "~" (approximate).
         private static readonly TimeSpan StaleThreshold = TimeSpan.FromDays(7);
 
-        // Wear tiers best -> worst (by float). Used to find the nearest available wear; ties resolve
-        // toward the better (lower-float) wear because this list is scanned front to back.
+        // Wear tiers best -> worst (by float). A variant that was never listed may borrow from its
+        // immediate neighbours in this list, and from nowhere else.
         private static readonly string[] WearOrder =
             ["Factory New", "Minimal Wear", "Field-Tested", "Well-Worn", "Battle-Scarred"];
 
@@ -56,8 +58,8 @@ namespace CSGOSkinAPI.Services
         public DateTime? UpdatedAtUtc => _updatedAtUtc;
 
         // Resolve a displayable price for a market_hash_name, or null when we have nothing to show.
-        // Preference order: the exact variant (approximate only if it's over a week stale) -> the
-        // nearest wear of the same skin (always approximate).
+        // Preference order: the exact variant (approximate only if it's over a week stale) -> an
+        // adjacent wear of the same skin (always approximate).
         public PriceResult? Resolve(string? marketHashName)
         {
             if (string.IsNullOrEmpty(marketHashName)) return null;
@@ -71,9 +73,18 @@ namespace CSGOSkinAPI.Services
             return NearestWear(marketHashName);
         }
 
-        // The suggested price of the closest wear of the same skin (same base name, so it stays
-        // within the item's ★ / StatTrak variant), or null when the name has no wear or no sibling
-        // is priced. Always approximate.
+        // A price for a variant that was never listed, inferred from the wears immediately either
+        // side of it in WearOrder. Keys on the full base name, so it stays within the item's ★ /
+        // StatTrak variant. Null when the name carries no wear at all.
+        //
+        // The borrow is capped at one tier. Two tiers apart the same skin can differ by an order of
+        // magnitude, and the only warning the user gets is a leading "~" - a wrong number is worse
+        // than no number, so beyond one tier we return nothing rather than reaching further out.
+        //
+        // Both neighbours priced -> their mean; one -> that one unchanged; neither -> null. Factory
+        // New and Battle-Scarred sit at the ends of the list, so they have a single neighbour each
+        // and never average. Averaging is the unbiased choice between two equidistant siblings, but
+        // it invents a figure matching no listing anywhere - hence always approximate.
         private PriceResult? NearestWear(string marketHashName)
         {
             var wearIdx = -1;
@@ -90,26 +101,35 @@ namespace CSGOSkinAPI.Services
             }
             if (wearIdx < 0) return null;
 
-            SkinPrice? best = null;
-            var bestDistance = int.MaxValue;
-            for (var i = 0; i < WearOrder.Length; i++)
-            {
-                if (i == wearIdx) continue;
-                if (_prices.TryGetValue($"{baseName} ({WearOrder[i]})", out var candidate)
-                    && candidate.SuggestedCents != null)
-                {
-                    var distance = Math.Abs(i - wearIdx);
-                    // Strict < with a front-to-back scan means a tie keeps the better (lower-float)
-                    // wear, which is encountered first.
-                    if (distance < bestDistance)
-                    {
-                        bestDistance = distance;
-                        best = candidate;
-                    }
-                }
-            }
+            // Off either end of WearOrder, or with no displayable SuggestedCents, there is no
+            // usable neighbour on that side.
+            SkinPrice? Neighbour(int i) =>
+                i >= 0 && i < WearOrder.Length
+                && _prices.TryGetValue($"{baseName} ({WearOrder[i]})", out var candidate)
+                && candidate.SuggestedCents != null
+                    ? candidate
+                    : null;
 
-            return best == null ? null : new PriceResult(best.MinCents, best.SuggestedCents, true);
+            var better = Neighbour(wearIdx - 1);
+            var worse = Neighbour(wearIdx + 1);
+            if (better == null && worse == null) return null;
+
+            return new PriceResult(
+                Mean(better?.MinCents, worse?.MinCents),
+                Mean(better?.SuggestedCents, worse?.SuggestedCents),
+                true);
+        }
+
+        // Mean of whichever of the two values is present, in integer cents, rounded to nearest
+        // (halves away from zero); null when neither is. Each field is averaged only over the
+        // neighbours that actually carry it, so a null MinCents on one side yields the other side's
+        // MinCents rather than halving it - treating the null as a zero would render a real item as
+        // near-free.
+        private static int? Mean(int? a, int? b)
+        {
+            if (a == null) return b;
+            if (b == null) return a;
+            return (int)Math.Round((a.Value + (double)b.Value) / 2, MidpointRounding.AwayFromZero);
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)

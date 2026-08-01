@@ -202,9 +202,10 @@ public class PriceServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task Resolve_VariantNeverListed_FallsBackToNearestWearOfSameSkin()
+    public async Task Resolve_VariantNeverListed_FallsBackToAnAdjacentWearOfSameSkin()
     {
-        // Battle-Scarred was never listed; Well-Worn is its immediate neighbour.
+        // Battle-Scarred was never listed. It sits at the end of the wear list, so Well-Worn is its
+        // only neighbour - Field-Tested is two tiers out and plays no part.
         var service = await ServiceWithFeedAsync(
             ("AK-47 | Redline (Field-Tested)", 12.00, 15.00),
             ("AK-47 | Redline (Well-Worn)", 10.00, 11.00));
@@ -218,30 +219,43 @@ public class PriceServiceTests : IDisposable
         Assert.True(result.Approximate);
     }
 
-    [Fact]
-    public async Task NearestWear_PicksTheClosestWear_NotTheFirstPriced()
+    [Theory]
+    // The wear looked up, the only wear that is priced, and how many tiers apart they are.
+    [InlineData("Factory New", "Field-Tested", 2)]
+    [InlineData("Factory New", "Well-Worn", 3)]
+    [InlineData("Factory New", "Battle-Scarred", 4)]
+    [InlineData("Battle-Scarred", "Field-Tested", 2)]
+    [InlineData("Minimal Wear", "Well-Worn", 2)]
+    [InlineData("Battle-Scarred", "Factory New", 4)]
+    public async Task NearestWear_MoreThanOneTierAway_IsNeverBorrowed(
+        string lookup, string priced, int tiersApart)
     {
-        // Factory New is missing. Battle-Scarred (distance 4) is listed first in the feed, but
-        // Field-Tested (distance 2) is the closer float and must win.
-        var service = await ServiceWithFeedAsync(
-            ("AK-47 | Redline (Battle-Scarred)", 5.00, 6.00),
-            ("AK-47 | Redline (Field-Tested)", 12.00, 15.00));
+        // The cap. Past one tier the same skin can differ by an order of magnitude, and the caller
+        // is told nothing louder than a "~" - so no price at all is the honest answer. tiersApart is
+        // carried only to make the distance under test readable in the failure output.
+        Assert.True(tiersApart > 1);
+        var service = await ServiceWithFeedAsync(($"AWP | Dragon Lore ({priced})", 400.00, 450.00));
 
-        var result = service.Resolve("AK-47 | Redline (Factory New)");
-
-        Assert.NotNull(result);
-        Assert.Equal(1500, result.SuggestedCents);
-        Assert.True(result.Approximate);
+        Assert.Null(service.Resolve($"AWP | Dragon Lore ({lookup})"));
     }
 
     [Fact]
-    public async Task NearestWear_Tie_ResolvesTowardTheBetterWear()
+    public async Task NearestWear_FourTiersAway_YieldsNoPrice()
     {
-        // The documented tie-break, and the easiest thing here to regress: Minimal Wear and
-        // Well-Worn are both one step from Field-Tested. WearOrder is scanned front to back with a
-        // strict <, so the lower-float side wins - guessing high on a missing variant is the
-        // deliberate choice. Feed order deliberately lists the worse wear first so a scan that
-        // took the last equal candidate would fail here.
+        // The case the cap exists for, kept as its own named test because it is the one that used
+        // to be pinned as current-but-unendorsed behaviour: a Factory New Dragon Lore taking a
+        // Battle-Scarred price was wrong by roughly two orders of magnitude, dressed up as a "~".
+        var service = await ServiceWithFeedAsync(("AWP | Dragon Lore (Battle-Scarred)", 400.00, 450.00));
+
+        Assert.Null(service.Resolve("AWP | Dragon Lore (Factory New)"));
+    }
+
+    [Fact]
+    public async Task NearestWear_BothNeighboursPriced_AveragesThem()
+    {
+        // Minimal Wear and Well-Worn are both one tier from Field-Tested, and there is no principled
+        // reason to prefer either, so the answer is their mean - the one choice with no directional
+        // bias. Min and Suggested are averaged independently: (2000+800)/2 and (2200+900)/2.
         var service = await ServiceWithFeedAsync(
             ("AK-47 | Redline (Well-Worn)", 8.00, 9.00),
             ("AK-47 | Redline (Minimal Wear)", 20.00, 22.00));
@@ -249,26 +263,145 @@ public class PriceServiceTests : IDisposable
         var result = service.Resolve("AK-47 | Redline (Field-Tested)");
 
         Assert.NotNull(result);
-        Assert.Equal(2200, result.SuggestedCents);
-        Assert.Equal(2000, result.MinCents);
+        Assert.Equal(1400, result.MinCents);
+        Assert.Equal(1550, result.SuggestedCents);
+        // An average matches no listing that exists anywhere, so the flag matters most here.
         Assert.True(result.Approximate);
     }
 
     [Fact]
-    public async Task NearestWear_BorrowsFromFourTiersAway_CurrentUncappedBehaviour()
+    public async Task NearestWear_AverageOfOddCents_RoundsToNearest()
     {
-        // PINNED, NOT ENDORSED. There is no distance limit on the fallback: a Factory New lookup
-        // will take a Battle-Scarred price, which on a skin like this is off by an order of
-        // magnitude and reaches the UI as nothing louder than a "~". Whether to cap the distance is
-        // an open product question; until it is answered, this records what the code actually does
-        // so a cap cannot be introduced silently.
-        var service = await ServiceWithFeedAsync(("AWP | Dragon Lore (Battle-Scarred)", 400.00, 450.00));
+        // Averaging in integer cents has to land somewhere on a half. (1001+1000)/2 = 1000.5 and
+        // (1501+1500)/2 = 1500.5, both rounded away from zero; truncating would bias every odd pair
+        // low, and there is no sub-cent price to carry the remainder into.
+        var service = await ServiceWithFeedAsync(
+            ("AK-47 | Redline (Minimal Wear)", 10.01, 15.01),
+            ("AK-47 | Redline (Well-Worn)", 10.00, 15.00));
 
-        var result = service.Resolve("AWP | Dragon Lore (Factory New)");
+        var result = service.Resolve("AK-47 | Redline (Field-Tested)");
 
         Assert.NotNull(result);
-        Assert.Equal(45000, result.SuggestedCents);
+        Assert.Equal(1001, result.MinCents);
+        Assert.Equal(1501, result.SuggestedCents);
         Assert.True(result.Approximate);
+    }
+
+    [Theory]
+    [InlineData("Minimal Wear")]  // the better-wear side
+    [InlineData("Well-Worn")]     // the worse-wear side
+    public async Task NearestWear_OnlyOneNeighbourPriced_UsesItUnchanged(string neighbour)
+    {
+        // With nothing on the other side there is nothing to average against, so the surviving
+        // neighbour has to come through exactly, not halved.
+        var service = await ServiceWithFeedAsync(($"AK-47 | Redline ({neighbour})", 20.00, 22.00));
+
+        var result = service.Resolve("AK-47 | Redline (Field-Tested)");
+
+        Assert.NotNull(result);
+        Assert.Equal(2000, result.MinCents);
+        Assert.Equal(2200, result.SuggestedCents);
+        Assert.True(result.Approximate);
+    }
+
+    [Fact]
+    public async Task NearestWear_NeitherNeighbourPriced_ReturnsNull()
+    {
+        // Both of Field-Tested's neighbours are missing and the two priced wears are two tiers out.
+        // We do not reach past the cap to fill the gap.
+        var service = await ServiceWithFeedAsync(
+            ("AK-47 | Redline (Factory New)", 30.00, 33.00),
+            ("AK-47 | Redline (Battle-Scarred)", 5.00, 6.00));
+
+        Assert.Null(service.Resolve("AK-47 | Redline (Field-Tested)"));
+    }
+
+    [Fact]
+    public async Task NearestWear_FactoryNew_HasOneNeighbourAndNeverAverages()
+    {
+        // Factory New sits at the end of the wear list, so it can only ever borrow Minimal Wear.
+        // Field-Tested being priced too must change nothing - an average of the two would be both
+        // out of range and, at these prices, badly low.
+        var service = await ServiceWithFeedAsync(
+            ("AK-47 | Redline (Minimal Wear)", 20.00, 22.00),
+            ("AK-47 | Redline (Field-Tested)", 12.00, 15.00));
+
+        var result = service.Resolve("AK-47 | Redline (Factory New)");
+
+        Assert.NotNull(result);
+        Assert.Equal(2000, result.MinCents);
+        Assert.Equal(2200, result.SuggestedCents);
+        Assert.True(result.Approximate);
+    }
+
+    [Fact]
+    public async Task NearestWear_BattleScarred_HasOneNeighbourAndNeverAverages()
+    {
+        // The mirror of the above at the other end of the list: Well-Worn only, never a blend with
+        // the Field-Tested price sitting two tiers away.
+        var service = await ServiceWithFeedAsync(
+            ("AK-47 | Redline (Well-Worn)", 8.00, 9.00),
+            ("AK-47 | Redline (Field-Tested)", 12.00, 15.00));
+
+        var result = service.Resolve("AK-47 | Redline (Battle-Scarred)");
+
+        Assert.NotNull(result);
+        Assert.Equal(800, result.MinCents);
+        Assert.Equal(900, result.SuggestedCents);
+        Assert.True(result.Approximate);
+    }
+
+    [Fact]
+    public async Task NearestWear_OneNeighbourHasNoMinPrice_AveragesMinOverTheOtherAlone()
+    {
+        // min_price is null when nothing is currently listed. Averaging it as a zero would report a
+        // ~$10 item at ~$5, so each field is averaged only over the neighbours that carry it: Min
+        // comes through as Well-Worn's alone while Suggested is still the mean of both.
+        var service = await ServiceWithFeedAsync(
+            ("AK-47 | Redline (Minimal Wear)", null, 22.00),
+            ("AK-47 | Redline (Well-Worn)", 8.00, 9.00));
+
+        var result = service.Resolve("AK-47 | Redline (Field-Tested)");
+
+        Assert.NotNull(result);
+        Assert.Equal(800, result.MinCents);
+        Assert.Equal(1550, result.SuggestedCents);
+        Assert.True(result.Approximate);
+    }
+
+    [Fact]
+    public async Task NearestWear_BothNeighboursHaveNoMinPrice_LeavesMinNull()
+    {
+        // Nothing listed either side: Min has to stay null rather than becoming 0, which the UI
+        // would render as a free item.
+        var service = await ServiceWithFeedAsync(
+            ("AK-47 | Redline (Minimal Wear)", null, 22.00),
+            ("AK-47 | Redline (Well-Worn)", null, 9.00));
+
+        var result = service.Resolve("AK-47 | Redline (Field-Tested)");
+
+        Assert.NotNull(result);
+        Assert.Null(result.MinCents);
+        Assert.Equal(1550, result.SuggestedCents);
+        Assert.True(result.Approximate);
+    }
+
+    [Fact]
+    public async Task Resolve_ExactHit_BeatsBothNeighbours()
+    {
+        // The fallback must never fire when the variant itself is priced - not even to blend the
+        // neighbours in - and an exact fresh hit is not approximate.
+        var service = await ServiceWithFeedAsync(
+            ("AK-47 | Redline (Minimal Wear)", 20.00, 22.00),
+            ("AK-47 | Redline (Field-Tested)", 12.00, 15.00),
+            ("AK-47 | Redline (Well-Worn)", 8.00, 9.00));
+
+        var result = service.Resolve("AK-47 | Redline (Field-Tested)");
+
+        Assert.NotNull(result);
+        Assert.Equal(1200, result.MinCents);
+        Assert.Equal(1500, result.SuggestedCents);
+        Assert.False(result.Approximate);
     }
 
     [Fact]
@@ -287,12 +420,34 @@ public class PriceServiceTests : IDisposable
     public async Task NearestWear_StaysWithinTheStatTrakVariant()
     {
         // The fallback keys on the full base name, so a StatTrak lookup must never quietly borrow
-        // the (much cheaper) plain variant's price.
+        // the (much cheaper) plain variant's price - and, both ways round, the plain lookup must not
+        // pick up the StatTrak premium either.
         var service = await ServiceWithFeedAsync(
             ("AK-47 | Redline (Field-Tested)", 12.00, 15.00),
-            ("AK-47 | Redline (Minimal Wear)", 20.00, 22.00));
+            ("AK-47 | Redline (Minimal Wear)", 20.00, 22.00),
+            ("StatTrak™ AK-47 | Redline (Well-Worn)", 30.00, 35.00));
 
-        Assert.Null(service.Resolve("StatTrak™ AK-47 | Redline (Field-Tested)"));
+        // StatTrak Minimal Wear's own neighbours (StatTrak FN and FT) are both unlisted. The plain
+        // Field-Tested and Minimal Wear prices sit right there and must not be reached for.
+        Assert.Null(service.Resolve("StatTrak™ AK-47 | Redline (Minimal Wear)"));
+        // And the reverse: plain Battle-Scarred's one neighbour is plain Well-Worn, which is
+        // unlisted. The StatTrak Well-Worn at that same wear is a different item entirely, so there
+        // is nothing to borrow and nothing to average in.
+        Assert.Null(service.Resolve("AK-47 | Redline (Battle-Scarred)"));
+    }
+
+    [Fact]
+    public async Task NearestWear_StaysWithinTheStarVariant()
+    {
+        // ★ (knives/gloves) is part of the base name in exactly the same way, and the gap between a
+        // ★ item and its unstarred namesake is about the largest in the game.
+        var service = await ServiceWithFeedAsync(
+            ("★ Karambit | Doppler (Minimal Wear)", 900.00, 1000.00));
+
+        // The starred variant borrows from its own Minimal Wear...
+        Assert.Equal(100000, service.Resolve("★ Karambit | Doppler (Factory New)")!.SuggestedCents);
+        // ...and the unstarred name, one character apart, gets nothing rather than that price.
+        Assert.Null(service.Resolve("Karambit | Doppler (Factory New)"));
     }
 
     [Fact]
