@@ -3,6 +3,8 @@ using System.Text.Json;
 using CSGOSkinAPI.Models;
 using CSGOSkinAPI.Services;
 using Microsoft.Extensions.DependencyInjection;
+using ProtoBuf;
+using SteamKit2.GC.CSGO.Internal;
 using Xunit;
 
 namespace csgoSkinStatistics.Tests.Services;
@@ -129,7 +131,7 @@ public class ResponseSizeLimitTests(ApiFactory factory) : IClassFixture<ApiFacto
     }
 
     [Fact]
-    public async Task OversizeWarmFetch_DoesNotStopTheDrainLoop()
+    public async Task OversizeWarmFetch_CachesNothingAndDoesNotStopTheDrainLoop()
     {
         // The warmer is the one caller with no request behind it, so the only thing that can go
         // wrong is the loop dying silently. It is built here rather than resolved from the host
@@ -137,7 +139,10 @@ public class ResponseSizeLimitTests(ApiFactory factory) : IClassFixture<ApiFacto
         // host's IHttpClientFactory, so it is the production 32 MB cap being hit.
         var oversize = NextSteamId();
         var next = NextSteamId();
-        _factory.Http.RespondOversized(InventoryUrl(oversize), OverSteamCap, ValidInventoryJson());
+        // The body behind the oversize declaration is a genuinely warmable inventory - one asset
+        // with a decodable certificate. Nothing may read it, so WarmableItemId must not reach the
+        // database; that is what separates "the cap stopped it" from "there was nothing to cache".
+        _factory.Http.RespondOversized(InventoryUrl(oversize), OverSteamCap, WarmableInventoryJson());
         _factory.Http.Respond(InventoryUrl(next), HttpStatusCode.OK, ValidInventoryJson());
 
         using var warmer = new InventoryWarmService(
@@ -153,6 +158,55 @@ public class ResponseSizeLimitTests(ApiFactory factory) : IClassFixture<ApiFacto
         await warmer.StopAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(30));
 
         Assert.Equal(1, _factory.Http.RequestsMatching(InventoryUrl(oversize)));
+        Assert.Null(await _factory.Database.GetItemAsync(WarmableItemId)
+            .WaitAsync(TimeSpan.FromSeconds(30)));
+    }
+
+    private const ulong WarmableItemId = 770001;
+
+    // An inventory holding a single item the warmer would happily persist: a description whose
+    // inspect action is the %propid:6% certificate template, and the per-asset certificate that
+    // fills it in. Mirrors InventoryWarmServiceTests' cert construction - a leading XOR key byte
+    // (0x00, the legacy no-op), the protobuf, then the four checksum bytes the client ignores.
+    private static string WarmableInventoryJson()
+    {
+        var item = new CEconItemPreviewDataBlock
+        {
+            itemid = WarmableItemId, defindex = 7, paintindex = 282, rarity = 5, quality = 4,
+            paintwear = 1065353216, paintseed = 661, inventory = 3, origin = 8,
+        };
+        using var buffer = new MemoryStream();
+        Serializer.Serialize(buffer, item);
+        var proto = buffer.ToArray();
+        var raw = new byte[1 + proto.Length + 4];
+        proto.CopyTo(raw, 1);
+
+        return JsonSerializer.Serialize(new SteamInventoryResponse
+        {
+            assets = [new SteamAsset { assetid = "1", classid = "c1", instanceid = "i1" }],
+            descriptions =
+            [
+                new SteamDescription
+                {
+                    classid = "c1",
+                    instanceid = "i1",
+                    actions = [new SteamAction { link = "steam://run/730//+csgo_econ_action_preview %propid:6%" }],
+                },
+            ],
+            asset_properties =
+            [
+                new SteamAssetProperties
+                {
+                    assetid = "1",
+                    asset_properties =
+                    [
+                        new SteamAssetProperty { propertyid = 6, string_value = Convert.ToHexString(raw) },
+                    ],
+                },
+            ],
+            total = 1,
+            success = 1,
+        });
     }
 
     private static async Task WaitForAsync(Func<bool> condition, string because)
