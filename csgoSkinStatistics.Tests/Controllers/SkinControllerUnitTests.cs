@@ -330,7 +330,7 @@ public class SkinControllerUnitTests(ConstDataFixture fixture) : IClassFixture<C
     [InlineData("86561198123456789")]     // right length, outside the individual-account block
     public void ParseSteamInput_OutOfRangeNumericId_IsNotTreatedAsAnId(string input)
     {
-        var (steamId64, vanity) = SkinController.ParseSteamInput(input);
+        var (steamId64, vanity) = SteamProfile.ParseSteamInput(input);
 
         Assert.Null(steamId64);
         // An all-digit input is never a vanity name either, so it resolves to nothing.

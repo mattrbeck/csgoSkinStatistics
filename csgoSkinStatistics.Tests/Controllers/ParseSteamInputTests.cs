@@ -1,9 +1,8 @@
-using CSGOSkinAPI.Controllers;
 using CSGOSkinAPI.Services;
 
 namespace csgoSkinStatistics.Tests.Controllers;
 
-// Exercises the real SkinController.ParseSteamInput (exposed via InternalsVisibleTo) rather than a
+// Exercises the real SteamProfile.ParseSteamInput (exposed via InternalsVisibleTo) rather than a
 // reimplementation, so a regression in the parser fails the build.
 public class ParseSteamInputTests
 {
@@ -13,7 +12,7 @@ public class ParseSteamInputTests
     [InlineData("steamcommunity.com/profiles/76561198123456789")]
     public void ParseSteamInput_KnownId_ReturnsId(string input)
     {
-        var (steamId64, vanity) = SkinController.ParseSteamInput(input);
+        var (steamId64, vanity) = SteamProfile.ParseSteamInput(input);
         Assert.Equal(76561198123456789UL, steamId64);
         Assert.Null(vanity);
     }
@@ -24,7 +23,7 @@ public class ParseSteamInputTests
     [InlineData("mattrb", "mattrb")]
     public void ParseSteamInput_ValidVanity_ReturnsVanity(string input, string expected)
     {
-        var (steamId64, vanity) = SkinController.ParseSteamInput(input);
+        var (steamId64, vanity) = SteamProfile.ParseSteamInput(input);
         Assert.Null(steamId64);
         Assert.Equal(expected, vanity);
     }
@@ -44,7 +43,7 @@ public class ParseSteamInputTests
     [InlineData("name%2f..%2f")]            // url-encoded slashes
     public void ParseSteamInput_MalformedVanity_ReturnsNeither(string input)
     {
-        var (steamId64, vanity) = SkinController.ParseSteamInput(input);
+        var (steamId64, vanity) = SteamProfile.ParseSteamInput(input);
         Assert.Null(steamId64);
         Assert.Null(vanity);
     }
@@ -95,6 +94,6 @@ public class ParseSteamInputTests
     [InlineData("waaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaay-too-long", false)]
     public void IsValidVanity_ValidatesCharset(string vanity, bool expected)
     {
-        Assert.Equal(expected, SkinController.IsValidVanity(vanity));
+        Assert.Equal(expected, SteamProfile.IsValidVanity(vanity));
     }
 }
