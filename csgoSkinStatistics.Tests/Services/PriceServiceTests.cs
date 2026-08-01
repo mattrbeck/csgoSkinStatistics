@@ -20,6 +20,14 @@ namespace csgoSkinStatistics.Tests.Services;
 // No test touches the network: the "skinport" client is always built from a stubbed handler, and
 // every database lives in its own temp file (never the test working directory - a shared file there
 // has flaked this suite before).
+//
+// One test asserts on the rate-limit log line, which means redirecting Console.Out - process-global
+// state. The collection below keeps this class from running alongside anything else so that
+// redirect can never swallow or garble another test's output.
+[CollectionDefinition("Console capture", DisableParallelization = true)]
+public class ConsoleCaptureCollection;
+
+[Collection("Console capture")]
 public class PriceServiceTests : IDisposable
 {
     private readonly string _dbPath = Path.Combine(
@@ -247,6 +255,23 @@ public class PriceServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task NearestWear_BorrowsFromFourTiersAway_CurrentUncappedBehaviour()
+    {
+        // PINNED, NOT ENDORSED. There is no distance limit on the fallback: a Factory New lookup
+        // will take a Battle-Scarred price, which on a skin like this is off by an order of
+        // magnitude and reaches the UI as nothing louder than a "~". Whether to cap the distance is
+        // an open product question; until it is answered, this records what the code actually does
+        // so a cap cannot be introduced silently.
+        var service = await ServiceWithFeedAsync(("AWP | Dragon Lore (Battle-Scarred)", 400.00, 450.00));
+
+        var result = service.Resolve("AWP | Dragon Lore (Factory New)");
+
+        Assert.NotNull(result);
+        Assert.Equal(45000, result.SuggestedCents);
+        Assert.True(result.Approximate);
+    }
+
+    [Fact]
     public async Task Resolve_NameWithoutWearSuffix_HasNoNearestWearFallback()
     {
         // A vanilla knife has no wear in its name, so there is no sibling to borrow from even
@@ -379,21 +404,42 @@ public class PriceServiceTests : IDisposable
         Assert.Null(service.Resolve("AK-47 | Redline (Field-Tested)"));
     }
 
+    // A DatabaseService pointed at a directory: SQLite cannot open it as a database file, so every
+    // call throws. The assertion in each test that uses it re-checks that, because the day
+    // DatabaseService normalizes or validates its path this stops being a broken database and the
+    // tests below would start passing for no reason at all.
+    private static DatabaseService UnopenableDatabase() => new(Path.GetTempPath());
+
     [Fact]
-    public async Task LoadPersistedPricesAsync_UnreadableDatabase_IsSurvivable()
+    public async Task LoadPersistedPricesAsync_UnreadableDatabase_LeavesTheServiceUnloaded()
     {
         // The snapshot is an optimisation, not a dependency: if the DB is missing or locked, the
-        // service must still come up and refresh from the feed rather than fault its host loop.
-        var unopenable = new DatabaseService(Path.GetTempPath()); // a directory, not a file
-        var (service, _, _) = NewService(unopenable, _ => Json(Feed(("AK-47 | Redline (Field-Tested)", 12.00, 15.00))));
+        // service must still come up (and let the feed refresh populate it) rather than fault the
+        // host loop it runs on.
+        var unopenable = UnopenableDatabase();
+        await Assert.ThrowsAnyAsync<Exception>(unopenable.LoadPricesAsync);
+        var (service, _, _) = NewService(unopenable, _ => Json("[]"));
 
         await service.LoadPersistedPricesAsync();
 
         Assert.Null(service.UpdatedAtUtc);
-        // The same is true of the write back: the in-memory map is swapped before the save, so a
-        // failing persist still leaves this process fully priced.
+        Assert.Null(service.Resolve("AK-47 | Redline (Field-Tested)"));
+    }
+
+    [Fact]
+    public async Task RefreshAsync_UnwritableDatabase_StillServesTheFeedFromMemory()
+    {
+        // The map is swapped in before the save, so losing the write-back costs the next restart
+        // its warm start - it must not cost this process its prices.
+        var unwritable = UnopenableDatabase();
+        await Assert.ThrowsAnyAsync<Exception>(
+            () => unwritable.SavePricesAsync(new Dictionary<string, (int?, int?)> { ["x"] = (1, 1) }, DateTime.UtcNow));
+        var (service, _, _) = NewService(unwritable, _ => Json(Feed(("AK-47 | Redline (Field-Tested)", 12.00, 15.00))));
+
         await service.RefreshAsync(CancellationToken.None);
+
         Assert.Equal(1500, service.Resolve("AK-47 | Redline (Field-Tested)")!.SuggestedCents);
+        Assert.NotNull(service.UpdatedAtUtc);
     }
 
     [Fact]
@@ -417,14 +463,65 @@ public class PriceServiceTests : IDisposable
         Assert.Equal(1600, service.Resolve("AK-47 | Redline (Field-Tested)")!.SuggestedCents);
     }
 
+    // Deliberately not a "keeps current prices" test: a 429 leaves exactly the same state as any
+    // other failed refresh, so an assertion on prices alone would pass with the whole 429 branch
+    // deleted. The rate-limit log is the only thing that branch produces, and it is what tells an
+    // operator the feed is being throttled rather than broken - see PriceServiceRateLimitLogTests.
     [Theory]
     [InlineData(true)]
     [InlineData(false)]  // Skinport does not always send Retry-After; the handler must not need it
-    public async Task RefreshAsync_RateLimited_KeepsCurrentPrices(bool withRetryAfter)
+    public async Task RefreshAsync_RateLimited_IsHandledLikeAnyOtherFailedRefresh(bool withRetryAfter)
     {
         var db = await NewDbAsync();
+        var (service, _, _) = NewService(db, RateLimitAfterFirstFeed(withRetryAfter));
+
+        await service.RefreshAsync(CancellationToken.None);
+        var loadedAt = service.UpdatedAtUtc;
+        await service.RefreshAsync(CancellationToken.None);
+
+        // A 429 must never be mistaken for "no items"; the previous map has to survive intact.
+        Assert.Equal(1500, service.Resolve("AK-47 | Redline (Field-Tested)")!.SuggestedCents);
+        Assert.Equal(loadedAt, service.UpdatedAtUtc);
+    }
+
+    [Theory]
+    [InlineData(true, ", retry after 30s")]
+    [InlineData(false, "")]
+    public async Task RefreshAsync_RateLimited_SaysSoInTheLog(bool withRetryAfter, string expectedRetryAfter)
+    {
+        // The only observable difference between the 429 branch and the generic failure path, and
+        // the reason the branch exists: "we are being throttled, back off" reads very differently
+        // from "the feed is broken" when someone is looking at why prices went stale. Deleting the
+        // branch fails here even though every other 429 assertion still passes.
+        var db = await NewDbAsync();
+        var (service, _, _) = NewService(db, RateLimitAfterFirstFeed(withRetryAfter));
+        await service.RefreshAsync(CancellationToken.None);
+
+        // Console.SetOut is process-global, hence this class's non-parallel collection.
+        var captured = new StringWriter();
+        var original = Console.Out;
+        Console.SetOut(captured);
+        try
+        {
+            await service.RefreshAsync(CancellationToken.None);
+        }
+        finally
+        {
+            Console.SetOut(original);
+        }
+
+        var log = captured.ToString();
+        Assert.Contains("Skinport RATE LIMITED (429)", log);
+        Assert.Contains($"(429){expectedRetryAfter}; keeping current prices.", log);
+        // ...and not as an unexplained exception from EnsureSuccessStatusCode.
+        Assert.DoesNotContain("Failed to refresh", log);
+    }
+
+    // Serves one good feed, then rate-limits every later request.
+    private static Func<HttpRequestMessage, HttpResponseMessage> RateLimitAfterFirstFeed(bool withRetryAfter)
+    {
         var first = true;
-        var (service, _, _) = NewService(db, _ =>
+        return _ =>
         {
             if (first)
             {
@@ -437,15 +534,7 @@ public class PriceServiceTests : IDisposable
                 rateLimited.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.FromSeconds(30));
             }
             return rateLimited;
-        });
-
-        await service.RefreshAsync(CancellationToken.None);
-        var loadedAt = service.UpdatedAtUtc;
-        await service.RefreshAsync(CancellationToken.None);
-
-        // A 429 must never be mistaken for "no items"; the previous map has to survive intact.
-        Assert.Equal(1500, service.Resolve("AK-47 | Redline (Field-Tested)")!.SuggestedCents);
-        Assert.Equal(loadedAt, service.UpdatedAtUtc);
+        };
     }
 
     public static TheoryData<string, HttpStatusCode> BadFeeds() => new()

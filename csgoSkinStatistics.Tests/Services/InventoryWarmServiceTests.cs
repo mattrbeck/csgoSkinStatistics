@@ -132,14 +132,27 @@ public class InventoryWarmServiceTests : IDisposable
         return Convert.ToHexString(raw);
     }
 
-    private static SteamDescription CertDescription(string classid, string instanceid) => new()
+    // The inspect action is not the only one Steam sends, and not necessarily the first, so the
+    // description carries a decoy ahead of it: picking actions[0] - or any non-null link - yields a
+    // URL that decodes to nothing.
+    private const string DecoyActionLink = "https://steamcommunity.com/market/listings/730/Whatever";
+    private const string CertActionLink = "steam://run/730//+csgo_econ_action_preview %propid:6%";
+    // A masked link: it parses, but only the game coordinator can resolve it, so the warmer has
+    // nothing to persist even when the asset carries a perfectly good certificate.
+    private const string LegacyActionLink =
+        "steam://rungame/730/%owner_steamid%/+csgo_econ_action_preview S%owner_steamid%A%assetid%D123";
+
+    private static SteamDescription Description(string classid, string instanceid, params string?[] actionLinks) => new()
     {
         classid = classid,
         instanceid = instanceid,
-        // Steam leaves the cert as a %propid:6% placeholder in the description-level template; the
-        // per-asset value is what makes each copy's link unique.
-        actions = [new SteamAction { link = "steam://run/730//+csgo_econ_action_preview %propid:6%" }],
+        actions = [.. actionLinks.Select(l => new SteamAction { link = l })],
     };
+
+    // Steam leaves the cert as a %propid:6% placeholder in the description-level template; the
+    // per-asset value is what makes each copy's link unique.
+    private static SteamDescription CertDescription(string classid, string instanceid)
+        => Description(classid, instanceid, DecoyActionLink, CertActionLink);
 
     private static SteamAssetProperties CertProperty(string assetid, CEconItemPreviewDataBlock item) => new()
     {
@@ -156,12 +169,16 @@ public class InventoryWarmServiceTests : IDisposable
         return Convert.ToInt32(await command.ExecuteScalarAsync());
     }
 
-    [Fact]
-    public async Task WarmedWithinCooldown_IsSkippedWithoutFetching()
+    [Theory]
+    // A warm from seconds ago: a burst of misses for this owner must cost nothing. 23h pins the
+    // other end of the 24h window - shortening the cooldown to an hour would multiply the traffic
+    // this service sends Steam, and nothing else in the suite would notice.
+    [InlineData(0)]
+    [InlineData(23)]
+    public async Task WarmWithinCooldown_IsSkippedWithoutFetching(int hoursAgo)
     {
         var db = await NewDbAsync();
-        // A warm recorded seconds ago: a burst of misses for this owner must cost nothing.
-        await db.RecordWarmAsync(SteamA, 7);
+        await RecordWarmAtAsync(SteamA, DateTime.UtcNow.AddHours(-hoursAgo), itemsCached: 7);
         var (service, handler, factory) = NewService(db, _ => Ok(EmptyInventory));
 
         await service.StartAsync(CancellationToken.None);
@@ -182,9 +199,10 @@ public class InventoryWarmServiceTests : IDisposable
     public async Task WarmOlderThanTheCooldown_IsFetchedAgain()
     {
         // The other half of the cooldown rule: inventories change, so once a day has passed the
-        // owner is warmable again.
+        // owner is warmable again. 25h vs the 23h case above brackets the 24h constant from both
+        // sides with an hour of margin, so neither test depends on how long the run takes.
         var db = await NewDbAsync();
-        await RecordWarmAtAsync(SteamA, DateTime.UtcNow.AddHours(-25));
+        await RecordWarmAtAsync(SteamA, DateTime.UtcNow.AddHours(-25), itemsCached: 7);
         var (service, handler, _) = NewService(db, _ => Ok(EmptyInventory));
 
         await service.StartAsync(CancellationToken.None);
@@ -194,15 +212,16 @@ public class InventoryWarmServiceTests : IDisposable
     }
 
     // RecordWarmAsync always stamps UtcNow, so an aged record has to be written directly.
-    private async Task RecordWarmAtAsync(ulong steamid, DateTime lastWarmed)
+    private async Task RecordWarmAtAsync(ulong steamid, DateTime lastWarmed, int itemsCached)
     {
         using var connection = new SqliteConnection($"Data Source={_dbPath};foreign keys=true;");
         await connection.OpenAsync();
         using var command = new SqliteCommand(
             @"INSERT OR REPLACE INTO inventory_warms (steamid, last_warmed, items_cached)
-              VALUES (@steamid, @last_warmed, 0)", connection);
+              VALUES (@steamid, @last_warmed, @items_cached)", connection);
         command.Parameters.AddWithValue("@steamid", (long)steamid);
         command.Parameters.AddWithValue("@last_warmed", lastWarmed.ToString("o"));
+        command.Parameters.AddWithValue("@items_cached", itemsCached);
         await command.ExecuteNonQueryAsync();
     }
 
@@ -319,6 +338,28 @@ public class InventoryWarmServiceTests : IDisposable
         Assert.True(handler.Requested(SteamA));
     }
 
+    // Warms one owner and waits for a second to be fetched behind it. The queue has a single
+    // consumer, so the fence proves the warm under test ran to completion - including one that
+    // cached nothing, which polling the database could never tell apart from one that never
+    // started, and which is exactly the outcome the selection tests below need to observe.
+    private async Task WarmBehindFenceAsync(InventoryWarmService service, StubHandler handler, ulong steamid)
+    {
+        await service.StartAsync(CancellationToken.None);
+        service.Enqueue(steamid);
+        service.Enqueue(SteamB);
+        await WaitForAsync(() => handler.Requested(SteamB), "the fence inventory queued behind the warm under test");
+        await service.StopAsync(CancellationToken.None);
+    }
+
+    // Serves `inventory` to SteamA and an empty inventory to the fence owner.
+    private Func<HttpRequestMessage, HttpResponseMessage> ServeToA(SteamInventoryResponse inventory)
+    {
+        var body = JsonSerializer.Serialize(inventory);
+        return request => request.RequestUri!.ToString().Contains($"/inventory/{SteamA}/")
+            ? Ok(body)
+            : Ok(EmptyInventory);
+    }
+
     [Fact]
     public async Task OnlyCertificateBearingItemsWithARealItemidArePersisted()
     {
@@ -328,6 +369,13 @@ public class InventoryWarmServiceTests : IDisposable
             itemid = 41001, defindex = 7, paintindex = 282, rarity = 5, quality = 4,
             paintwear = 1065353216, paintseed = 661, inventory = 3, origin = 8,
         };
+        // Every excluded asset carries a real, decodable certificate of its own, so the only thing
+        // that can keep it out of the database is the rule its comment names. (Handing certs only
+        // to the assets that were meant to survive would have made this test pass no matter what
+        // the description/link filtering did.)
+        var legacyLinked = new CEconItemPreviewDataBlock { itemid = 41002, defindex = 7, paintindex = 282, paintseed = 2 };
+        var notInspectable = new CEconItemPreviewDataBlock { itemid = 41003, defindex = 7, paintindex = 282, paintseed = 3 };
+        var undescribed = new CEconItemPreviewDataBlock { itemid = 41005, defindex = 7, paintindex = 282, paintseed = 5 };
         // Music kits, graffiti and the like decode with itemid 0 and would all collide on the
         // searches primary key, so they must be dropped even though the cert parses fine.
         var nonPaint = new CEconItemPreviewDataBlock { itemid = 0, defindex = 1314, rarity = 3, quality = 4 };
@@ -345,90 +393,81 @@ public class InventoryWarmServiceTests : IDisposable
             descriptions =
             [
                 CertDescription("c1", "i1"),
-                new SteamDescription
-                {
-                    classid = "c2",
-                    instanceid = "i2",
-                    // A legacy masked link: it parses, but only the game coordinator can resolve it,
-                    // so the warmer has nothing to persist.
-                    actions = [new SteamAction { link = "steam://rungame/730/%owner_steamid%/+csgo_econ_action_preview S%owner_steamid%A%assetid%D123" }],
-                },
-                new SteamDescription
-                {
-                    classid = "c3",
-                    instanceid = "i3",
-                    // A nameless/linkless action and a non-inspect one: neither is an inspect link,
-                    // and the null must not throw while being ruled out.
-                    actions =
-                    [
-                        new SteamAction { link = null, name = "Broken" },
-                        new SteamAction { link = "https://steamcommunity.com/market/listings/730/Whatever" },
-                    ],
-                },
+                Description("c2", "i2", LegacyActionLink),
+                // A linkless action and a non-inspect one: neither yields an inspect URL, and the
+                // null must not throw while being ruled out.
+                Description("c3", "i3", null, DecoyActionLink),
                 CertDescription("c4", "i4"),
             ],
             asset_properties =
             [
                 CertProperty("1", skin),
+                CertProperty("2", legacyLinked),
+                CertProperty("3", notInspectable),
                 CertProperty("4", nonPaint),
+                CertProperty("5", undescribed),
             ],
             total = 5,
         };
 
-        var (service, _, _) = NewService(db, _ => Ok(JsonSerializer.Serialize(inventory)));
-
-        await service.StartAsync(CancellationToken.None);
-        service.Enqueue(SteamA);
-        await WaitForAsync(async () => await ReadItemsCachedAsync(SteamA) > 0, "the warm to record its cached count");
-        await service.StopAsync(CancellationToken.None);
+        var (service, handler, _) = NewService(db, ServeToA(inventory));
+        await WarmBehindFenceAsync(service, handler, SteamA);
 
         Assert.Equal(1, await ReadItemsCachedAsync(SteamA));
         var cached = await db.GetItemAsync(41001);
         Assert.NotNull(cached);
         Assert.Equal(282u, cached.paintindex);
         Assert.Equal(661u, cached.paintseed);
-        // Nothing else made it in - in particular the zero-itemid item, which would have taken the
-        // key 0 row and been served for every other non-paint lookup.
+        // The masked link needs the game coordinator, the third has no inspect action to build a
+        // link from, and the fifth's description is missing - their certs are never even reached.
+        Assert.Null(await db.GetItemAsync(41002));
+        Assert.Null(await db.GetItemAsync(41003));
+        Assert.Null(await db.GetItemAsync(41005));
+        // The zero-itemid item would have taken the key 0 row and been served for every other
+        // non-paint lookup.
         Assert.Null(await db.GetItemAsync(0));
     }
 
     [Fact]
     public async Task DescriptionsAreMatchedOnClassidAndInstanceid()
     {
-        // Two copies of the same class differing only by instanceid is the normal shape for an item
-        // whose description varies (name tag, applied stickers). Matching on classid alone would
-        // decode the wrong copy's cert - and the lookup here is the one place that pairing is made.
+        // Two copies of one class differing only by instanceid is the normal shape for an item
+        // whose description varies (name tag, applied stickers). Their descriptions differ in the
+        // only way that matters here - one offers a locally decodable cert template, the other only
+        // a masked link - so a lookup that ignored instanceid (or matched anything at all) would
+        // pair both assets with the first description and cache nothing.
+        //
+        // NOTE: this pins the (classid, instanceid) pairing, not how it is looked up. The per-asset
+        // FirstOrDefault scan is O(assets x descriptions) and is owned by a later wave; a
+        // dictionary keyed on the same pair must keep this test green.
         var db = await NewDbAsync();
-        var plain = new CEconItemPreviewDataBlock { itemid = 42001, defindex = 7, paintindex = 282, paintseed = 1 };
-        var stickered = new CEconItemPreviewDataBlock { itemid = 42002, defindex = 7, paintindex = 282, paintseed = 2 };
+        var masked = new CEconItemPreviewDataBlock { itemid = 42001, defindex = 7, paintindex = 282, paintseed = 1 };
+        var certified = new CEconItemPreviewDataBlock { itemid = 42002, defindex = 7, paintindex = 282, paintseed = 2 };
 
         var inventory = new SteamInventoryResponse
         {
             assets =
             [
-                new SteamAsset { assetid = "10", classid = "shared", instanceid = "plain" },
-                new SteamAsset { assetid = "20", classid = "shared", instanceid = "stickered" },
+                new SteamAsset { assetid = "10", classid = "shared", instanceid = "masked" },
+                new SteamAsset { assetid = "20", classid = "shared", instanceid = "certified" },
             ],
             descriptions =
             [
-                CertDescription("shared", "plain"),
-                CertDescription("shared", "stickered"),
+                Description("shared", "masked", LegacyActionLink),
+                CertDescription("shared", "certified"),
             ],
-            asset_properties = [CertProperty("10", plain), CertProperty("20", stickered)],
+            asset_properties = [CertProperty("10", masked), CertProperty("20", certified)],
             total = 2,
         };
 
-        var (service, _, _) = NewService(db, _ => Ok(JsonSerializer.Serialize(inventory)));
+        var (service, handler, _) = NewService(db, ServeToA(inventory));
+        await WarmBehindFenceAsync(service, handler, SteamA);
 
-        await service.StartAsync(CancellationToken.None);
-        service.Enqueue(SteamA);
-        await WaitForAsync(async () => await ReadItemsCachedAsync(SteamA) == 2, "both copies to be cached");
-        await service.StopAsync(CancellationToken.None);
-
-        // Both descriptions carry the same inspect template, so the per-asset cert is what
-        // distinguishes them; each asset must end up with its own.
-        Assert.Equal(1u, (await db.GetItemAsync(42001))!.paintseed);
+        Assert.Equal(1, await ReadItemsCachedAsync(SteamA));
+        // Asset 20 got its own description's cert template, and asset 10 got its own masked link -
+        // neither borrowed the other's.
         Assert.Equal(2u, (await db.GetItemAsync(42002))!.paintseed);
+        Assert.Null(await db.GetItemAsync(42001));
     }
 
     [Fact]
@@ -446,13 +485,10 @@ public class InventoryWarmServiceTests : IDisposable
             asset_properties = [CertProperty("1", skin)],
             total = 2500, // more than this page carries
         };
-        var (service, _, _) = NewService(db, _ => Ok(JsonSerializer.Serialize(inventory)));
+        var (service, handler, _) = NewService(db, ServeToA(inventory));
+        await WarmBehindFenceAsync(service, handler, SteamA);
 
-        await service.StartAsync(CancellationToken.None);
-        service.Enqueue(SteamA);
-        await WaitForAsync(async () => await ReadItemsCachedAsync(SteamA) == 1, "the first page to be cached");
-        await service.StopAsync(CancellationToken.None);
-
+        Assert.Equal(1, await ReadItemsCachedAsync(SteamA));
         Assert.NotNull(await db.GetItemAsync(43001));
     }
 
