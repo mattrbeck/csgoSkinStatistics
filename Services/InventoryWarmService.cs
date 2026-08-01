@@ -5,7 +5,8 @@ namespace CSGOSkinAPI.Services
     // inventory (trade threads, showcases). This fetches that inventory once, decodes each
     // item's embedded certificate locally (see docs/inventory-endpoint-cert.md), and
     // persists the results, so follow-up lookups become DB hits with zero GC traffic.
-    public class InventoryWarmService(IHttpClientFactory httpClientFactory, DatabaseService dbService) : BackgroundService
+    public class InventoryWarmService(IHttpClientFactory httpClientFactory, DatabaseService dbService,
+        ILogger<InventoryWarmService> logger) : BackgroundService
     {
         // One warm per owner per cooldown: a burst of misses for the same inventory should
         // cost a single fetch, and a stale link whose item left the inventory will never
@@ -33,7 +34,7 @@ namespace CSGOSkinAPI.Services
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    Console.WriteLine($"Inventory warm for {steamid} failed: {ex.Message}");
+                    logger.LogError(ex, "Inventory warm for {SteamId} failed", steamid);
                 }
             }
         }
@@ -58,13 +59,26 @@ namespace CSGOSkinAPI.Services
             {
                 if (response.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
                 {
+                    // Split rather than conditionally concatenated, for the same reason as the
+                    // Skinport 429 in PriceService: Retry-After is optional and belongs in a field.
                     var retryAfter = response.Headers.RetryAfter?.Delta;
-                    Console.WriteLine($"Inventory warm for {steamid}: Steam RATE LIMITED (429)" +
-                        (retryAfter != null ? $"; Retry-After {retryAfter.Value.TotalSeconds:0}s" : ""));
+                    if (retryAfter is TimeSpan delay)
+                    {
+                        logger.LogWarning(
+                            "Inventory warm for {SteamId}: Steam rate limited (429); Retry-After {RetryAfterSeconds:0}s",
+                            steamid, delay.TotalSeconds);
+                    }
+                    else
+                    {
+                        logger.LogWarning(
+                            "Inventory warm for {SteamId}: Steam rate limited (429)", steamid);
+                    }
                 }
                 else
                 {
-                    Console.WriteLine($"Inventory warm for {steamid}: fetch failed with {response.StatusCode}");
+                    logger.LogWarning(
+                        "Inventory warm for {SteamId}: fetch failed with {StatusCode}",
+                        steamid, response.StatusCode);
                 }
                 return;
             }
@@ -73,7 +87,7 @@ namespace CSGOSkinAPI.Services
                 await response.Content.ReadAsStringAsync(cancellationToken));
             if (inventoryData?.assets == null || inventoryData.descriptions == null)
             {
-                Console.WriteLine($"Inventory warm for {steamid}: empty or invalid inventory");
+                logger.LogDebug("Inventory warm for {SteamId}: empty or invalid inventory", steamid);
                 return;
             }
 
@@ -112,8 +126,11 @@ namespace CSGOSkinAPI.Services
             await dbService.RecordWarmAsync(steamid, cached);
             // Single count=2000 page, same as the inventory endpoint: a bigger inventory is warmed
             // only up to the first page. That's fine for a best-effort warmer, but note it.
-            var truncated = inventoryData.total > inventoryData.assets.Count ? " (inventory truncated at one page)" : "";
-            Console.WriteLine($"Inventory warm for {steamid}: cached {cached} of {inventoryData.assets.Count} items{truncated}");
+            var truncated = inventoryData.total > inventoryData.assets.Count;
+            logger.LogInformation(
+                "Inventory warm for {SteamId}: cached {CachedCount} of {AssetCount} items "
+                + "(truncated at one page: {Truncated})",
+                steamid, cached, inventoryData.assets.Count, truncated);
         }
     }
 }

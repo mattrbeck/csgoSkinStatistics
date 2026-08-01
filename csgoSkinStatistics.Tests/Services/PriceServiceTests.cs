@@ -8,6 +8,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using CSGOSkinAPI.Services;
+using Microsoft.Extensions.Logging;
 using Xunit;
 
 namespace csgoSkinStatistics.Tests.Services;
@@ -21,13 +22,9 @@ namespace csgoSkinStatistics.Tests.Services;
 // every database lives in its own temp file (never the test working directory - a shared file there
 // has flaked this suite before).
 //
-// One test asserts on the rate-limit log line, which means redirecting Console.Out - process-global
-// state. The collection below keeps this class from running alongside anything else so that
-// redirect can never swallow or garble another test's output.
-[CollectionDefinition("Console capture", DisableParallelization = true)]
-public class ConsoleCaptureCollection;
-
-[Collection("Console capture")]
+// One test asserts on the rate-limit log line. It reads it off a CapturingLogger handed to the
+// service, so there is no process-global console redirection here and nothing this class needs
+// serialized against the rest of the suite.
 public class PriceServiceTests : IDisposable
 {
     private readonly string _dbPath = Path.Combine(
@@ -98,11 +95,12 @@ public class PriceServiceTests : IDisposable
     }
 
     private (PriceService Service, StubHandler Handler, StubClientFactory Factory) NewService(
-        DatabaseService db, Func<HttpRequestMessage, HttpResponseMessage> responder)
+        DatabaseService db, Func<HttpRequestMessage, HttpResponseMessage> responder,
+        ILogger<PriceService>? logger = null)
     {
         var handler = new StubHandler(responder);
         var factory = new StubClientFactory(handler);
-        var service = new PriceService(factory, db);
+        var service = new PriceService(factory, db, logger ?? new CapturingLogger<PriceService>());
         _disposables.Add(handler);
         _disposables.Add(service);
         return (service, handler, factory);
@@ -642,36 +640,33 @@ public class PriceServiceTests : IDisposable
     }
 
     [Theory]
-    [InlineData(true, ", retry after 30s")]
-    [InlineData(false, "")]
-    public async Task RefreshAsync_RateLimited_SaysSoInTheLog(bool withRetryAfter, string expectedRetryAfter)
+    [InlineData(true, 30.0)]
+    [InlineData(false, null)]
+    public async Task RefreshAsync_RateLimited_SaysSoInTheLog(bool withRetryAfter, double? expectedRetryAfter)
     {
         // The only observable difference between the 429 branch and the generic failure path, and
         // the reason the branch exists: "we are being throttled, back off" reads very differently
         // from "the feed is broken" when someone is looking at why prices went stale. Deleting the
         // branch fails here even though every other 429 assertion still passes.
         var db = await NewDbAsync();
-        var (service, _, _) = NewService(db, RateLimitAfterFirstFeed(withRetryAfter));
+        var log = new CapturingLogger<PriceService>();
+        var (service, _, _) = NewService(db, RateLimitAfterFirstFeed(withRetryAfter), log);
+        await service.RefreshAsync(CancellationToken.None);
+        var beforeThrottle = log.Entries.Count;
+
         await service.RefreshAsync(CancellationToken.None);
 
-        // Console.SetOut is process-global, hence this class's non-parallel collection.
-        var captured = new StringWriter();
-        var original = Console.Out;
-        Console.SetOut(captured);
-        try
-        {
-            await service.RefreshAsync(CancellationToken.None);
-        }
-        finally
-        {
-            Console.SetOut(original);
-        }
-
-        var log = captured.ToString();
-        Assert.Contains("Skinport RATE LIMITED (429)", log);
-        Assert.Contains($"(429){expectedRetryAfter}; keeping current prices.", log);
-        // ...and not as an unexplained exception from EnsureSuccessStatusCode.
-        Assert.DoesNotContain("Failed to refresh", log);
+        // Exactly one line, and a Warning: a throttled feed is something an operator can act on,
+        // so it must not be filterable away with the routine Debug traffic - nor be shouted as an
+        // Error, which is what an unexplained exception from EnsureSuccessStatusCode would raise.
+        var entry = Assert.Single(log.Entries.Skip(beforeThrottle));
+        Assert.Equal(LogLevel.Warning, entry.Level);
+        Assert.Contains("rate limited (429)", entry.Text);
+        Assert.Contains("keeping current prices.", entry.Text);
+        Assert.Null(entry.Exception);
+        // Retry-After travels as a queryable field rather than as text spliced into the sentence,
+        // and is simply absent on the 429s Skinport sends without the header.
+        Assert.Equal(expectedRetryAfter, entry["RetryAfterSeconds"]);
     }
 
     // Serves one good feed, then rate-limits every later request.

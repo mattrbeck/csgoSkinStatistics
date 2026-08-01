@@ -20,17 +20,22 @@ namespace CSGOSkinAPI.Services
         private readonly StickerCatalog _stickers;
         private readonly Dictionary<string, string> _skinImages;
 
+        private readonly ILogger<ConstDataService> _logger;
+
         // Production: the catalogs sit beside the app, so they resolve against the working directory
         // exactly as a bare relative path would.
-        public ConstDataService() : this(Directory.GetCurrentDirectory())
+        public ConstDataService(ILogger<ConstDataService> logger)
+            : this(Directory.GetCurrentDirectory(), logger)
         {
         }
 
         // Tests point this at a fixture directory. Without it every test that wants a real service
         // has to write its catalogs into the *shared* working directory, which makes any two such
-        // tests race each other.
-        internal ConstDataService(string dataDirectory)
+        // tests race each other. The logger defaults to the null sink for the tests that only care
+        // about what the catalogs resolve to.
+        internal ConstDataService(string dataDirectory, ILogger<ConstDataService>? logger = null)
         {
+            _logger = logger ?? NullLogger<ConstDataService>.Instance;
             var jsonString = File.ReadAllText(Path.Combine(dataDirectory, "const.json"));
             _constData = JsonSerializer.Deserialize<ConstData>(jsonString, JsonOptions) ?? new ConstData();
 
@@ -166,7 +171,7 @@ namespace CSGOSkinAPI.Services
 
             if (warnIfMissing)
             {
-                Console.WriteLine($"Item {defIndex} is missing from constants");
+                _logger.LogWarning("Item {DefIndex} is missing from constants", defIndex);
             }
             return "";
         }
@@ -178,7 +183,7 @@ namespace CSGOSkinAPI.Services
                 return pattern;
             }
 
-            Console.WriteLine($"Skin {paintIndex} is missing from constants");
+            _logger.LogWarning("Skin {PaintIndex} is missing from constants", paintIndex);
             return "";
         }
 

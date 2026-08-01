@@ -1,4 +1,6 @@
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using CSGOSkinAPI.Models;
 using CSGOSkinAPI.Services;
 
@@ -44,7 +46,10 @@ internal sealed class CatalogDirectory : IDisposable
         return this;
     }
 
-    public ConstDataService Build() => new(_directory);
+    public ConstDataService Build() => Build(NullLogger<ConstDataService>.Instance);
+
+    // The overload a test that wants to see the "missing from constants" warnings uses.
+    public ConstDataService Build(ILogger<ConstDataService> logger) => new(_directory, logger);
 
     private void Write<T>(string fileName, T value)
         => File.WriteAllText(Path.Combine(_directory, fileName), JsonSerializer.Serialize(value));

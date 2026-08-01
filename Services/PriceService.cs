@@ -28,7 +28,8 @@ namespace CSGOSkinAPI.Services
     // (and shown approximate once it's over a week stale), and a variant that was never listed
     // borrows from an adjacent wear of the same skin (also approximate). A kept value is preferred
     // over an adjacent-wear guess. The borrow is capped at one wear tier - see NearestWear.
-    public class PriceService(IHttpClientFactory httpClientFactory, DatabaseService dbService) : BackgroundService
+    public class PriceService(IHttpClientFactory httpClientFactory, DatabaseService dbService,
+        ILogger<PriceService> logger) : BackgroundService
     {
         public const string Currency = "USD";
         private const string ItemsUrl = "https://api.skinport.com/v1/items?app_id=730&currency=" + Currency + "&tradable=0";
@@ -155,7 +156,9 @@ namespace CSGOSkinAPI.Services
                 {
                     delay = ColdStartBackoff[Math.Min(coldStartAttempts, ColdStartBackoff.Length - 1)];
                     coldStartAttempts++;
-                    Console.WriteLine($"Skinport prices still unavailable; retrying in {delay.TotalMinutes:0} min.");
+                    logger.LogWarning(
+                        "Skinport prices still unavailable; retrying in {RetryInMinutes:0} min.",
+                        delay.TotalMinutes);
                 }
                 else
                 {
@@ -189,12 +192,14 @@ namespace CSGOSkinAPI.Services
                         kv => new SkinPrice(kv.Value.MinCents, kv.Value.SuggestedCents, kv.Value.UpdatedAt),
                         StringComparer.Ordinal);
                     _updatedAtUtc = persisted.Values.Max(v => v.UpdatedAt);
-                    Console.WriteLine($"Loaded {persisted.Count} persisted Skinport prices (latest {_updatedAtUtc:u}).");
+                    logger.LogInformation(
+                        "Loaded {PriceCount} persisted Skinport prices (latest {PricesUpdatedAt:u}).",
+                        persisted.Count, _updatedAtUtc);
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Failed to load persisted prices: {ex.Message}");
+                logger.LogWarning(ex, "Failed to load persisted prices");
             }
         }
 
@@ -206,8 +211,20 @@ namespace CSGOSkinAPI.Services
                 using var response = await client.GetAsync(ItemsUrl, cancellationToken);
                 if ((int)response.StatusCode == 429)
                 {
+                    // Two templates rather than one with a spliced-in fragment: Retry-After is
+                    // optional on Skinport's 429s, and a conditional inside the message would put
+                    // the seconds back into the text instead of leaving them a queryable field.
                     var retryAfter = response.Headers.RetryAfter?.Delta?.TotalSeconds;
-                    Console.WriteLine($"Skinport RATE LIMITED (429){(retryAfter is double s ? $", retry after {s}s" : "")}; keeping current prices.");
+                    if (retryAfter is double seconds)
+                    {
+                        logger.LogWarning(
+                            "Skinport rate limited (429), retry after {RetryAfterSeconds}s; keeping current prices.",
+                            seconds);
+                    }
+                    else
+                    {
+                        logger.LogWarning("Skinport rate limited (429); keeping current prices.");
+                    }
                     return;
                 }
                 response.EnsureSuccessStatusCode();
@@ -215,7 +232,7 @@ namespace CSGOSkinAPI.Services
                 var items = await response.Content.ReadFromJsonAsync<List<SkinportItem>>(cancellationToken);
                 if (items == null || items.Count == 0)
                 {
-                    Console.WriteLine("Skinport returned no items; keeping current prices.");
+                    logger.LogWarning("Skinport returned no items; keeping current prices.");
                     return;
                 }
 
@@ -240,12 +257,14 @@ namespace CSGOSkinAPI.Services
                 _updatedAtUtc = now;
 
                 await dbService.SavePricesAsync(fed, now);
-                Console.WriteLine($"Refreshed {fed.Count} Skinport prices ({merged.Count} kept in total).");
+                logger.LogInformation(
+                    "Refreshed {RefreshedCount} Skinport prices ({KeptCount} kept in total).",
+                    fed.Count, merged.Count);
             }
             catch (Exception ex)
             {
                 // Keep serving whatever we already have; try again next cycle.
-                Console.WriteLine($"Failed to refresh Skinport prices: {ex.Message}");
+                logger.LogError(ex, "Failed to refresh Skinport prices");
             }
         }
     }

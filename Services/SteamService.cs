@@ -3,7 +3,8 @@ namespace CSGOSkinAPI.Services
     public class SteamService
     {
         private readonly List<SteamAccountManager> _accountManagers = [];
-        private readonly SteamTokenStore _tokenStore = new("steam-tokens.json");
+        private readonly ILogger<SteamService> _logger;
+        private readonly SteamTokenStore _tokenStore;
         // Written on the HTTP thread (ConnectAsync/Disconnect), read on the per-account callback
         // loop threads, so it must be volatile for those loops to observe a shutdown promptly.
         private volatile bool _isRunning = false;
@@ -15,9 +16,12 @@ namespace CSGOSkinAPI.Services
         private readonly SemaphoreSlim _connectLock = new(1, 1);
 
 
-        public SteamService()
+        // ILoggerFactory rather than ILogger<SteamService>: SteamTokenStore is a file this service
+        // owns and news up itself (it is not registered with DI), so it needs a logger of its own
+        // category, and a factory is the only thing that can mint one without either forcing the
+        // store into the container or logging its lines under this service's name.
+        public SteamService(ILoggerFactory loggerFactory) : this(loadAccounts: true, loggerFactory)
         {
-            LoadAndInitializeAccounts();
         }
 
         // Test seam. The public constructor deliberately throws when no account is configured, so an
@@ -25,9 +29,15 @@ namespace CSGOSkinAPI.Services
         // the startup ConnectAsync in Program.cs dial Steam for real. Skipping the load leaves an
         // empty account list, which is the state a misconfigured deployment would be in: ConnectAsync
         // has nothing to connect and GetItemInfoAsync still throws "No Steam accounts configured".
-        // Nothing else about the service changes.
-        internal SteamService(bool loadAccounts)
+        // Nothing else about the service changes. The logger defaults to the null sink so a test
+        // that isn't looking at the log doesn't have to supply one.
+        internal SteamService(bool loadAccounts, ILoggerFactory? loggerFactory = null)
         {
+            loggerFactory ??= NullLoggerFactory.Instance;
+            _logger = loggerFactory.CreateLogger<SteamService>();
+            _tokenStore = new SteamTokenStore(
+                "steam-tokens.json", loggerFactory.CreateLogger<SteamTokenStore>());
+
             if (loadAccounts)
             {
                 LoadAndInitializeAccounts();
@@ -47,12 +57,12 @@ namespace CSGOSkinAPI.Services
                     if (loadedAccounts != null && loadedAccounts.Count > 0)
                     {
                         accounts.AddRange(loadedAccounts);
-                        Console.WriteLine($"Loaded {accounts.Count} Steam accounts from steam-accounts.json");
+                        _logger.LogInformation("Loaded {AccountCount} Steam accounts from steam-accounts.json", accounts.Count);
                     }
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"Error loading steam-accounts.json: {ex.Message}");
+                    _logger.LogError(ex, "Error loading steam-accounts.json");
                 }
             }
 
@@ -64,7 +74,7 @@ namespace CSGOSkinAPI.Services
                 if (!string.IsNullOrEmpty(steamUsername) && !string.IsNullOrEmpty(steamPassword))
                 {
                     accounts.Add(new SteamAccount { Username = steamUsername, Password = steamPassword });
-                    Console.WriteLine("Using Steam account from environment variables");
+                    _logger.LogInformation("Using Steam account from environment variables");
                 }
             }
 
@@ -99,7 +109,7 @@ namespace CSGOSkinAPI.Services
 
             if (!_isRunning)
             {
-                Console.WriteLine("Steam service not running, connecting...");
+                _logger.LogInformation("Steam service not running, connecting...");
                 await ConnectAsync();
             }
 
@@ -117,7 +127,7 @@ namespace CSGOSkinAPI.Services
             // response removes the entry and then orphan itself on a list nobody drives.
             if (!JoinOrCreatePendingRequest(jobId, tcs))
             {
-                Console.WriteLine($"Request for itemid {jobId} already pending, waiting for existing request...");
+                _logger.LogDebug("Request for itemid {ItemId} already pending, waiting for existing request...", jobId);
 
                 // Bound the wait: if the leader never completes, return null instead of hanging
                 // forever. The window covers the leader's own 2s-per-account retry budget plus slack.
@@ -125,7 +135,7 @@ namespace CSGOSkinAPI.Services
                 if (await Task.WhenAny(tcs.Task, coalescedTimeout) == coalescedTimeout)
                 {
                     RemovePendingRequest(jobId, tcs);
-                    Console.WriteLine($"Coalesced wait for itemid {jobId} timed out");
+                    _logger.LogWarning("Coalesced wait for itemid {ItemId} timed out", jobId);
                     return null;
                 }
                 return await tcs.Task;
@@ -144,7 +154,7 @@ namespace CSGOSkinAPI.Services
                     var accountManager = GetNextAvailableAccount(attemptedAccounts);
                     if (accountManager == null)
                     {
-                        Console.WriteLine("No available accounts for request");
+                        _logger.LogWarning("No available accounts for request");
                         break;
                     }
 
@@ -152,7 +162,7 @@ namespace CSGOSkinAPI.Services
 
                     if (!accountManager.IsConnected || !accountManager.IsLoggedIn)
                     {
-                        Console.WriteLine($"[{accountManager.Account.Username}] Account not ready, trying next account...");
+                        _logger.LogDebug("[{SteamAccount}] Account not ready, trying next account...", accountManager.Account.Username);
                         continue;
                     }
 
@@ -162,7 +172,7 @@ namespace CSGOSkinAPI.Services
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"[{accountManager.Account.Username}] Failed to send GC request: {ex.Message}");
+                        _logger.LogWarning(ex, "[{SteamAccount}] Failed to send GC request", accountManager.Account.Username);
                         continue; // try next account
                     }
 
@@ -172,10 +182,10 @@ namespace CSGOSkinAPI.Services
                         return await tcs.Task; // GC responded (success or null item)
                     }
 
-                    Console.WriteLine($"[{accountManager.Account.Username}] Request timed out for job {jobId}, trying next account...");
+                    _logger.LogDebug("[{SteamAccount}] Request timed out for job {ItemId}, trying next account...", accountManager.Account.Username, jobId);
                 }
 
-                Console.WriteLine($"All account attempts failed for itemid {jobId}");
+                _logger.LogError("All account attempts failed for itemid {ItemId}", jobId);
                 return null;
             }
             finally
@@ -275,7 +285,7 @@ namespace CSGOSkinAPI.Services
             }
         }
 
-        private static async Task SendGCRequest(SteamAccountManager accountManager, ulong s, ulong a, ulong d, ulong m, ulong jobId)
+        private async Task SendGCRequest(SteamAccountManager accountManager, ulong s, ulong a, ulong d, ulong m, ulong jobId)
         {
             await accountManager.RateLimitSemaphore.WaitAsync();
             try
@@ -286,7 +296,7 @@ namespace CSGOSkinAPI.Services
                 if (timeSinceLastRequest < minimumInterval)
                 {
                     var waitTime = minimumInterval - timeSinceLastRequest;
-                    Console.WriteLine($"[{accountManager.Account.Username}] Rate limiting: waiting {waitTime.TotalMilliseconds:F0}ms");
+                    _logger.LogTrace("[{SteamAccount}] Rate limiting: waiting {WaitMilliseconds:F0}ms", accountManager.Account.Username, waitTime.TotalMilliseconds);
                     await Task.Delay(waitTime);
                 }
 
@@ -300,7 +310,7 @@ namespace CSGOSkinAPI.Services
                 request.Body.param_m = m;
 
                 accountManager.GC.Send(request, 730);
-                Console.WriteLine($"[{accountManager.Account.Username}] Sent GC request for itemid {jobId}");
+                _logger.LogTrace("[{SteamAccount}] Sent GC request for itemid {ItemId}", accountManager.Account.Username, jobId);
             }
             finally
             {
@@ -320,7 +330,7 @@ namespace CSGOSkinAPI.Services
                     return;
                 }
 
-                Console.WriteLine($"ConnectAsync called - connecting {_accountManagers.Count} Steam accounts");
+                _logger.LogInformation("ConnectAsync called - connecting {AccountCount} Steam accounts", _accountManagers.Count);
 
                 // The callback loops must pump while we connect (the Connected/LoggedOn callbacks are
                 // what establish the session), so _isRunning has to be set before they start. Spawn a
@@ -335,7 +345,7 @@ namespace CSGOSkinAPI.Services
                     {
                         _ = Task.Run(() =>
                         {
-                            Console.WriteLine($"[{accountManager.Account.Username}] Starting callback manager loop");
+                            _logger.LogDebug("[{SteamAccount}] Starting callback manager loop", accountManager.Account.Username);
                             while (_isRunning)
                             {
                                 // A throw from a callback handler (e.g. a malformed GC message) must
@@ -348,10 +358,10 @@ namespace CSGOSkinAPI.Services
                                 }
                                 catch (Exception ex)
                                 {
-                                    Console.WriteLine($"[{accountManager.Account.Username}] Callback loop error: {ex.Message}");
+                                    _logger.LogError(ex, "[{SteamAccount}] Callback loop error", accountManager.Account.Username);
                                 }
                             }
-                            Console.WriteLine($"[{accountManager.Account.Username}] Callback manager loop ended");
+                            _logger.LogDebug("[{SteamAccount}] Callback manager loop ended", accountManager.Account.Username);
                         });
                     }
                 }
@@ -368,10 +378,10 @@ namespace CSGOSkinAPI.Services
                 {
                     if (_accountManagers.Any(am => am.IsConnected && am.IsLoggedIn))
                     {
-                        Console.WriteLine("At least one Steam account connected successfully");
+                        _logger.LogInformation("At least one Steam account connected successfully");
                         return;
                     }
-                    Console.WriteLine("Waiting for account connections...");
+                    _logger.LogDebug("Waiting for account connections...");
                     await Task.Delay(1000);
                 }
 
@@ -385,7 +395,7 @@ namespace CSGOSkinAPI.Services
                     throw new Exception("Failed to connect any Steam accounts");
                 }
 
-                Console.WriteLine($"Steam service started with {connectedCount}/{_accountManagers.Count} accounts connected");
+                _logger.LogInformation("Steam service started with {ConnectedCount}/{AccountCount} accounts connected", connectedCount, _accountManagers.Count);
             }
             finally
             {
@@ -397,19 +407,19 @@ namespace CSGOSkinAPI.Services
         {
             try
             {
-                Console.WriteLine($"[{accountManager.Account.Username}] Connecting account");
+                _logger.LogInformation("[{SteamAccount}] Connecting account", accountManager.Account.Username);
                 accountManager.Client.Connect();
                 await Task.Delay(2000); // Give some time for connection
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[{accountManager.Account.Username}] Failed to connect account: {ex.Message}");
+                _logger.LogWarning(ex, "[{SteamAccount}] Failed to connect account", accountManager.Account.Username);
             }
         }
 
         public void Disconnect()
         {
-            Console.WriteLine("Disconnecting from Steam...");
+            _logger.LogInformation("Disconnecting from Steam...");
             _isRunning = false;
             foreach (var accountManager in _accountManagers)
             {
@@ -419,7 +429,7 @@ namespace CSGOSkinAPI.Services
 
         private void OnConnected(SteamClient.ConnectedCallback callback, SteamAccountManager accountManager)
         {
-            Console.WriteLine($"[{accountManager.Account.Username}] Steam client connected");
+            _logger.LogInformation("[{SteamAccount}] Steam client connected", accountManager.Account.Username);
             accountManager.IsConnected = true;
             _ = LogOnAsync(accountManager); // async auth; don't block the callback thread
         }
@@ -438,7 +448,7 @@ namespace CSGOSkinAPI.Services
             var cachedToken = _tokenStore.Get(username);
             if (cachedToken != null)
             {
-                Console.WriteLine($"[{username}] Logging on with cached token");
+                _logger.LogInformation("[{SteamAccount}] Logging on with cached token", username);
                 accountManager.UsedCachedToken = true;
                 accountManager.User.LogOn(new SteamUser.LogOnDetails
                 {
@@ -450,7 +460,7 @@ namespace CSGOSkinAPI.Services
 
             try
             {
-                Console.WriteLine($"[{username}] Authenticating");
+                _logger.LogInformation("[{SteamAccount}] Authenticating", username);
                 accountManager.UsedCachedToken = false;
                 var session = await accountManager.Client.Authentication.BeginAuthSessionViaCredentialsAsync(new AuthSessionDetails
                 {
@@ -464,7 +474,7 @@ namespace CSGOSkinAPI.Services
                 // Key by the configured username so the next lookup (also by it) hits.
                 _tokenStore.Set(username, poll.RefreshToken);
 
-                Console.WriteLine($"[{username}] Logging on");
+                _logger.LogInformation("[{SteamAccount}] Logging on", username);
                 accountManager.User.LogOn(new SteamUser.LogOnDetails
                 {
                     Username = poll.AccountName,
@@ -474,25 +484,25 @@ namespace CSGOSkinAPI.Services
             catch (Exception ex)
             {
                 // Bad credentials, or an account that needs a Steam Guard code we don't supply.
-                Console.WriteLine($"[{username}] Authentication failed: {ex.Message}");
+                _logger.LogError(ex, "[{SteamAccount}] Authentication failed", username);
             }
         }
 
         private void OnDisconnected(SteamClient.DisconnectedCallback callback, SteamAccountManager accountManager)
         {
-            Console.WriteLine($"[{accountManager.Account.Username}] Steam client disconnected. User initiated: {callback.UserInitiated}");
+            _logger.LogInformation("[{SteamAccount}] Steam client disconnected. User initiated: {UserInitiated}", accountManager.Account.Username, callback.UserInitiated);
             accountManager.IsConnected = false;
             accountManager.IsLoggedIn = false;
 
             if (!callback.UserInitiated && _isRunning)
             {
-                Console.WriteLine($"[{accountManager.Account.Username}] Disconnection was not user-initiated, attempting to reconnect...");
+                _logger.LogWarning("[{SteamAccount}] Disconnection was not user-initiated, attempting to reconnect...", accountManager.Account.Username);
                 _ = Task.Run(async () =>
                 {
                     await Task.Delay(5000); // Wait 5 seconds before reconnecting
                     if (_isRunning && !accountManager.IsConnected)
                     {
-                        Console.WriteLine($"[{accountManager.Account.Username}] Reconnecting Steam account");
+                        _logger.LogInformation("[{SteamAccount}] Reconnecting Steam account", accountManager.Account.Username);
                         accountManager.Client.Connect();
                     }
                 });
@@ -502,17 +512,17 @@ namespace CSGOSkinAPI.Services
         private void OnLoggedOn(SteamUser.LoggedOnCallback callback, SteamAccountManager accountManager)
         {
             var username = accountManager.Account.Username;
-            Console.WriteLine($"[{username}] Steam logon result: {callback.Result}");
+            _logger.LogInformation("[{SteamAccount}] Steam logon result: {LogonResult}", username, callback.Result);
             if (callback.Result != EResult.OK)
             {
-                Console.WriteLine($"[{username}] Failed to log on to Steam: {callback.Result}");
+                _logger.LogError("[{SteamAccount}] Failed to log on to Steam: {LogonResult}", username, callback.Result);
 
                 // A cached token Steam rejected (expired, revoked, password changed, ...): drop it
                 // and re-authenticate with credentials. The credential path sets UsedCachedToken
                 // false, so a failure there just logs and never loops back here.
                 if (accountManager.UsedCachedToken)
                 {
-                    Console.WriteLine($"[{username}] Cached token rejected; re-authenticating with credentials");
+                    _logger.LogWarning("[{SteamAccount}] Cached token rejected; re-authenticating with credentials", username);
                     accountManager.UsedCachedToken = false;
                     _tokenStore.Remove(username);
                     _ = LogOnAsync(accountManager);
@@ -533,20 +543,20 @@ namespace CSGOSkinAPI.Services
             _ = Task.Run(async () =>
             {
                 // Wait for CS:GO connection to stabilize before sending Hello
-                Console.WriteLine($"[{accountManager.Account.Username}] Waiting 5 seconds for connection to stabilize...");
+                _logger.LogDebug("[{SteamAccount}] Waiting 5 seconds for connection to stabilize...", accountManager.Account.Username);
                 await Task.Delay(5000);
 
                 // Send Hello message to GC to establish session
-                Console.WriteLine($"[{accountManager.Account.Username}] Sending Hello message to Game Coordinator...");
+                _logger.LogDebug("[{SteamAccount}] Sending Hello message to Game Coordinator...", accountManager.Account.Username);
                 var helloMsg = new ClientGCMsgProtobuf<SteamKit2.GC.CSGO.Internal.CMsgClientHello>((uint)EGCBaseClientMsg.k_EMsgGCClientHello);
                 helloMsg.Body.version = 2000202; // Protocol version
                 accountManager.GC.Send(helloMsg, 730);
             });
         }
 
-        private static void OnLoggedOff(SteamUser.LoggedOffCallback callback, SteamAccountManager accountManager)
+        private void OnLoggedOff(SteamUser.LoggedOffCallback callback, SteamAccountManager accountManager)
         {
-            Console.WriteLine($"[{accountManager.Account.Username}] Steam user logged off. Result: {callback.Result}");
+            _logger.LogInformation("[{SteamAccount}] Steam user logged off. Result: {LogoffResult}", accountManager.Account.Username, callback.Result);
             accountManager.IsLoggedIn = false;
         }
 
@@ -568,7 +578,7 @@ namespace CSGOSkinAPI.Services
                     }
                     else
                     {
-                        Console.WriteLine($"[{accountManager.Account.Username}] No item info in response");
+                        _logger.LogDebug("[{SteamAccount}] No item info in response", accountManager.Account.Username);
                     }
 
                     // Pull the pending list from the dictionary and resolve every waiter on it
@@ -577,44 +587,44 @@ namespace CSGOSkinAPI.Services
                 }
                 else
                 {
-                    Console.WriteLine($"[{accountManager.Account.Username}] No pending request found for ItemID: {responseItemId}");
+                    _logger.LogDebug("[{SteamAccount}] No pending request found for ItemID: {ItemId}", accountManager.Account.Username, responseItemId);
                 }
             }
             else if (callback.EMsg == (uint)EGCBaseClientMsg.k_EMsgGCClientConnectionStatus)
             {
                 var response = new ClientGCMsgProtobuf<CMsgConnectionStatus>(callback.Message);
-                Console.WriteLine($"[{accountManager.Account.Username}] GC Connection Status:{response.Body.status}, WaitSeconds:{response.Body.wait_seconds}");
+                _logger.LogDebug("[{SteamAccount}] GC Connection Status:{GCConnectionStatus}, WaitSeconds:{GCWaitSeconds}", accountManager.Account.Username, response.Body.status, response.Body.wait_seconds);
 
                 if (response.Body.status != GCConnectionStatus.GCConnectionStatus_HAVE_SESSION)
                 {
-                    Console.WriteLine($"[{accountManager.Account.Username}] WARNING: Not properly connected to Game Coordinator!");
+                    _logger.LogWarning("[{SteamAccount}] Not properly connected to Game Coordinator!", accountManager.Account.Username);
                 }
             }
             else if (callback.EMsg == (uint)EGCBaseClientMsg.k_EMsgGCClientWelcome)
             {
                 var response = new ClientGCMsgProtobuf<CMsgClientWelcome>(callback.Message);
-                Console.WriteLine($"[{accountManager.Account.Username}] GC Welcome Received, version: {response.Body.version}");
+                _logger.LogInformation("[{SteamAccount}] GC Welcome Received, version: {GCVersion}", accountManager.Account.Username, response.Body.version);
             }
             else if (callback.EMsg == (uint)ECsgoGCMsg.k_EMsgGCCStrike15_v2_ClientLogonFatalError)
             {
                 var response = new ClientGCMsgProtobuf<CMsgGCCStrike15_v2_ClientLogonFatalError>(callback.Message);
-                Console.WriteLine($"[{accountManager.Account.Username}] ERROR: GC Fatal Logon Error: Code:{response.Body.errorcode}, Message: {response.Body.message}");
+                _logger.LogError("[{SteamAccount}] GC Fatal Logon Error: Code:{GCErrorCode}, Message: {GCErrorMessage}", accountManager.Account.Username, response.Body.errorcode, response.Body.message);
             }
             else if (callback.EMsg == (uint)ECsgoGCMsg.k_EMsgGCCStrike15_v2_GC2ClientGlobalStats)
             {
-                Console.WriteLine($"[{accountManager.Account.Username}] GC Global Stats Received");
+                _logger.LogTrace("[{SteamAccount}] GC Global Stats Received", accountManager.Account.Username);
             }
             else if (callback.EMsg == (uint)ECsgoGCMsg.k_EMsgGCCStrike15_v2_MatchmakingGC2ClientHello)
             {
-                Console.WriteLine($"[{accountManager.Account.Username}] GC Hello Received");
+                _logger.LogDebug("[{SteamAccount}] GC Hello Received", accountManager.Account.Username);
             }
             else if (callback.EMsg == (uint)ECsgoGCMsg.k_EMsgGCCStrike15_v2_ClientGCRankUpdate)
             {
-                Console.WriteLine($"[{accountManager.Account.Username}] GC Rank Update Received");
+                _logger.LogTrace("[{SteamAccount}] GC Rank Update Received", accountManager.Account.Username);
             }
             else
             {
-                Console.WriteLine($"[{accountManager.Account.Username}] Unhandled GC Message Received: {callback.EMsg}");
+                _logger.LogDebug("[{SteamAccount}] Unhandled GC Message Received: {GCMessageId}", accountManager.Account.Username, callback.EMsg);
             }
         }
     }

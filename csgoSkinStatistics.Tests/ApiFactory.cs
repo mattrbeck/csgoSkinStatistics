@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace csgoSkinStatistics.Tests;
 
@@ -176,8 +177,9 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
         }
     }
 
-    private sealed class IdleInventoryWarmService(IHttpClientFactory httpClientFactory, DatabaseService dbService)
-        : InventoryWarmService(httpClientFactory, dbService)
+    private sealed class IdleInventoryWarmService(IHttpClientFactory httpClientFactory,
+        DatabaseService dbService, ILogger<InventoryWarmService> logger)
+        : InventoryWarmService(httpClientFactory, dbService, logger)
     {
         protected override Task ExecuteAsync(CancellationToken stoppingToken) => Task.CompletedTask;
     }

@@ -90,7 +90,7 @@ public class InventoryWarmServiceTests : IDisposable
     {
         var handler = new StubHandler(responder);
         var factory = new StubClientFactory(handler);
-        var service = new InventoryWarmService(factory, db);
+        var service = new InventoryWarmService(factory, db, new CapturingLogger<InventoryWarmService>());
         _disposables.Add(handler);
         _disposables.Add(service);
         return (service, handler, factory);

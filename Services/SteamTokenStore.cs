@@ -9,8 +9,16 @@ namespace CSGOSkinAPI.Services
     {
         private readonly string _path;
         private readonly object _lock = new();
+        private readonly ILogger _logger;
 
-        public SteamTokenStore(string path) => _path = path;
+        // Not a DI service - SteamService news one up for the file it owns - so the logger is
+        // passed in rather than injected, and defaults to the null sink for the tests that
+        // construct a store directly and assert on the file rather than on the log.
+        public SteamTokenStore(string path, ILogger<SteamTokenStore>? logger = null)
+        {
+            _path = path;
+            _logger = logger ?? NullLogger<SteamTokenStore>.Instance;
+        }
 
         public string? Get(string username)
         {
@@ -54,7 +62,7 @@ namespace CSGOSkinAPI.Services
             catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
             {
                 // Missing/corrupt/unreadable: start empty. The next successful login rewrites it.
-                Console.WriteLine($"Could not read {_path}: {ex.Message}");
+                _logger.LogWarning(ex, "Could not read Steam token store {TokenStorePath}", _path);
             }
             return [];
         }
@@ -91,13 +99,13 @@ namespace CSGOSkinAPI.Services
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 // A non-writable token store just means we re-auth with credentials next time.
-                Console.WriteLine($"Could not write {_path}: {ex.Message}");
+                _logger.LogWarning(ex, "Could not write Steam token store {TokenStorePath}", _path);
             }
         }
 
         private const UnixFileMode OwnerOnly = UnixFileMode.UserRead | UnixFileMode.UserWrite;
 
-        private static void RestrictToOwner(string path)
+        private void RestrictToOwner(string path)
         {
             if (OperatingSystem.IsWindows())
             {
@@ -113,7 +121,7 @@ namespace CSGOSkinAPI.Services
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                Console.WriteLine($"Could not restrict permissions on {path}: {ex.Message}");
+                _logger.LogWarning(ex, "Could not restrict permissions on {TokenStorePath}", path);
             }
         }
     }
