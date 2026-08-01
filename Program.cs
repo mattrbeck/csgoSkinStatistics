@@ -2,6 +2,12 @@
 
 var builder = WebApplication.CreateBuilder(args);
 
+// The two trust-boundary lines are the only logging in this app that must survive whatever level
+// an operator sets - see TransportSecurity.PinTrustBoundaryLogging for why the appsettings.json
+// entry alone does not achieve that. Registered here, after WebApplication.CreateBuilder has bound
+// the Logging configuration section, so the pin sees the operator's rules and outranks them.
+TransportSecurity.PinTrustBoundaryLogging(builder.Logging);
+
 builder.Services.AddControllers();
 builder.Services.AddResponseCompression(options =>
 {
@@ -147,10 +153,9 @@ var forwardedHeaderOptions = TransportSecurity.BuildForwardedHeadersOptions(app.
 // form - otherwise produces a working-looking app whose limiter has quietly collapsed back to one
 // global bucket, with nothing in the log to explain it.
 var transportLoggerFactory = app.Services.GetRequiredService<ILoggerFactory>();
-TransportSecurity.LogTrustedSources(
-    transportLoggerFactory.CreateLogger(typeof(TransportSecurity)), forwardedHeaderOptions);
-var forwardedTrustDiagnostics = new ForwardedTrustDiagnostics(
-    forwardedHeaderOptions, transportLoggerFactory.CreateLogger(typeof(ForwardedTrustDiagnostics)));
+TransportSecurity.LogTrustedSources(transportLoggerFactory, forwardedHeaderOptions);
+var forwardedTrustDiagnostics =
+    new ForwardedTrustDiagnostics(forwardedHeaderOptions, transportLoggerFactory);
 app.Use(async (context, next) =>
 {
     // Ahead of UseForwardedHeaders, which is about to overwrite the peer address this reads.

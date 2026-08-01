@@ -58,3 +58,43 @@ public class CapturingLogger : ILogger
 
 // The ILogger<T> a constructor-injected component asks for.
 public sealed class CapturingLogger<T> : CapturingLogger, ILogger<T>;
+
+// Captures what was logged AND the category it was logged under. Needed wherever the component
+// under test picks its own category - the category is then part of its behaviour, and a test that
+// only sees the entries cannot tell a correct one from a wrong one.
+public sealed class CapturingLoggerFactory : ILoggerFactory
+{
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, CapturingLogger> _loggers =
+        new(StringComparer.Ordinal);
+
+    public ILogger CreateLogger(string categoryName)
+        => _loggers.GetOrAdd(categoryName, _ => new CapturingLogger());
+
+    public IEnumerable<(string Category, LogEntry Entry)> EntriesWithCategory
+        => _loggers.SelectMany(pair => pair.Value.Entries.Select(entry => (pair.Key, entry)));
+
+    // No-ops: nothing here forwards to a real provider, and tests never dispose the loggers.
+    public void AddProvider(ILoggerProvider provider) { }
+
+    public void Dispose() { }
+}
+
+// A capturing logger *provider*, for the tests that have to go through the real filter pipeline
+// rather than around it. Aliased "Console" so that provider-scoped configuration - the
+// Logging:Console:LogLevel:* keys an operator actually writes - binds to it exactly as it would to
+// the real console provider, which is the whole point of using it.
+[ProviderAlias("Console")]
+public sealed class CapturingLoggerProvider : ILoggerProvider
+{
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, CapturingLogger> _loggers =
+        new(StringComparer.Ordinal);
+
+    // Always true, so what reaches here is decided entirely by the filter rules under test rather
+    // than by this sink having an opinion of its own.
+    public ILogger CreateLogger(string categoryName)
+        => _loggers.GetOrAdd(categoryName, _ => new CapturingLogger());
+
+    public IEnumerable<LogEntry> Entries => _loggers.SelectMany(pair => pair.Value.Entries);
+
+    public void Dispose() { }
+}

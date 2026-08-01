@@ -308,14 +308,18 @@ public sealed class ForwardedHeadersTests(ForwardedHeadersFixture fixture)
         // The one thing an operator can grep for in `docker compose logs` to see what the app
         // actually trusts, rather than what they meant it to. Asserted through the same call
         // Program.cs makes, so the test pins the emitted line rather than a helper beside it.
-        var log = new CapturingLogger();
+        var log = new CapturingLoggerFactory();
 
         TransportSecurity.LogTrustedSources(log, TransportSecurity.BuildForwardedHeadersOptions(
             Config(($"{TransportSecurity.KnownProxiesKey}:0", "203.0.113.9"))));
 
-        var entry = Assert.Single(log.Entries);
+        var (category, entry) = Assert.Single(log.EntriesWithCategory);
+        // The category is part of the behaviour, not an incidental detail: it is what
+        // PinTrustBoundaryLogging protects, so emitting from outside that prefix would quietly
+        // turn the pin into dead configuration.
+        Assert.StartsWith(TransportSecurity.LogCategory, category, StringComparison.Ordinal);
         // Information, not Debug: a mis-set boundary is silent otherwise, so this has to survive a
-        // production log level. appsettings.json pins CSGOSkinAPI.Security here for that reason.
+        // production log level - see the two theories below for that half.
         Assert.Equal(LogLevel.Information, entry.Level);
         Assert.Contains("10.0.0.0/8", entry.Text);
         Assert.Contains("192.168.0.0/16", entry.Text);
@@ -327,20 +331,134 @@ public sealed class ForwardedHeadersTests(ForwardedHeadersFixture fixture)
         Assert.Equal("1", entry["ForwardLimit"]);
     }
 
-    [Fact]
-    public void The_shipped_configuration_keeps_the_trust_boundary_lines_visible()
+    // --- the trust-boundary lines survive an operator turning the logs down ----------------
+    //
+    // Both lines are pointless if a production log level filters them out, and every way that can
+    // happen is a configuration an operator writes with no intent to silence a security
+    // diagnostic. These go through the real pipeline - shipped appsettings.json, real
+    // LoggerFilterOptions rules, real LoggerRuleSelector precedence, real emission from the real
+    // code - because every cheaper assertion has a mutation that survives it: asserting the
+    // appsettings string passes with the emitting category changed, and asserting the emission
+    // with a hand-made logger passes with the pin deleted.
+
+    private static ILoggerFactory FilteredFactory(
+        CapturingLoggerProvider sink, bool pinned, (string Key, string Value) setting)
     {
-        // Both lines above are pointless if a production log level filters them out, and the
-        // obvious tidy-up - "CSGOSkinAPI.Security is the same as the CSGOSkinAPI default, drop it"
-        // - is exactly what makes turning the app down silence them. Read from the shipped
-        // appsettings.json rather than a literal, so the pin is what is asserted. (Parsing it here
-        // also proves the explanatory comments in that file are legal: ASP.NET Core's JSON
-        // configuration provider skips comments, and nothing else in the repo reads it.)
         var config = new ConfigurationBuilder()
+            // The file the app actually ships. Parsing it here also proves its explanatory
+            // comments are legal - ASP.NET Core's JSON provider skips them, and nothing else in
+            // the repo reads the file.
             .AddJsonFile("appsettings.json", optional: false)
+            .AddInMemoryCollection(new Dictionary<string, string?> { [setting.Key] = setting.Value })
             .Build();
 
-        Assert.Equal("Information", config["Logging:LogLevel:CSGOSkinAPI.Security"]);
+        return LoggerFactory.Create(logging =>
+        {
+            logging.AddConfiguration(config.GetSection("Logging"));
+            logging.AddProvider(sink);
+            if (pinned)
+            {
+                TransportSecurity.PinTrustBoundaryLogging(logging);
+            }
+        });
+    }
+
+    private static void EmitBothTrustBoundaryLines(ILoggerFactory factory)
+    {
+        var options = TransportSecurity.BuildForwardedHeadersOptions(Config());
+        TransportSecurity.LogTrustedSources(factory, options);
+        new ForwardedTrustDiagnostics(options, factory).Inspect(Request("203.0.113.9"));
+    }
+
+    private static void AssertBothLinesReached(CapturingLoggerProvider sink)
+    {
+        Assert.Contains(sink.Entries, e =>
+            e.Text.StartsWith("Trusted forwarded-header sources:", StringComparison.Ordinal));
+        Assert.Contains(sink.Entries, e =>
+            e.Text.StartsWith("Ignoring forwarded headers from untrusted peer", StringComparison.Ordinal));
+    }
+
+    // Knobs scoped to a category. The appsettings.json entry for CSGOSkinAPI.Security handles
+    // these on its own, because a longer category prefix outranks a shorter one.
+    public static TheoryData<string, string> CategoryScopedTurnDowns() => new()
+    {
+        { "Logging:LogLevel:Default", "Warning" },
+        { "Logging:LogLevel:Default", "None" },
+        { "Logging:LogLevel:CSGOSkinAPI", "Warning" },
+        { "Logging:LogLevel:CSGOSkinAPI", "None" },
+    };
+
+    [Theory]
+    [MemberData(nameof(CategoryScopedTurnDowns))]
+    public void A_category_scoped_turn_down_does_not_silence_the_trust_boundary_lines(
+        string key, string value)
+    {
+        var sink = new CapturingLoggerProvider();
+        using var factory = FilteredFactory(sink, pinned: true, (key, value));
+
+        EmitBothTrustBoundaryLines(factory);
+
+        AssertBothLinesReached(sink);
+    }
+
+    // Knobs scoped to a provider - `Logging__Console__LogLevel__Default=Warning` in a compose
+    // environment block, which is Microsoft's own documented way to quiet a containerised app.
+    // LoggerRuleSelector ranks ANY rule carrying a ProviderName above any rule without one, so
+    // these outrank the appsettings.json category pin and the code pin is what saves the lines.
+    public static TheoryData<string, string> ProviderScopedTurnDowns() => new()
+    {
+        { "Logging:Console:LogLevel:Default", "Warning" },
+        { "Logging:Console:LogLevel:Default", "None" },
+        { "Logging:Console:LogLevel:CSGOSkinAPI", "Warning" },
+        { "Logging:Console:LogLevel:CSGOSkinAPI", "None" },
+    };
+
+    [Theory]
+    [MemberData(nameof(ProviderScopedTurnDowns))]
+    public void A_provider_scoped_turn_down_does_not_silence_the_trust_boundary_lines(
+        string key, string value)
+    {
+        var sink = new CapturingLoggerProvider();
+        using var factory = FilteredFactory(sink, pinned: true, (key, value));
+
+        EmitBothTrustBoundaryLines(factory);
+
+        AssertBothLinesReached(sink);
+    }
+
+    [Theory]
+    [MemberData(nameof(ProviderScopedTurnDowns))]
+    public void A_provider_scoped_turn_down_silences_the_startup_line_without_the_pin(
+        string key, string value)
+    {
+        // The control, and the reason the theory above is not vacuous: the same configuration with
+        // PinTrustBoundaryLogging removed does exactly what the review found - the startup line
+        // goes quiet, from a setting whose author was only trying to reduce log volume. (All four
+        // reach it, because the startup line is Information and every value here is above that.)
+        var sink = new CapturingLoggerProvider();
+        using var factory = FilteredFactory(sink, pinned: false, (key, value));
+
+        EmitBothTrustBoundaryLines(factory);
+
+        Assert.DoesNotContain(sink.Entries, e =>
+            e.Text.StartsWith("Trusted forwarded-header sources:", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("Logging:Console:LogLevel:Default")]
+    [InlineData("Logging:Console:LogLevel:CSGOSkinAPI")]
+    public void A_provider_scoped_off_silences_the_untrusted_peer_warning_without_the_pin(string key)
+    {
+        // The same control for the second line. It takes "None" rather than "Warning" to reach,
+        // because the line is itself a Warning - which is exactly why the pair of controls is
+        // split: a single one asserting both lines vanish would be wrong for half its cases and
+        // would have to be weakened into proving nothing.
+        var sink = new CapturingLoggerProvider();
+        using var factory = FilteredFactory(sink, pinned: false, (key, "None"));
+
+        EmitBothTrustBoundaryLines(factory);
+
+        Assert.Empty(sink.Entries);
     }
 
     // --- forwarded headers end to end -----------------------------------------------------
@@ -461,10 +579,10 @@ public sealed class ForwardedHeadersTests(ForwardedHeadersFixture fixture)
 
     // --- the untrusted-peer warning -------------------------------------------------------
 
-    private static (ForwardedTrustDiagnostics Diagnostics, CapturingLogger Log) Diagnostics(
+    private static (ForwardedTrustDiagnostics Diagnostics, CapturingLoggerFactory Log) Diagnostics(
         params (string Key, string Value)[] settings)
     {
-        var log = new CapturingLogger();
+        var log = new CapturingLoggerFactory();
         var options = TransportSecurity.BuildForwardedHeadersOptions(Config(settings));
         return (new ForwardedTrustDiagnostics(options, log), log);
     }
@@ -492,7 +610,9 @@ public sealed class ForwardedHeadersTests(ForwardedHeadersFixture fixture)
 
         Assert.True(diagnostics.Inspect(Request("203.0.113.9")));
 
-        var entry = Assert.Single(log.Entries);
+        var (category, entry) = Assert.Single(log.EntriesWithCategory);
+        // Under the pinned prefix, for the same reason as the startup line above.
+        Assert.StartsWith(TransportSecurity.LogCategory, category, StringComparison.Ordinal);
         // Warning, so it stands out from routine traffic and survives a production log level.
         Assert.Equal(LogLevel.Warning, entry.Level);
         Assert.Contains("203.0.113.9", entry.Text);
@@ -506,7 +626,7 @@ public sealed class ForwardedHeadersTests(ForwardedHeadersFixture fixture)
         // Once, not once per request: this must not become a log flood under load.
         Assert.False(diagnostics.Inspect(Request("203.0.113.9")));
         Assert.False(diagnostics.Inspect(Request("198.51.100.1")));
-        Assert.Single(log.Entries);
+        Assert.Single(log.EntriesWithCategory);
     }
 
     [Fact]
@@ -519,7 +639,7 @@ public sealed class ForwardedHeadersTests(ForwardedHeadersFixture fixture)
         // Untrusted peer with no forwarded header - i.e. an ordinary direct client, not a proxy
         // problem. Warning here would fire on every request of a directly-exposed deployment.
         Assert.False(diagnostics.Inspect(Request("203.0.113.9", forwarded: false)));
-        Assert.Empty(log.Entries);
+        Assert.Empty(log.EntriesWithCategory);
     }
 
     [Fact]
@@ -529,7 +649,7 @@ public sealed class ForwardedHeadersTests(ForwardedHeadersFixture fixture)
 
         Assert.False(diagnostics.Inspect(Request("::ffff:10.0.0.5")));
         Assert.True(diagnostics.Inspect(Request("::ffff:203.0.113.9")));
-        Assert.Single(log.Entries);
+        Assert.Single(log.EntriesWithCategory);
     }
 
     [Fact]
@@ -539,7 +659,7 @@ public sealed class ForwardedHeadersTests(ForwardedHeadersFixture fixture)
         var (diagnostics, log) = Diagnostics(($"{TransportSecurity.KnownNetworksKey}:0", "  "));
 
         Assert.True(diagnostics.Inspect(Request("10.0.0.5")));
-        Assert.Single(log.Entries);
+        Assert.Single(log.EntriesWithCategory);
     }
 
     // --- the partition key ----------------------------------------------------------------
