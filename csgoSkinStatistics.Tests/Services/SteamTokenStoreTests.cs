@@ -110,6 +110,35 @@ public class SteamTokenStoreTests : IDisposable
     }
 
     [Fact]
+    public void NewStore_IsReadableOnlyByItsOwner()
+    {
+        if (OperatingSystem.IsWindows()) return; // POSIX modes don't apply
+
+        new SteamTokenStore(_path).Set("alice", "refresh-abc");
+
+        // A refresh token is a credential: it logs the account on without the password or Steam
+        // Guard, so the store must not be left group/world readable by the process umask.
+        var mode = File.GetUnixFileMode(_path);
+        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, mode);
+    }
+
+    [Fact]
+    public void ExistingWorldReadableStore_IsTightenedOnWrite()
+    {
+        if (OperatingSystem.IsWindows()) return;
+
+        // A store left behind by an older build (or restored from a backup) must not stay readable.
+        File.WriteAllText(_path, "{}");
+        File.SetUnixFileMode(_path,
+            UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead);
+
+        new SteamTokenStore(_path).Set("alice", "refresh-abc");
+
+        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(_path));
+        Assert.Equal("refresh-abc", new SteamTokenStore(_path).Get("alice"));
+    }
+
+    [Fact]
     public async Task ConcurrentWrites_FromManyThreads_AllReadBack()
     {
         var store = new SteamTokenStore(_path);
