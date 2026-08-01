@@ -59,11 +59,12 @@ class InventoryItem extends HTMLElement {
         animation: shimmer 2s infinite;
         top: 0;
       }
-      :host(.loaded:not([style*="border-left-color"])) {
-        border-left-color: var(--pop, #2ecc71);
-      }
+      /* The left edge encodes RARITY, and updateDisplay writes that colour as an inline style
+         on the host. Inline wins the cascade, so any rule here that wants to colour this edge
+         must say !important or it will never render - which is how the old ".loaded means
+         analysed" green edge quietly died. Don't add a competing non-important rule. */
       :host(.error) {
-        border-left-color: var(--error, #cc492f);
+        border-left-color: var(--error, #cc492f) !important;
       }
       
       .item-content {
@@ -392,7 +393,7 @@ class InventoryItem extends HTMLElement {
       }
 
       .error-message {
-        color: var(--error, #cc492f) !important;
+        color: var(--error, #cc492f);
       }
 
       .item-actions {

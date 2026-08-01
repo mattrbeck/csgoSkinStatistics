@@ -735,6 +735,41 @@ describe('failed analysis', () => {
       .toBe('Detailed analysis failed');
   });
 
+  // The red left edge for a failed analysis: what jsdom can and cannot see.
+  //
+  // Checked empirically before these two tests were written, not assumed:
+  //   * jsdom (20.x, via jest-environment-jsdom 29) has no adoptedStyleSheets, so the component
+  //     takes its <style> fallback path - the text read below really is the stylesheet the card
+  //     installs.
+  //   * getComputedStyle() on a shadow host returns an empty string for anything a :host() rule
+  //     sets; jsdom does not apply shadow stylesheets to their host at all.
+  //   * jsdom does not populate .sheet on a <style> inside a shadow root either, so the rule
+  //     cannot be reached through the CSSOM.
+  //   * jsdom's cascade also gets !important backwards in the plain document: an author
+  //     !important declaration loses to an inline style there, the opposite of the real rule.
+  //
+  // So no jest test in this repo can assert that the edge actually renders red - only a browser
+  // can. The two tests below check the two halves that ARE checkable and are named for exactly
+  // that: the behavioural half (an errored card still carries a conflicting inline rarity
+  // colour, which is *why* the rule needs !important) and a source-level guard on the single
+  // token that decides the conflict.
+  test('an errored card still carries its inline rarity colour, which the error edge must outrank', () => {
+    const el = makeCard({ name: 'AK-47 | Redline', rarity: 'Classified' });
+    el.updateWithDetails({ error: 'timed out' }, null);
+    expect(el.classList.contains('error')).toBe(true);
+    expect(el.style.getPropertyValue('border-left-color')).toBe('#D32CE6');
+  });
+
+  test('the installed stylesheet declares the error edge !important (source check, not a render check)', () => {
+    const el = makeCard({ name: 'AK-47 | Redline', rarity: 'Classified' });
+    const css = el.shadowRoot.querySelector('style').textContent;
+    const errorRule = (css.match(/:host\(\.error\)\s*\{([^}]*)\}/) || [])[1];
+    expect(errorRule).toBeDefined();
+    // Without the !important the inline colour asserted above wins and this edge never renders,
+    // which is how it sat dead in the stylesheet from 8d45891 until 2026-08-01.
+    expect(errorRule).toMatch(/border-left-color\s*:[^;]*!important/);
+  });
+
   test('a retry that fails again does not stack a second error line', () => {
     const el = makeCard({ name: 'X' });
     el.updateWithDetails({ error: 'timed out' }, null);
