@@ -272,17 +272,19 @@ public class PriceServiceTests : IDisposable
     [Fact]
     public async Task NearestWear_AverageOfOddCents_RoundsToNearest()
     {
-        // Averaging in integer cents has to land somewhere on a half. (1001+1000)/2 = 1000.5 and
-        // (1501+1500)/2 = 1500.5, both rounded away from zero; truncating would bias every odd pair
-        // low, and there is no sub-cent price to carry the remainder into.
+        // Averaging in integer cents has to land somewhere on a half, and there is no sub-cent price
+        // to carry the remainder into. Min: (1003+1000)/2 = 1001.5 -> 1002, a value equal to neither
+        // neighbour, so truncating or quietly returning one side fails here. Suggested:
+        // (1501+1500)/2 = 1500.5 -> 1501, which pins the half going away from zero rather than to
+        // even (which would give 1500).
         var service = await ServiceWithFeedAsync(
-            ("AK-47 | Redline (Minimal Wear)", 10.01, 15.01),
+            ("AK-47 | Redline (Minimal Wear)", 10.03, 15.01),
             ("AK-47 | Redline (Well-Worn)", 10.00, 15.00));
 
         var result = service.Resolve("AK-47 | Redline (Field-Tested)");
 
         Assert.NotNull(result);
-        Assert.Equal(1001, result.MinCents);
+        Assert.Equal(1002, result.MinCents);
         Assert.Equal(1501, result.SuggestedCents);
         Assert.True(result.Approximate);
     }
