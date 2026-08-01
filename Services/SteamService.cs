@@ -20,6 +20,18 @@ namespace CSGOSkinAPI.Services
             LoadAndInitializeAccounts();
         }
 
+        // Test seam. The public constructor deliberately throws when no account is configured, so an
+        // integration-test host cannot build one - and supplying real credentials instead would make
+        // the startup ConnectAsync in Program.cs dial Steam for real. This builds the same service
+        // with an empty account list, which is the state a misconfigured deployment would be in:
+        // ConnectAsync has nothing to connect and GetItemInfoAsync still throws "No Steam accounts
+        // configured". Nothing else about the service changes.
+        private SteamService(bool _)
+        {
+        }
+
+        internal static SteamService CreateWithoutAccounts() => new(false);
+
         private void LoadAndInitializeAccounts()
         {
             List<SteamAccount> accounts = [];
