@@ -162,6 +162,14 @@ public class InventoryEndpointTests(ApiFactory factory) : IClassFixture<ApiFacto
         Assert.Equal("Rifle", cert.GetProperty("item_type").GetString());
         // Parsed out of the free-text StatTrak score line, thousands separator and all.
         Assert.Equal(1234, cert.GetProperty("stattrak_kills").GetInt32());
+        // Priced off Steam's own market_hash_name, so an item is priced even before anything about
+        // it has been decoded. Cents, exactly as the feed gave them.
+        var price = cert.GetProperty("price");
+        Assert.Equal(200000, price.GetProperty("min").GetInt32());
+        Assert.Equal(240000, price.GetProperty("suggested").GetInt32());
+        Assert.Equal("USD", price.GetProperty("currency").GetString());
+        Assert.Equal("skinport", price.GetProperty("source").GetString());
+        Assert.False(price.GetProperty("approximate").GetBoolean());
 
         // %propid:6% was replaced with this asset's certificate, which is what lets the item decode
         // with no Game Coordinator round-trip.
@@ -185,6 +193,11 @@ public class InventoryEndpointTests(ApiFactory factory) : IClassFixture<ApiFacto
             cached.GetProperty("inspect_link").GetString());
         Assert.Equal(222UL, cached.GetProperty("existing_data").GetProperty("itemid").GetUInt64());
         Assert.Equal("Well-Worn", cached.GetProperty("existing_data").GetProperty("wear_name").GetString());
+        // Well-Worn was never listed on Skinport, so the decoded item is priced off the nearest
+        // wear of the same skin and flagged approximate.
+        var approximatePrice = cached.GetProperty("existing_data").GetProperty("price");
+        Assert.Equal(125050, approximatePrice.GetProperty("suggested").GetInt32());
+        Assert.True(approximatePrice.GetProperty("approximate").GetBoolean());
         // The classic link names the owner and the copy, and those travel back on the response.
         Assert.Equal(steamId, cached.GetProperty("existing_data").GetProperty("s").GetUInt64());
         Assert.Equal(999UL, cached.GetProperty("existing_data").GetProperty("d").GetUInt64());
@@ -215,6 +228,61 @@ public class InventoryEndpointTests(ApiFactory factory) : IClassFixture<ApiFacto
         var json = await ReadJson(await _factory.CreateClient().GetAsync($"/api/inventory?steamid={steamId}"));
 
         Assert.False(json.GetProperty("truncated").GetBoolean());
+    }
+
+    [Fact]
+    public async Task AssetsWhoseLinksCannotBeUsed_StillRenderWithoutDecodedData()
+    {
+        // Steam's own data is uneven: some descriptions carry a null action link, some carry an
+        // action that isn't an inspect link, and a certificate placeholder goes unfilled when the
+        // asset has no properties at all (this inventory has no asset_properties array). None of
+        // those may drop the item silently or fail the whole request.
+        var steamId = NextSteamId();
+        var inventory = new SteamInventoryResponse
+        {
+            total = 3,
+            success = 1,
+            assets =
+            [
+                new() { assetid = "2001", classid = "D1", instanceid = "J1" },
+                new() { assetid = "2002", classid = "D2", instanceid = "J2" },
+                new() { assetid = "2003", classid = "D3", instanceid = "J3" },
+            ],
+            descriptions =
+            [
+                new() { classid = "D1", instanceid = "J1", name = "Null Link", actions = [new() { link = null }] },
+                new()
+                {
+                    classid = "D2",
+                    instanceid = "J2",
+                    name = "Not An Inspect Link",
+                    actions = [new() { name = "View in Workshop", link = "steam://openurl/https://example.com" }],
+                },
+                new()
+                {
+                    classid = "D3",
+                    instanceid = "J3",
+                    // No `name`; the response falls back to market_name.
+                    market_name = "Unfilled Certificate",
+                    actions = [new() { link = CertTemplate }],
+                },
+            ],
+        };
+        _factory.Http.Respond(InventoryUrl(steamId), HttpStatusCode.OK, Serialize(inventory));
+
+        var json = await ReadJson(await _factory.CreateClient().GetAsync($"/api/inventory?steamid={steamId}"));
+
+        // The first two have no inspect link to build, so they are dropped.
+        var items = json.GetProperty("csgo_items").EnumerateArray().ToArray();
+        var item = Assert.Single(items);
+        Assert.Equal("2003", item.GetProperty("assetid").GetString());
+        Assert.Equal("Unfilled Certificate", item.GetProperty("name").GetString());
+        // The placeholder is left intact rather than spliced with an empty string, so the link
+        // visibly fails to parse instead of pointing at junk - and the item ships undecoded.
+        Assert.Equal(CertTemplate, item.GetProperty("inspect_link").GetString());
+        Assert.Equal(JsonValueKind.Null, item.GetProperty("existing_data").ValueKind);
+        Assert.Equal(JsonValueKind.Null, item.GetProperty("stattrak_kills").ValueKind);
+        Assert.Equal(JsonValueKind.Null, item.GetProperty("wear").ValueKind);
     }
 
     // --- caching -------------------------------------------------------------------------
@@ -309,6 +377,18 @@ public class InventoryEndpointTests(ApiFactory factory) : IClassFixture<ApiFacto
     }
 
     [Fact]
+    public async Task RateLimitWithoutARetryAfterHeader_IsStillSurfacedAs429()
+    {
+        // Steam does not always say how long the throttle lasts.
+        var steamId = NextSteamId();
+        _factory.Http.Respond(InventoryUrl(steamId), HttpStatusCode.TooManyRequests, "");
+
+        var response = await _factory.CreateClient().GetAsync($"/api/inventory?steamid={steamId}");
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, response.StatusCode);
+    }
+
+    [Fact]
     public async Task InventoryWithNoAssets_Is400()
     {
         // Steam returns a well-formed body with no assets/descriptions for an empty inventory.
@@ -319,6 +399,52 @@ public class InventoryEndpointTests(ApiFactory factory) : IClassFixture<ApiFacto
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Equal("Invalid inventory data or inventory is empty",
+            (await ReadJson(response)).GetProperty("error").GetString());
+    }
+
+    [Fact]
+    public async Task InventoryWithAssetsButNoDescriptions_Is400()
+    {
+        // Without descriptions there are no inspect links to build, so there is nothing to return.
+        var steamId = NextSteamId();
+        _factory.Http.Respond(InventoryUrl(steamId), HttpStatusCode.OK,
+            """{"success":1,"total_inventory_count":1,"assets":[{"assetid":"1","classid":"C","instanceid":"I"}]}""");
+
+        var response = await _factory.CreateClient().GetAsync($"/api/inventory?steamid={steamId}");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("Invalid inventory data or inventory is empty",
+            (await ReadJson(response)).GetProperty("error").GetString());
+    }
+
+    [Fact]
+    public async Task ConnectionFailure_Is400AndIsNotNegativeCached()
+    {
+        // A transient blip must let the next request retry rather than being pinned as an error for
+        // the negative-cache window.
+        var steamId = NextSteamId();
+        _factory.Http.Throw(InventoryUrl(steamId), () => new HttpRequestException("connection reset"));
+        var client = _factory.CreateClient();
+
+        var first = await client.GetAsync($"/api/inventory?steamid={steamId}");
+        var second = await client.GetAsync($"/api/inventory?steamid={steamId}");
+
+        Assert.Equal(HttpStatusCode.BadRequest, first.StatusCode);
+        Assert.Equal("Failed to connect to Steam API", (await ReadJson(first)).GetProperty("error").GetString());
+        Assert.Equal(HttpStatusCode.BadRequest, second.StatusCode);
+        Assert.Equal(2, _factory.Http.RequestsMatching(InventoryUrl(steamId)));
+    }
+
+    [Fact]
+    public async Task FetchTimeout_Is400()
+    {
+        var steamId = NextSteamId();
+        _factory.Http.Throw(InventoryUrl(steamId), () => new TaskCanceledException("timed out"));
+
+        var response = await _factory.CreateClient().GetAsync($"/api/inventory?steamid={steamId}");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("Request timed out while fetching inventory",
             (await ReadJson(response)).GetProperty("error").GetString());
     }
 
@@ -397,6 +523,21 @@ public class InventoryEndpointTests(ApiFactory factory) : IClassFixture<ApiFacto
             (await ReadJson(response)).GetProperty("error").GetString());
     }
 
+    [Theory]
+    [InlineData("/api/inventory")]
+    [InlineData("/api/inventory?steamid=")]
+    public async Task MissingSteamId_Is400FromModelBinding(string path)
+    {
+        // `steamid` is a non-nullable string on an [ApiController], so MVC treats it as required and
+        // rejects a missing or blank value with a ValidationProblem before the action runs. The
+        // action's own IsNullOrEmpty guard is therefore never reached over HTTP; what callers
+        // actually see is this, so this is what's pinned.
+        var response = await _factory.CreateClient().GetAsync(path);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("steamid", (await ReadJson(response)).GetProperty("errors").ToString());
+    }
+
     [Fact]
     public async Task VanityName_IsResolvedThroughTheProfileXmlFeed()
     {
@@ -422,6 +563,21 @@ public class InventoryEndpointTests(ApiFactory factory) : IClassFixture<ApiFacto
     {
         const string vanity = "vanity-no-id";
         _factory.Http.RespondXml($"/id/{vanity}/", "<response><error>The specified profile could not be found.</error></response>");
+
+        var response = await _factory.CreateClient().GetAsync($"/api/inventory?steamid={vanity}");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("Unable to resolve Steam ID or inventory",
+            (await ReadJson(response)).GetProperty("error").GetString());
+    }
+
+    [Fact]
+    public async Task VanityResolveThatThrows_Is400NotA500()
+    {
+        // The resolve step swallows transport failures itself, so a Steam outage during a vanity
+        // lookup is a 400 like any other unresolvable input.
+        const string vanity = "vanity-throws";
+        _factory.Http.Throw($"/id/{vanity}/", () => new HttpRequestException("connection reset"));
 
         var response = await _factory.CreateClient().GetAsync($"/api/inventory?steamid={vanity}");
 

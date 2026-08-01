@@ -4,13 +4,14 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
 
 namespace csgoSkinStatistics.Tests;
 
 // Boots the real Program.cs pipeline - routing, model binding, the byte-bounded inventory
 // MemoryCache, the rate limiter, the exception handler, the controller itself - with only the
-// process boundaries stubbed: no Steam login, no outbound HTTP, and a throwaway database and
-// catalog directory per factory so two test classes can never share state on disk.
+// process boundaries stubbed: no Steam login, nothing that leaves the machine, and a throwaway
+// database and catalog directory per factory so two test classes can never share state on disk.
 //
 // One factory serves a whole test class (xunit runs a class's tests sequentially), so tests must
 // pick distinct steamids: the inventory cache lives for the life of the host.
@@ -26,10 +27,23 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
         // directory, where concurrent test classes would trample each other's rows.
         _databasePath = Path.Combine(Path.GetTempPath(), $"csgoskin-tests-{Guid.NewGuid():N}.db");
         Database = new DatabaseService(_databasePath);
+        Http.RespondJson("api.skinport.com", Prices);
     }
+
+    // The Skinport feed PriceService loads at startup. Only the Field-Tested variants are listed,
+    // which is true to the real feed - it only carries variants that have actually sold - and lets
+    // the nearest-wear fallback show up in a response.
+    public static SkinportItem[] Prices { get; } =
+    [
+        new() { market_hash_name = "AK-47 | Fire Serpent (Field-Tested)", min_price = 1000.00, suggested_price = 1250.50 },
+        new() { market_hash_name = "StatTrak™ AK-47 | Fire Serpent (Field-Tested)", min_price = 2000.00, suggested_price = 2400.00 },
+    ];
 
     // Every outbound call the app makes - inventory, profile XML, vanity resolve - lands here.
     public StubHttpMessageHandler Http { get; } = new();
+
+    // Stands in for the Game Coordinator round-trip behind /api.
+    public FakeSteamService Steam { get; } = new();
 
     // The same instance the app uses, so a test can seed the item cache the endpoints read.
     public DatabaseService Database { get; }
@@ -51,9 +65,9 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
         builder.ConfigureServices(services =>
         {
             // SteamService's public constructor throws without credentials, and Program.cs kicks off
-            // a real ConnectAsync at startup. An account-less instance boots and stays offline.
+            // a real ConnectAsync at startup. An account-less stand-in boots and stays offline.
             services.RemoveAll<SteamService>();
-            services.AddSingleton(SteamService.CreateWithoutAccounts());
+            services.AddSingleton<SteamService>(Steam);
 
             services.RemoveAll<DatabaseService>();
             services.AddSingleton(Database);
@@ -61,13 +75,13 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
             services.RemoveAll<ConstDataService>();
             services.AddSingleton(_catalogs.Build());
 
-            // Both BackgroundServices start with the host. PriceService would immediately fetch the
-            // Skinport feed (and make every asserted `price` field depend on when that landed), and
-            // InventoryWarmService would fetch a whole inventory in the background off any cache
-            // miss, polluting the outbound-request counts these tests assert on. Idling their loops
-            // leaves the rest of each service - Resolve, Enqueue - exactly as production has it.
-            services.RemoveAll<PriceService>();
-            services.AddSingleton<PriceService, IdlePriceService>();
+            // PriceService keeps its real loop: the feed it fetches is stubbed like everything else,
+            // and CreateHost waits for the load, so `price` is populated and constant.
+            //
+            // The warm service does not. It fetches a whole inventory in the background off any
+            // single-item cache miss, which would land in the middle of the outbound-request counts
+            // these tests assert on. Idling only its loop leaves the rest of it - Enqueue, the
+            // bounded drop-on-full queue - exactly as production has it.
             services.RemoveAll<InventoryWarmService>();
             services.AddSingleton<InventoryWarmService, IdleInventoryWarmService>();
 
@@ -76,6 +90,27 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
             services.AddHttpClient("steam").ConfigurePrimaryHttpMessageHandler(() => Http);
             services.AddHttpClient("skinport").ConfigurePrimaryHttpMessageHandler(() => Http);
         });
+    }
+
+    protected override IHost CreateHost(IHostBuilder builder)
+    {
+        var host = base.CreateHost(builder);
+
+        // PriceService loads its (stubbed) feed on a background task as the host starts. Blocking
+        // until it has means every test in the class sees the same prices, instead of the `price`
+        // field flipping partway through the class depending on when the load landed.
+        var prices = host.Services.GetRequiredService<PriceService>();
+        var deadline = DateTime.UtcNow.AddSeconds(30);
+        while (prices.UpdatedAtUtc == null)
+        {
+            if (DateTime.UtcNow > deadline)
+            {
+                throw new TimeoutException("PriceService never loaded the stubbed Skinport feed.");
+            }
+            Thread.Sleep(10);
+        }
+
+        return host;
     }
 
     protected override void Dispose(bool disposing)
@@ -99,12 +134,6 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
                 // Still held open by a pooled connection; it's a temp file either way.
             }
         }
-    }
-
-    private sealed class IdlePriceService(IHttpClientFactory httpClientFactory, DatabaseService dbService)
-        : PriceService(httpClientFactory, dbService)
-    {
-        protected override Task ExecuteAsync(CancellationToken stoppingToken) => Task.CompletedTask;
     }
 
     private sealed class IdleInventoryWarmService(IHttpClientFactory httpClientFactory, DatabaseService dbService)

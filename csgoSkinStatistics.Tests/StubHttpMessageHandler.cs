@@ -43,6 +43,11 @@ public sealed class StubHttpMessageHandler : HttpMessageHandler
     public StubHttpMessageHandler RespondXml(string urlContains, string xml)
         => Respond(urlContains, HttpStatusCode.OK, xml, "text/xml");
 
+    // Simulates a transport-level failure (connection reset, DNS, timeout) rather than an HTTP
+    // status.
+    public StubHttpMessageHandler Throw(string urlContains, Func<Exception> error)
+        => Respond(urlContains, HttpResponseMessage () => throw error());
+
     public IReadOnlyList<string> Requests
     {
         get { lock (_sync) return [.. _requests]; }

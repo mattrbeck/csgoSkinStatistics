@@ -22,15 +22,17 @@ namespace CSGOSkinAPI.Services
 
         // Test seam. The public constructor deliberately throws when no account is configured, so an
         // integration-test host cannot build one - and supplying real credentials instead would make
-        // the startup ConnectAsync in Program.cs dial Steam for real. This builds the same service
-        // with an empty account list, which is the state a misconfigured deployment would be in:
-        // ConnectAsync has nothing to connect and GetItemInfoAsync still throws "No Steam accounts
-        // configured". Nothing else about the service changes.
-        private SteamService(bool _)
+        // the startup ConnectAsync in Program.cs dial Steam for real. Skipping the load leaves an
+        // empty account list, which is the state a misconfigured deployment would be in: ConnectAsync
+        // has nothing to connect and GetItemInfoAsync still throws "No Steam accounts configured".
+        // Nothing else about the service changes.
+        internal SteamService(bool loadAccounts)
         {
+            if (loadAccounts)
+            {
+                LoadAndInitializeAccounts();
+            }
         }
-
-        internal static SteamService CreateWithoutAccounts() => new(false);
 
         private void LoadAndInitializeAccounts()
         {
@@ -86,7 +88,9 @@ namespace CSGOSkinAPI.Services
             }
         }
 
-        public async Task<CEconItemPreviewDataBlock?> GetItemInfoAsync(ulong s, ulong a, ulong d, ulong m)
+        // virtual purely so a test can stand in for the Game Coordinator round-trip, which otherwise
+        // needs a live Steam session. Nothing in the app overrides it.
+        public virtual async Task<CEconItemPreviewDataBlock?> GetItemInfoAsync(ulong s, ulong a, ulong d, ulong m)
         {
             if (_accountManagers.Count == 0)
             {
