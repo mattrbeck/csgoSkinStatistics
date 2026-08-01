@@ -51,7 +51,10 @@ namespace CSGOSkinAPI.Services
             // are throttled too instead of being retried on every subsequent miss.
             await dbService.RecordWarmAsync(steamid, 0);
 
-            var response = await SteamInventoryDocument.FetchAsync(
+            // Owned by this caller (see SteamInventoryDocument.FetchAsync). Everything read off it -
+            // status, Retry-After, the body - happens below within this scope, so disposing at the
+            // end of the method releases the buffered page as soon as it is parsed.
+            using var response = await SteamInventoryDocument.FetchAsync(
                 httpClientFactory, steamid.ToString(), cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
