@@ -73,7 +73,7 @@ namespace CSGOSkinAPI.Security
             // trust boundary: all of RFC1918 stays trusted, which on a shared bridge network or in
             // a VPC still means untrusted neighbours can forge a client IP at us. To actually
             // narrow it, set KnownNetworks - a single host is fine, e.g. "198.51.100.7/32".
-            // Whatever you end up with is printed at startup by DescribeTrustedSources, so check
+            // Whatever you end up with is logged at startup by LogTrustedSources, so check
             // the log rather than trusting intent.
             var networks = ReadList(config, KnownNetworksKey) ?? DefaultKnownNetworks;
             foreach (var cidr in networks)
@@ -104,18 +104,82 @@ namespace CSGOSkinAPI.Security
             return values?.Select(v => v.Trim()).Where(v => v.Length > 0).ToArray();
         }
 
-        // Printed once at startup. A mis-set trust boundary is otherwise entirely silent: the
-        // middleware's own diagnostic is Debug and this app's minimum level is Information, so a
-        // deployment whose peer address falls outside the trusted set behaves exactly like the
-        // unfixed app - one global token bucket - with nothing in the log to say so. This line
-        // makes the resolved set greppable in `docker compose logs` on day one.
-        public static string DescribeTrustedSources(ForwardedHeadersOptions options)
+        // The resolved trust boundary, as a message template. A template rather than a formatted
+        // string so the three values arrive as queryable fields, and a const so it can be
+        // concatenated into the untrusted-peer warning below (which prints the same resolved set)
+        // without either copy drifting from the other.
+        public const string TrustedSourcesTemplate =
+            "Trusted forwarded-header sources: networks=[{TrustedNetworks}] "
+            + "proxies=[{TrustedProxies}] forwardLimit={ForwardLimit}";
+
+        // The arguments TrustedSourcesTemplate expects, in order.
+        public static object?[] TrustedSourceValues(ForwardedHeadersOptions options) =>
+        [
+            string.Join(", ", options.KnownIPNetworks),
+            string.Join(", ", options.KnownProxies),
+            options.ForwardLimit?.ToString() ?? "unlimited",
+        ];
+
+        // The category both trust-boundary lines are logged under - this type's startup line and
+        // ForwardedTrustDiagnostics' untrusted-peer warning, which live in this namespace precisely
+        // so one prefix covers both. Owned here rather than chosen at the call site: a caller free
+        // to pick the category is a caller free to pick one the pin below does not cover, which
+        // would leave the pin as dead configuration and nothing would fail.
+        public const string LogCategory = "CSGOSkinAPI.Security";
+
+        // Guarantees both lines survive every logging level an operator can configure.
+        //
+        // The appsettings.json entry for LogCategory handles the category-scoped knobs on its own
+        // (a longer category prefix outranks a shorter one, so it beats Logging:LogLevel:Default
+        // and Logging:LogLevel:CSGOSkinAPI). It does NOT handle the provider-scoped ones, and those
+        // are the shape operators actually reach for: `Logging__Console__LogLevel__Default=Warning`
+        // in a compose environment block is Microsoft's own documented way to quiet a containerised
+        // app. LoggerRuleSelector ranks any rule carrying a ProviderName above any rule without
+        // one - the category comparison is deliberately skipped on that transition - so a bare
+        // provider Default silently outranks our category pin, and None silences both lines with
+        // nobody having asked for that.
+        //
+        // So: for every provider an operator has scoped a rule to, pin our category under that same
+        // provider too. Same provider, longer category, therefore higher rank. Reading the rules
+        // rather than enumerating providers means this covers whatever the operator actually wrote,
+        // including providers this app never registers itself, and it runs as a post-configure so
+        // it sees the fully-bound configuration (and re-runs on reload, since the options monitor
+        // rebuilds the instance from scratch each time).
+        //
+        // The result is that these two lines cannot be turned down by configuration at all. That is
+        // a deliberately absolute guarantee and it is only defensible because the volume is: one at
+        // startup, and one per host however many requests arrive. There is no operational reason to
+        // want them off, and every reason a mis-set trust boundary must not be able to hide.
+        public static void PinTrustBoundaryLogging(ILoggingBuilder logging)
         {
-            var networks = string.Join(", ", options.KnownIPNetworks);
-            var proxies = string.Join(", ", options.KnownProxies);
-            return $"Trusted forwarded-header sources: networks=[{networks}] proxies=[{proxies}] "
-                + $"forwardLimit={options.ForwardLimit?.ToString() ?? "unlimited"}";
+            logging.AddFilter(LogCategory, LogLevel.Information);
+            logging.Services.PostConfigure<LoggerFilterOptions>(options =>
+            {
+                // Snapshot first: the loop adds rules that would otherwise be re-read as input.
+                var scopedProviders = options.Rules
+                    .Where(rule => rule.ProviderName != null)
+                    .Select(rule => rule.ProviderName!)
+                    .Distinct(StringComparer.Ordinal)
+                    .ToList();
+                foreach (var providerName in scopedProviders)
+                {
+                    options.Rules.Add(
+                        new LoggerFilterRule(providerName, LogCategory, LogLevel.Information, null));
+                }
+            });
         }
+
+        // Logged once at startup, at Information. A mis-set trust boundary is otherwise entirely
+        // silent: the middleware's own diagnostic is Debug and this app's minimum level is
+        // Information, so a deployment whose peer address falls outside the trusted set behaves
+        // exactly like the unfixed app - one global token bucket - with nothing in the log to say
+        // so. This line makes the resolved set greppable in `docker compose logs` on day one.
+        //
+        // Takes the factory, not a logger, so the category is this type's own and cannot drift away
+        // from what PinTrustBoundaryLogging protects.
+        public static void LogTrustedSources(ILoggerFactory loggerFactory, ForwardedHeadersOptions options)
+            => loggerFactory.CreateLogger(typeof(TransportSecurity))
+                .LogInformation(TrustedSourcesTemplate, TrustedSourceValues(options));
 
         // Mirrors the framework's own CheckKnownAddress, including the IPv4-mapped unwrap that lets
         // an IPv4 trusted range match the "::ffff:10.0.0.5" a dual-stack Kestrel reports. Used only
@@ -172,11 +236,16 @@ namespace CSGOSkinAPI.Security
     // is the rate limiter silently collapsing back to a single global bucket.
     //
     // One instance per app (Program.cs holds it), so the "once" is per host rather than per
-    // process - which keeps it honest under tests, where many hosts share one process. Console
-    // rather than ILogger to match the rest of this codebase; an ILogger migration is its own job.
-    public sealed class ForwardedTrustDiagnostics(ForwardedHeadersOptions options, Action<string>? log = null)
+    // process - which keeps it honest under tests, where many hosts share one process.
+    // Takes the factory rather than a logger, and takes it as a requirement rather than defaulting:
+    // the category has to be TransportSecurity.LogCategory for the pin to cover it, and this is the
+    // one class in the codebase whose entire purpose is being heard. An optional logger defaulting
+    // to the null sink would mean a caller who simply forgot one gets silence from the diagnostic
+    // that exists because silence is the failure mode.
+    public sealed class ForwardedTrustDiagnostics(ForwardedHeadersOptions options, ILoggerFactory loggerFactory)
     {
-        private readonly Action<string> log = log ?? Console.WriteLine;
+        private readonly ILogger logger =
+            loggerFactory.CreateLogger(typeof(ForwardedTrustDiagnostics));
         private int warned;
 
         // Call BEFORE the forwarded-headers middleware: it needs the peer's real address, which
@@ -203,10 +272,14 @@ namespace CSGOSkinAPI.Security
             {
                 return false;
             }
-            log($"Ignoring forwarded headers from untrusted peer {peer?.ToString() ?? "(no address)"} "
-                + "- if that is your reverse proxy, the rate limiter is keying on it instead of on "
-                + "real client IPs. Add it to ForwardedHeaders:KnownNetworks. "
-                + TransportSecurity.DescribeTrustedSources(options));
+            // The peer, and the resolved trust boundary it failed against, are both fields - the
+            // log line alone is enough to act on without also being a sentence to parse.
+            logger.LogWarning(
+                "Ignoring forwarded headers from untrusted peer {UntrustedPeer} - if that is your "
+                + "reverse proxy, the rate limiter is keying on it instead of on real client IPs. "
+                + "Add it to ForwardedHeaders:KnownNetworks. "
+                + TransportSecurity.TrustedSourcesTemplate,
+                [peer?.ToString() ?? "(no address)", .. TransportSecurity.TrustedSourceValues(options)]);
             return true;
         }
     }

@@ -1,0 +1,18 @@
+root = true
+
+[*.cs]
+
+# The structured-logging migration is only worth anything while the message templates stay
+# templates. Swapping `logger.LogWarning("... {SteamId}", id)` back to `logger.LogWarning($"...
+# {id}")` compiles cleanly, produces an identical-looking console line, and silently gives up both
+# the queryable field and the injection safety that comes from the value never being message text.
+#
+# CA2254 catches exactly that (the message must be a constant expression), and CA2017 catches a
+# template whose placeholder count no longer matches its arguments. Both ship enabled by default at
+# Info severity, which means they are reported and ignored - TreatWarningsAsErrors does not touch a
+# diagnostic that was never a warning. Raised to error here so the regression fails the build
+# rather than relying on a reviewer noticing, or on the one test that happens to assert a template.
+#
+# If one of these fires, fix the call site. Do not lower the severity.
+dotnet_diagnostic.CA2254.severity = error
+dotnet_diagnostic.CA2017.severity = error

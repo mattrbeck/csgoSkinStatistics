@@ -146,7 +146,8 @@ public class ResponseSizeLimitTests(ApiFactory factory) : IClassFixture<ApiFacto
         _factory.Http.Respond(InventoryUrl(next), HttpStatusCode.OK, ValidInventoryJson());
 
         using var warmer = new InventoryWarmService(
-            _factory.Services.GetRequiredService<IHttpClientFactory>(), _factory.Database);
+            _factory.Services.GetRequiredService<IHttpClientFactory>(), _factory.Database,
+            new CapturingLogger<InventoryWarmService>());
         await warmer.StartAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(30));
         warmer.Enqueue(oversize);
         warmer.Enqueue(next);

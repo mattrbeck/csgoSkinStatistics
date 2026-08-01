@@ -8,6 +8,9 @@ global using Microsoft.AspNetCore.Rewrite;
 global using System.Threading.RateLimiting;
 global using Microsoft.Data.Sqlite;
 global using Microsoft.Extensions.Caching.Memory;
+// Microsoft.Extensions.Logging itself arrives with the Web SDK's implicit usings; the Abstractions
+// namespace (NullLogger/NullLoggerFactory) does not, and the hand-constructed services need it.
+global using Microsoft.Extensions.Logging.Abstractions;
 global using SteamKit2;
 global using SteamKit2.Authentication;
 global using SteamKit2.GC;

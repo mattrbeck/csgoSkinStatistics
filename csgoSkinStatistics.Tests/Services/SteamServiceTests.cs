@@ -1,5 +1,6 @@
 using CSGOSkinAPI.Services;
 using CSGOSkinAPI.Models;
+using Microsoft.Extensions.Logging.Abstractions;
 using SteamKit2.GC.CSGO.Internal;
 using System.Text.Json;
 using Xunit;
@@ -192,7 +193,7 @@ public class SteamServiceTests : IDisposable
     {
         File.WriteAllText("steam-accounts.json",
             JsonSerializer.Serialize(new List<SteamAccount> { new() { Username = "u", Password = "p" } }));
-        return new SteamService();
+        return new SteamService(NullLoggerFactory.Instance);
     }
 
     private static TaskCompletionSource<CEconItemPreviewDataBlock?> NewWaiter() =>

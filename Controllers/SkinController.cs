@@ -6,8 +6,21 @@ namespace CSGOSkinAPI.Controllers
     [Route("api")]
     [EnableRateLimiting("api")]
     [InvalidModelStateAsError]
-    public partial class SkinController(SteamService steamService, DatabaseService dbService, ConstDataService constDataService, IHttpClientFactory httpClientFactory, InventoryWarmService warmService, IMemoryCache cache, PriceService priceService) : ControllerBase
+    public partial class SkinController(SteamService steamService, DatabaseService dbService, ConstDataService constDataService, IHttpClientFactory httpClientFactory, InventoryWarmService warmService, IMemoryCache cache, PriceService priceService, ILoggerFactory loggerFactory) : ControllerBase
     {
+        // Everything this controller reports about its own work.
+        private readonly ILogger _logger = loggerFactory.CreateLogger<SkinController>();
+
+        // Malformed inspect links, which are a different kind of event and belong on a
+        // different knob: they are not a fault of ours, the caller already has their answer
+        // (a 400), their volume is set by whoever is calling rather than by anything the app
+        // is doing, and the line carries up to MaxLoggedLength characters of the caller's
+        // choosing. Sharing a category with the app's own diagnostics would mean muting a
+        // flood of them costs you the diagnostics too. CSGOSkinAPI.RateLimiting exists for
+        // exactly the same reason. Both are documented in appsettings.json.
+        internal const string InspectLinkLogCategory = "CSGOSkinAPI.InspectLinks";
+        private readonly ILogger _inspectLogger = loggerFactory.CreateLogger(InspectLinkLogCategory);
+
         // SteamID64 of the first individual account; anything below is not a profile id.
         private const ulong MinSteamId64 = 76561197960265729;
 
@@ -46,10 +59,12 @@ namespace CSGOSkinAPI.Controllers
             // Unhandled exceptions bubble to the global handler in Program.cs (generic 500).
             if (!string.IsNullOrEmpty(url))
             {
-                var parsed = ParseInspectUrl(url);
+                // ParseInspectUrl has already logged the failure, with the URL as a field and
+                // under the inspect-link category; a second line here would say strictly less
+                // about the same request.
+                var parsed = ParseInspectUrl(url, _inspectLogger);
                 if (parsed == null)
                 {
-                    Console.WriteLine("Failed to parse inspect URL");
                     return BadRequest(new { error = "Invalid inspect URL format" });
                 }
 
@@ -82,7 +97,8 @@ namespace CSGOSkinAPI.Controllers
             // links carry no owner id, so they can't be warmed.
             if (s >= MinSteamId64)
             {
-                Console.WriteLine($"Cache miss for item {a}; queueing inventory warm for owner {s}");
+                _logger.LogDebug(
+                    "Cache miss for item {ItemId}; queueing inventory warm for owner {SteamId}", a, s);
                 warmService.Enqueue(s);
             }
 
@@ -98,7 +114,7 @@ namespace CSGOSkinAPI.Controllers
             var itemInfo = await steamService.GetItemInfoAsync(s, a, d, m);
             if (itemInfo == null)
             {
-                Console.WriteLine("Item not found in Steam GC");
+                _logger.LogWarning("Steam GC returned no item for itemid {ItemId}", a);
                 return NotFound(new { error = "Steam GC did not return an item" });
             }
 
@@ -161,7 +177,7 @@ namespace CSGOSkinAPI.Controllers
                 httpClient.Timeout = TimeSpan.FromSeconds(10);
                 
                 var inventoryUrl = $"https://steamcommunity.com/inventory/{steamid}/730/2?l=english&count=2000";
-                Console.WriteLine($"Fetching inventory from: {inventoryUrl}");
+                _logger.LogDebug("Fetching inventory for {SteamId} from {InventoryUrl}", steamId, inventoryUrl);
                 
                 var response = await httpClient.GetAsync(inventoryUrl);
                 if (!response.IsSuccessStatusCode)
@@ -171,8 +187,17 @@ namespace CSGOSkinAPI.Controllers
                         // Steam is throttling this server's IP for the inventory endpoint. Surface it
                         // loudly in the logs (with Retry-After when present) so the throttle is visible.
                         var retryAfter = response.Headers.RetryAfter?.Delta;
-                        Console.WriteLine($"Steam inventory RATE LIMITED (429) for {steamid}" +
-                            (retryAfter != null ? $"; Retry-After {retryAfter.Value.TotalSeconds:0}s" : ""));
+                        if (retryAfter is TimeSpan retryDelay)
+                        {
+                            _logger.LogWarning(
+                                "Steam inventory rate limited (429) for {SteamId}; Retry-After {RetryAfterSeconds:0}s",
+                                steamId, retryDelay.TotalSeconds);
+                        }
+                        else
+                        {
+                            _logger.LogWarning(
+                                "Steam inventory rate limited (429) for {SteamId}", steamId);
+                        }
                         return CacheInventoryFailure(cacheKey, StatusCodes.Status429TooManyRequests,
                             "Steam is rate limiting inventory requests right now. Please try again in a minute.",
                             RateLimitedInventoryCacheTtl);
@@ -182,7 +207,9 @@ namespace CSGOSkinAPI.Controllers
                         return CacheInventoryFailure(cacheKey, StatusCodes.Status400BadRequest,
                             "Inventory is private or user does not exist", NegativeInventoryCacheTtl);
                     }
-                    Console.WriteLine($"Steam inventory fetch for {steamid} failed: {(int)response.StatusCode} {response.StatusCode}");
+                    _logger.LogWarning(
+                        "Steam inventory fetch for {SteamId} failed: {StatusCode} {StatusName}",
+                        steamId, (int)response.StatusCode, response.StatusCode);
                     return CacheInventoryFailure(cacheKey, StatusCodes.Status400BadRequest,
                         $"Failed to fetch inventory: {response.StatusCode}", NegativeInventoryCacheTtl);
                 }
@@ -261,7 +288,7 @@ namespace CSGOSkinAPI.Controllers
                     propsByAsset.TryGetValue(asset.assetid, out var assetProps);
                     var inspectLink = BuildInspectLink(inspectAction.link, assetProps, steamid, asset.assetid);
 
-                    var parsed = ParseInspectUrl(inspectLink);
+                    var parsed = ParseInspectUrl(inspectLink, _inspectLogger);
                     if (parsed.HasValue && parsed.Value.directItem == null)
                     {
                         idsToLookUp.Add(parsed.Value.a);
@@ -355,7 +382,9 @@ namespace CSGOSkinAPI.Controllers
                     csgo_items = csgoItems
                 };
 
-                Console.WriteLine($"Successfully parsed {csgoItems.Count} CS2 items from {inventoryData.total} total items");
+                _logger.LogDebug(
+                    "Successfully parsed {ParsedCount} CS2 items from {TotalCount} total items",
+                    csgoItems.Count, inventoryData.total);
 
                 // Cache the exact bytes we return, keyed by resolved SteamId64. Size is the byte
                 // length so the MemoryCache's byte SizeLimit bounds total memory; expires after
@@ -374,12 +403,12 @@ namespace CSGOSkinAPI.Controllers
             }
             catch (HttpRequestException ex)
             {
-                Console.WriteLine($"HTTP error fetching inventory: {ex.Message}");
+                _logger.LogWarning(ex, "HTTP error fetching inventory");
                 return BadRequest(new { error = "Failed to connect to Steam API" });
             }
             catch (JsonException ex)
             {
-                Console.WriteLine($"JSON parsing error: {ex.Message}");
+                _logger.LogWarning(ex, "JSON parsing error reading the Steam inventory response");
                 return BadRequest(new { error = "Invalid response from Steam API" });
             }
             // Anything else bubbles to the global handler in Program.cs (generic 500). Note the
@@ -465,7 +494,7 @@ namespace CSGOSkinAPI.Controllers
             }
             catch (HttpRequestException ex)
             {
-                Console.WriteLine($"HTTP error fetching profile: {ex.Message}");
+                _logger.LogWarning(ex, "HTTP error fetching profile");
                 return BadRequest(new { error = "Failed to connect to Steam API" });
             }
 
@@ -498,10 +527,18 @@ namespace CSGOSkinAPI.Controllers
         // Longest prefix of an untrusted value we will put in a log line.
         private const int MaxLoggedLength = 200;
 
-        // Renders an untrusted request value for the log. Control characters become '?' so a caller
-        // cannot embed CR/LF and forge whole log lines (which would let them fake entries for other
-        // requests, or bury their own), and the value is clipped so a request-sized string can't
-        // flood the log.
+        // Renders an untrusted request value for the log. Applied to the two values a caller
+        // controls outright: the ?url= inspect link and the vanity name.
+        //
+        // Since these travel as *parameters* of a structured message template rather than as text
+        // spliced into it, a CR/LF can no longer forge a record in a structured sink - the value is
+        // one field, whatever is in it. What it can still do is forge a *line*: the default console
+        // formatter renders the template back into a single line of text, and this app's log is
+        // read through `docker compose logs`, so an embedded CR/LF there still produces output that
+        // looks like separate entries. Control characters therefore still become '?'.
+        //
+        // Truncation is independent of all that and outlives any sink change: ?url= is unbounded,
+        // and a request-sized value has no business being copied into a log record at all.
         internal static string ForLog(string? value)
         {
             if (string.IsNullOrEmpty(value))
@@ -578,7 +615,7 @@ namespace CSGOSkinAPI.Controllers
                 var response = await httpClient.GetAsync(xmlUrl);
                 if (!response.IsSuccessStatusCode)
                 {
-                    Console.WriteLine($"Steam profile request failed: {response.StatusCode}");
+                    _logger.LogWarning("Steam profile request failed: {StatusCode}", response.StatusCode);
                     return null;
                 }
 
@@ -589,12 +626,13 @@ namespace CSGOSkinAPI.Controllers
                     return steamId;
                 }
 
-                Console.WriteLine($"Failed to resolve custom URL '{ForLog(customUrl)}' to SteamId64");
+                _logger.LogWarning(
+                    "Failed to resolve custom URL '{Vanity}' to SteamId64", ForLog(customUrl));
                 return null;
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error resolving custom URL '{ForLog(customUrl)}': {ex.Message}");
+                _logger.LogWarning(ex, "Error resolving custom URL '{Vanity}'", ForLog(customUrl));
                 return null;
             }
         }
@@ -683,8 +721,13 @@ namespace CSGOSkinAPI.Controllers
                 .Replace("%assetid%", assetId);
         }
 
-        internal static (ulong s, ulong a, ulong d, ulong m, CEconItemPreviewDataBlock? directItem)? ParseInspectUrl(string url)
+        // Static because it is shared with InventoryWarmService (and driven directly by tests),
+        // so the logger arrives as an argument rather than through a field. Optional, and null-sunk
+        // when absent, so a test that is asserting on the parse result need not supply one.
+        internal static (ulong s, ulong a, ulong d, ulong m, CEconItemPreviewDataBlock? directItem)? ParseInspectUrl(
+            string url, ILogger? logger = null)
         {
+            logger ??= NullLogger.Instance;
             var decodedUrl = HttpUtility.UrlDecode(url);
             var match = InspectUrlRegex().Match(decodedUrl);
             if (!match.Success)
@@ -692,7 +735,7 @@ namespace CSGOSkinAPI.Controllers
                 var hexMatch = InspectUrlHexRegex().Match(decodedUrl);
                 if (!hexMatch.Success)
                 {
-                    Console.WriteLine($"Failed to decode URL: {ForLog(url)}");
+                    logger.LogWarning("Failed to decode URL: {InspectUrl}", ForLog(url));
                     return null;
                 }
                 var hexValue = hexMatch.Groups[1].Value;
@@ -701,21 +744,21 @@ namespace CSGOSkinAPI.Controllers
                 // request thread.
                 if (hexValue.Length > 2048)
                 {
-                    Console.WriteLine($"Hex payload too long: {ForLog(url)}");
+                    logger.LogWarning("Hex payload too long: {InspectUrl}", ForLog(url));
                     return null;
                 }
                 // The regex matches odd-length runs too, which Convert.FromHexString rejects with a
                 // FormatException - guard it so a bad link is a 400, not an unhandled 500.
                 if (hexValue.Length % 2 != 0)
                 {
-                    Console.WriteLine($"Hex payload has odd length: {ForLog(url)}");
+                    logger.LogWarning("Hex payload has odd length: {InspectUrl}", ForLog(url));
                     return null;
                 }
                 var rawBytes = Convert.FromHexString(hexValue);
                 // Need at least the leading byte, one protobuf byte, and the 4-byte checksum.
                 if (rawBytes.Length < 6)
                 {
-                    Console.WriteLine($"Hex payload too short: {ForLog(url)}");
+                    logger.LogWarning("Hex payload too short: {InspectUrl}", ForLog(url));
                     return null;
                 }
                 // As of March 2026 the payload is XOR-obfuscated with its first byte
@@ -738,7 +781,7 @@ namespace CSGOSkinAPI.Controllers
                 {
                     // Valid hex that isn't a valid CEconItemPreviewDataBlock (garbage, or a
                     // truncated/mis-typed protobuf) throws here - map it to a 400, not a 500.
-                    Console.WriteLine($"Failed to decode inspect cert payload: {ex.Message}");
+                    logger.LogWarning(ex, "Failed to decode inspect cert payload from {InspectUrl}", ForLog(url));
                     return null;
                 }
                 return (0, itemInfoProto.itemid, 0, 0, itemInfoProto);
@@ -753,7 +796,7 @@ namespace CSGOSkinAPI.Controllers
                 !ulong.TryParse(match.Groups[3].Value, out var a) ||
                 !ulong.TryParse(match.Groups[4].Value, out var d))
             {
-                Console.WriteLine($"Inspect URL has out-of-range numeric fields: {ForLog(url)}");
+                logger.LogWarning("Inspect URL has out-of-range numeric fields: {InspectUrl}", ForLog(url));
                 return null;
             }
             if (firstParam == "S")
