@@ -65,7 +65,7 @@ namespace CSGOSkinAPI.Controllers
 
                 if (directItem != null)
                 {
-                    return Ok(CreateResponse(directItem, constDataService, priceService, s, a, d, m));
+                    return Ok(ItemResponse.CreateResponse(directItem, constDataService, priceService, s, a, d, m));
                 }
             }
 
@@ -80,7 +80,7 @@ namespace CSGOSkinAPI.Controllers
             var existingItem = await dbService.GetItemAsync(a);
             if (existingItem != null)
             {
-                return Ok(CreateResponse(existingItem, constDataService, priceService, s, a, d, m));
+                return Ok(ItemResponse.CreateResponse(existingItem, constDataService, priceService, s, a, d, m));
             }
 
             // A classic S-form link that missed the cache still goes through the GC below,
@@ -112,7 +112,7 @@ namespace CSGOSkinAPI.Controllers
             }
 
             await dbService.SaveItemWithExtrasAsync(itemInfo);
-            return Ok(CreateResponse(itemInfo, constDataService, priceService, s, a, d, m));
+            return Ok(ItemResponse.CreateResponse(itemInfo, constDataService, priceService, s, a, d, m));
         }
 
         // `steamid` is deliberately nullable. A non-nullable string parameter on an [ApiController]
@@ -278,11 +278,11 @@ namespace CSGOSkinAPI.Controllers
                         var (s, a, d, m, directItem) = parsed.Value;
                         if (directItem != null)
                         {
-                            existingItemData = CreateResponse(directItem, constDataService, priceService, s, a, d, m);
+                            existingItemData = ItemResponse.CreateResponse(directItem, constDataService, priceService, s, a, d, m);
                         }
                         else if (cachedItems.TryGetValue(a, out var existingItem))
                         {
-                            existingItemData = CreateResponse(existingItem, constDataService, priceService, s, a, d, m);
+                            existingItemData = ItemResponse.CreateResponse(existingItem, constDataService, priceService, s, a, d, m);
                         }
                     }
 
@@ -293,7 +293,7 @@ namespace CSGOSkinAPI.Controllers
                         // Base price keyed on Steam's own market_hash_name (authoritative,
                         // language-independent), so every item is priced even when it has no
                         // decoded existing_data yet.
-                        price = BuildPrice(priceService, description.market_hash_name ?? ""),
+                        price = ItemResponse.BuildPrice(priceService, description.market_hash_name ?? ""),
                         type = description.type,
                         inspect_link = inspectLink,
                         wear = wearTag?.localized_tag_name,
@@ -510,109 +510,6 @@ namespace CSGOSkinAPI.Controllers
                 _logger.LogWarning(ex, "Error resolving custom URL '{Vanity}'", LogSanitizer.ForLog(customUrl));
                 return null;
             }
-        }
-
-        private static object CreateResponse(CEconItemPreviewDataBlock item, ConstDataService constDataService, PriceService priceService, ulong s, ulong a, ulong d, ulong m)
-        {
-            var itemInfo = constDataService.GetItemInformation(item);
-
-            return new
-            {
-                price = BuildPrice(priceService, itemInfo.MarketHashName),
-                item.itemid,
-                item.defindex,
-                item.paintindex,
-                item.rarity,
-                item.quality,
-                item.paintwear,
-                item.paintseed,
-                item.inventory,
-                item.origin,
-                stattrak = item.ShouldSerializekilleatervalue(),
-                // The decoded cert/GC item carries the live kill count for free (proto field
-                // 10); null for non-StatTrak items. Cached items keep it via the killeatervalue
-                // column (see below) - older cached rows that predate that column report null.
-                stattrak_kills = item.StatTrakKills(),
-                souvenir = itemInfo.IsSouvenir,
-                market_hash_name = itemInfo.MarketHashName,
-                special = itemInfo.Special,
-                weapon = itemInfo.Type,
-                skin = itemInfo.Name,
-                wear_name = itemInfo.WearName,
-                rarity_name = itemInfo.RarityName,
-                quality_name = itemInfo.QualityName,
-                origin_name = itemInfo.OriginName,
-                paintwear_float = itemInfo.PaintWear,
-                is_knife_or_glove = itemInfo.IsKnifeOrGlove,
-                image = constDataService.ResolveSkinImage(item.defindex, item.paintindex),
-                // Ordered arrays; `slot` is NOT unique — CS2 stacks multiple stickers in one
-                // slot (verified live), so these stay positional. Each decal is resolved to its
-                // name + image here so the client renders straight from the response and never
-                // downloads the full catalog. Only `wear` (scrape level) travels alongside.
-                stickers = item.stickers.Select(s => MakeStickerDto(s, constDataService)).ToArray(),
-                keychains = item.keychains.Select(k => MakeKeychainDto(k, constDataService)).ToArray(),
-                s,
-                a,
-                d,
-                m
-            };
-        }
-
-        // Skinport base price for a market_hash_name, or null when we have nothing to show. May be
-        // approximate (a value that aged out of the feed, or the nearest wear of the same skin) -
-        // the client prefixes a "~" then. Cents keep the value exact; the client formats it.
-        private static object? BuildPrice(PriceService priceService, string marketHashName)
-        {
-            var price = priceService.Resolve(marketHashName);
-            if (price == null || price.SuggestedCents == null)
-            {
-                return null;
-            }
-            return new
-            {
-                min = price.MinCents,
-                suggested = price.SuggestedCents,
-                currency = PriceService.Currency,
-                source = "skinport",
-                approximate = price.Approximate,
-            };
-        }
-
-        internal static object MakeStickerDto(CEconItemPreviewDataBlock.Sticker s, ConstDataService constData)
-        {
-            var kit = constData.ResolveSticker(s.sticker_id);
-            return new
-            {
-                s.sticker_id,
-                s.wear,
-                rotation = s.Rotation(),
-                offset_x = s.OffsetX(),
-                offset_y = s.OffsetY(),
-                name = kit?.Name ?? "",
-                image = kit?.Image ?? "",
-            };
-        }
-
-        // A charm, or a Sticker Slab. A slab is a single-use charm that seals a sticker inside
-        // it; the sealed sticker's id rides in proto field 12 (see StickerSlab). When present we
-        // display the sealed sticker (the slab container itself isn't in our keychain catalog)
-        // and flag it, so the client can mark it as a slab.
-        internal static object MakeKeychainDto(CEconItemPreviewDataBlock.Sticker k, ConstDataService constData)
-        {
-            var wrapped = StickerSlab.GetWrappedStickerId(k);
-            var kit = wrapped != 0 ? constData.ResolveSticker(wrapped) : constData.ResolveKeychain(k.sticker_id);
-            return new
-            {
-                k.sticker_id,
-                k.wear,
-                offset_x = k.OffsetX(),
-                offset_y = k.OffsetY(),
-                pattern = k.Pattern(),
-                name = kit?.Name ?? "",
-                image = kit?.Image ?? "",
-                slab = wrapped != 0,
-                wrapped_sticker = wrapped,
-            };
         }
     }
 
