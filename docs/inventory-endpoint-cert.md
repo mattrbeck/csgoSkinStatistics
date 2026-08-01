@@ -77,7 +77,8 @@ So the certificate is exactly `[1-byte XOR key][CEconItemPreviewDataBlock][4-byt
 ### Relevant code paths
 
 - **Cert / inventory path** — `GetInventoryData` resolves `%propid:6%` from
-  `asset_properties` (see `propsByAsset`), then `ParseInspectUrl` returns the
+  `asset_properties` (the per-asset index now lives in
+  `Services/SteamInventoryDocument.cs`), then `ParseInspectUrl` returns the
   decoded block as `directItem`. Built into the response via `CreateResponse`
   **without any GC call or DB read**.
 - **GC path** — `GetSkinData` (`/api`) only calls `steamService.GetItemInfoAsync`
@@ -123,7 +124,8 @@ The original run only had 4 usable rows in `searches.db`. Re-running the same
 method against the server's `remote_searches.db` (22,421 `searches` rows, 5,003
 stickers, 273 keychains) over `mattrb`'s live inventory yielded **18 same-item
 GC↔certificate pairs across 8 item categories** — every one a clean match.
-Driver: `scripts/cert_gc_compare.py`; full output: `docs/cert-gc-comparison-report.md`.
+Run ad hoc (see [Reproduction notes](#reproduction-notes)); neither the throwaway
+comparison script nor its raw output was kept, so the tables below are the record.
 
 | Result | Value |
 |---|---|
@@ -279,7 +281,7 @@ GC-result cache (legacy links) or a general item store; the answer drives the ke
 
 ### 3. Validate the untested behavior _(partly done — 2026-06-07)_
 Targeted checks against real GC ground truth, reusing the web-link method.
-Status after the large-scale re-run (`scripts/cert_gc_compare.py`):
+Status after the large-scale re-run:
 - ✅ **Glove matched pair** — done (Specialist Gloves, 0 discrepancies).
 - ✅ **Sticker & keychain sub-blocks** — done (Cyrex: 3 stickers + 1 keychain;
   MP5-SD: 1 sticker), id- and float-exact.
@@ -353,17 +355,18 @@ all non-zero paint items) while pre-protecting the future cert path. Covered by
   (single item; the `s/a/d` form forces the GC for legacy links).
 - **Known-good live web link used for matched validation** (may go stale):
   `S76561198084749846A698323590D7935523998312483177` (Silver Breakout Coin).
-- **Driver script:** `scripts/cert_gc_compare.py` (now permanent). Re-decodes the
-  certificate hex in Python with the exact `ParseInspectUrl` algorithm and diffs
-  against a `searches` DB; field numbers were reflected out of SteamKit2 3.3.1.
-  Run: `python3 scripts/cert_gc_compare.py --inventory <SteamID64|file.json>
-  --db remote_searches.db --report docs/cert-gc-comparison-report.md`. It needs
-  no GC creds and no running app. **Caveat:** it found one real bug *in itself*
-  worth remembering — the app URL-decodes the link before the hex regex, and a
-  naïve `[ %20]+` class will eat leading `0`/`2` hex digits and corrupt the
-  decode; decode `%20`→space first, then match `preview ([0-9A-F]+)`.
-- **Report:** latest output committed at `docs/cert-gc-comparison-report.md`
-  (+ machine-readable `docs/cert-gc-comparison-data.json`).
+- **How the 2026-06-07 comparison was run — ad hoc, and the tool was not kept.**
+  It was a throwaway Python script, written for that session and never committed;
+  neither it nor its raw output lives in this repo, so the run is *not* currently
+  reproducible from a checkout. The results tables above are the surviving record.
+  Redoing it means rewriting the driver, which is a small job: re-decode the
+  certificate hex in Python with the exact `ParseInspectUrl` algorithm (see the
+  decode algorithm above) and diff each item against the matching `searches` row
+  in a DB copy; field numbers can be reflected out of SteamKit2 3.3.1. It needs
+  no GC creds and no running app. **Caveat worth carrying over:** the original
+  script had a real bug *in itself* — the app URL-decodes the link before the hex
+  regex, and a naïve `[ %20]+` class eats leading `0`/`2` hex digits and corrupts
+  the decode; decode `%20`→space first, then match `preview ([0-9A-F]+)`.
 - **DB note:** `searches.db` is gitignored; `remote_searches.db` is a server copy
   (also large — keep it out of commits). Forcing GC lookups writes rows
   (`SaveItemWithExtrasAsync`); clean up test rows if you need a pristine baseline.
