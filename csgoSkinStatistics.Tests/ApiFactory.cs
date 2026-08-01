@@ -54,6 +54,18 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
     // The same instance the app uses, so a test can seed the item cache the endpoints read.
     public DatabaseService Database { get; }
 
+    // Host settings layered over appsettings.json, applied after this factory's own defaults so a
+    // test can override them (the forwarded-headers suite tightens RateLimiting:TokenLimit to watch
+    // partitioning, and names its own trusted proxies). Populate before the first CreateClient -
+    // the host is built once, on demand, and never reconfigured after that.
+    public Dictionary<string, string?> Settings { get; } = [];
+
+    // Extra registrations for a test class that needs to reach into the host itself rather than
+    // swap a service - specifically an IStartupFilter, which is the only way to run a middleware
+    // *before* Program.cs's pipeline (TestServer leaves Connection.RemoteIpAddress null, so the
+    // forwarded-headers trust check has no peer to judge unless a test stamps one).
+    public Action<IServiceCollection>? ConfigureExtraServices { get; set; }
+
     // A small stand-in for const.json. Deliberately not the shipped catalog: these tests assert on
     // resolved names, and pinning them to the real data would make them fail whenever the catalog
     // is regenerated.
@@ -74,9 +86,15 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
         // faster hardware (less wall clock, so less replenishment). The limiter is infrastructure
         // these tests aren't exercising; take it out of the picture rather than budget around it.
         builder.UseSetting("RateLimiting:TokenLimit", "1000000");
+        foreach (var (key, value) in Settings)
+        {
+            builder.UseSetting(key, value);
+        }
 
         builder.ConfigureServices(services =>
         {
+            ConfigureExtraServices?.Invoke(services);
+
             // SteamService's public constructor throws without credentials, and Program.cs kicks off
             // a real ConnectAsync at startup. An account-less stand-in boots and stays offline.
             services.RemoveAll<SteamService>();

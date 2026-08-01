@@ -23,4 +23,5 @@ global using System.Web;
 global using System.Runtime.CompilerServices;
 global using CSGOSkinAPI.Services;
 global using CSGOSkinAPI.Models;
+global using CSGOSkinAPI.Security;
 global using ProtoBuf;
