@@ -4,6 +4,12 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!-- Same gate as the main project (see csgoSkinStatistics.csproj for the rationale): nullable
+         analysis was already running here, all 8 of the warnings it found were in this project, and
+         nothing failed because of them. Test code is where these matter most - a CS8602 in a test
+         is a NullReferenceException waiting to be misread as a product bug. Assert.NotNull first,
+         then dereference; do not reach for `!` or a #pragma. -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 
