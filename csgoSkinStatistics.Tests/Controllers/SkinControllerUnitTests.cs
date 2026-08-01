@@ -1,5 +1,4 @@
 using System.Text.Json;
-using CSGOSkinAPI.Controllers;
 using CSGOSkinAPI.Models;
 using CSGOSkinAPI.Services;
 using ProtoBuf;
@@ -21,7 +20,7 @@ public sealed class ConstDataFixture : IDisposable
     public void Dispose() => _catalogs.Dispose();
 }
 
-// Exercises the real SkinController DTO builders and inspect-URL parser through InternalsVisibleTo.
+// Exercises the real ItemResponse DTO builders and inspect-URL parser through InternalsVisibleTo.
 // These assert on the serialized JSON rather than the anonymous types, because the JSON *is* the
 // contract: the browser reads these field names straight off the response.
 public class SkinControllerUnitTests(ConstDataFixture fixture) : IClassFixture<ConstDataFixture>
@@ -50,7 +49,7 @@ public class SkinControllerUnitTests(ConstDataFixture fixture) : IClassFixture<C
             offset_y = -0.5f,
         };
 
-        var json = ToJson(SkinController.MakeStickerDto(sticker, _constData));
+        var json = ToJson(ItemResponse.MakeStickerDto(sticker, _constData));
 
         Assert.Equal(StickerAndKeychainId, json.GetProperty("sticker_id").GetUInt32());
         Assert.Equal(0.25f, json.GetProperty("wear").GetSingle());
@@ -71,7 +70,7 @@ public class SkinControllerUnitTests(ConstDataFixture fixture) : IClassFixture<C
             wear = 0.25f,
         };
 
-        var json = ToJson(SkinController.MakeStickerDto(sticker, _constData));
+        var json = ToJson(ItemResponse.MakeStickerDto(sticker, _constData));
 
         Assert.Equal(JsonValueKind.Null, json.GetProperty("rotation").ValueKind);
         Assert.Equal(JsonValueKind.Null, json.GetProperty("offset_x").ValueKind);
@@ -91,7 +90,7 @@ public class SkinControllerUnitTests(ConstDataFixture fixture) : IClassFixture<C
             offset_y = 0f,
         };
 
-        var json = ToJson(SkinController.MakeStickerDto(sticker, _constData));
+        var json = ToJson(ItemResponse.MakeStickerDto(sticker, _constData));
 
         Assert.Equal(0f, json.GetProperty("rotation").GetSingle());
         Assert.Equal(0f, json.GetProperty("offset_x").GetSingle());
@@ -103,7 +102,7 @@ public class SkinControllerUnitTests(ConstDataFixture fixture) : IClassFixture<C
     {
         var sticker = new CEconItemPreviewDataBlock.Sticker { slot = 0, sticker_id = StickerAndKeychainId, wear = 0f };
 
-        var json = ToJson(SkinController.MakeStickerDto(sticker, _constData));
+        var json = ToJson(ItemResponse.MakeStickerDto(sticker, _constData));
 
         var expected = _constData.ResolveSticker(StickerAndKeychainId);
         Assert.NotNull(expected);
@@ -118,7 +117,7 @@ public class SkinControllerUnitTests(ConstDataFixture fixture) : IClassFixture<C
         // placeholder rather than breaking on a null.
         var sticker = new CEconItemPreviewDataBlock.Sticker { slot = 0, sticker_id = UnknownDecalId, wear = 0f };
 
-        var json = ToJson(SkinController.MakeStickerDto(sticker, _constData));
+        var json = ToJson(ItemResponse.MakeStickerDto(sticker, _constData));
 
         Assert.Equal("", json.GetProperty("name").GetString());
         Assert.Equal("", json.GetProperty("image").GetString());
@@ -139,7 +138,7 @@ public class SkinControllerUnitTests(ConstDataFixture fixture) : IClassFixture<C
             pattern = 88,
         };
 
-        var json = ToJson(SkinController.MakeKeychainDto(charm, _constData));
+        var json = ToJson(ItemResponse.MakeKeychainDto(charm, _constData));
 
         var expected = _constData.ResolveKeychain(StickerAndKeychainId);
         Assert.NotNull(expected);
@@ -160,7 +159,7 @@ public class SkinControllerUnitTests(ConstDataFixture fixture) : IClassFixture<C
         var slab = new CEconItemPreviewDataBlock.Sticker { slot = 0, sticker_id = 37, wear = 0f };
         StickerSlab.SetWrappedStickerId(slab, StickerAndKeychainId);
 
-        var json = ToJson(SkinController.MakeKeychainDto(slab, _constData));
+        var json = ToJson(ItemResponse.MakeKeychainDto(slab, _constData));
 
         var sealedKit = _constData.ResolveSticker(StickerAndKeychainId);
         var charmKit = _constData.ResolveKeychain(StickerAndKeychainId);
@@ -181,7 +180,7 @@ public class SkinControllerUnitTests(ConstDataFixture fixture) : IClassFixture<C
     {
         var charm = new CEconItemPreviewDataBlock.Sticker { slot = 0, sticker_id = StickerAndKeychainId, wear = 0f };
 
-        var json = ToJson(SkinController.MakeKeychainDto(charm, _constData));
+        var json = ToJson(ItemResponse.MakeKeychainDto(charm, _constData));
 
         Assert.Equal(JsonValueKind.Null, json.GetProperty("offset_x").ValueKind);
         Assert.Equal(JsonValueKind.Null, json.GetProperty("offset_y").ValueKind);
@@ -200,8 +199,8 @@ public class SkinControllerUnitTests(ConstDataFixture fixture) : IClassFixture<C
         static string[] Keys(JsonElement e) => [.. e.EnumerateObject().Select(p => p.Name)];
 
         Assert.Equal(
-            Keys(ToJson(SkinController.MakeKeychainDto(charm, _constData))),
-            Keys(ToJson(SkinController.MakeKeychainDto(slab, _constData))));
+            Keys(ToJson(ItemResponse.MakeKeychainDto(charm, _constData))),
+            Keys(ToJson(ItemResponse.MakeKeychainDto(slab, _constData))));
     }
 
     [Fact]
@@ -225,8 +224,8 @@ public class SkinControllerUnitTests(ConstDataFixture fixture) : IClassFixture<C
         var reloaded = Serializer.Deserialize<CEconItemPreviewDataBlock.Sticker>(ms);
 
         Assert.Equal(
-            JsonSerializer.Serialize(SkinController.MakeKeychainDto(fresh, _constData)),
-            JsonSerializer.Serialize(SkinController.MakeKeychainDto(reloaded, _constData)));
+            JsonSerializer.Serialize(ItemResponse.MakeKeychainDto(fresh, _constData)),
+            JsonSerializer.Serialize(ItemResponse.MakeKeychainDto(reloaded, _constData)));
     }
 
     // --- inspect URL parsing -----------------------------------------------------------
@@ -330,7 +329,7 @@ public class SkinControllerUnitTests(ConstDataFixture fixture) : IClassFixture<C
     [InlineData("86561198123456789")]     // right length, outside the individual-account block
     public void ParseSteamInput_OutOfRangeNumericId_IsNotTreatedAsAnId(string input)
     {
-        var (steamId64, vanity) = SkinController.ParseSteamInput(input);
+        var (steamId64, vanity) = SteamProfile.ParseSteamInput(input);
 
         Assert.Null(steamId64);
         // An all-digit input is never a vanity name either, so it resolves to nothing.

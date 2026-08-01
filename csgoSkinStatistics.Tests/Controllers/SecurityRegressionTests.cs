@@ -1,4 +1,3 @@
-using CSGOSkinAPI.Controllers;
 using CSGOSkinAPI.Models;
 using CSGOSkinAPI.Security;
 using CSGOSkinAPI.Services;
@@ -24,7 +23,7 @@ public class SecurityRegressionTests
         // The charset check is what stops a vanity from carrying anything but name characters into
         // the server-side steamcommunity.com fetch and into the logs. `$` let a trailing newline
         // through; the pattern is anchored with \z now.
-        Assert.False(SkinController.IsValidVanity(vanity));
+        Assert.False(SteamProfile.IsValidVanity(vanity));
     }
 
     [Theory]
@@ -32,7 +31,7 @@ public class SecurityRegressionTests
     [InlineData("steamcommunity.com/id/mattrb\n")]
     public void ParseSteamInput_VanityWithTrailingNewline_ReturnsNeither(string input)
     {
-        var (steamId64, vanity) = SkinController.ParseSteamInput(input);
+        var (steamId64, vanity) = SteamProfile.ParseSteamInput(input);
 
         Assert.Null(steamId64);
         Assert.Null(vanity);
@@ -43,7 +42,7 @@ public class SecurityRegressionTests
     [InlineData("a-b_c123")]
     public void IsValidVanity_StillAcceptsRealNames(string vanity)
     {
-        Assert.True(SkinController.IsValidVanity(vanity));
+        Assert.True(SteamProfile.IsValidVanity(vanity));
     }
 
     // --- log sanitisation ----------------------------------------------------------------
