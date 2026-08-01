@@ -1,4 +1,5 @@
 using CSGOSkinAPI.Services;
+using Microsoft.Extensions.Logging;
 
 namespace csgoSkinStatistics.Tests.Controllers;
 
@@ -54,7 +55,17 @@ public class ParseSteamInputTests
         // A multi-megabyte hex payload must be rejected before it is hex-decoded and protobuf-parsed.
         var hugeHex = new string('A', 5000);
         var url = "steam://rungame/730/0/+csgo_econ_action_preview " + hugeHex;
-        Assert.Null(InspectLink.ParseInspectUrl(url));
+        var log = new CapturingLogger();
+
+        Assert.Null(InspectLink.ParseInspectUrl(url, log));
+
+        // Asserting the *reason*, not just the null. This payload is also rejected further down,
+        // by the protobuf deserialize catch - so `Assert.Null` alone passes with the length cap
+        // raised to any value, and defends nothing. The cap is what stops the allocation and the
+        // parse from happening at all; only the line it logs distinguishes it from the late catch.
+        var entry = Assert.Single(log.Entries);
+        Assert.Equal(LogLevel.Warning, entry.Level);
+        Assert.Equal("Hex payload too long: {InspectUrl}", entry["{OriginalFormat}"]);
     }
 
     [Fact]
