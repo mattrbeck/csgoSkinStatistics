@@ -56,9 +56,12 @@ builder.Services.AddRateLimiter(options =>
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
     options.AddPolicy("api", httpContext =>
     {
-        // Partition by client IP. A single key ("unknown") for IP-less requests is deliberate:
-        // it caps that whole bucket rather than letting them each get their own allowance.
-        var clientIp = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+        // Partition by client. Behind the reverse proxy this is the *client's* address rather than
+        // the proxy's only because UseForwardedHeaders runs first (see Security/TransportSecurity.cs);
+        // without it every caller on the internet would share one bucket. ClientPartitionKey also
+        // decides what counts as one client - an IPv6 /64 rather than a single address, which a
+        // client can rotate through freely - and folds IPv4-mapped addresses onto their IPv4 form.
+        var clientIp = TransportSecurity.ClientPartitionKey(httpContext.Connection.RemoteIpAddress);
         return RateLimitPartition.GetTokenBucketLimiter(clientIp, _ => new TokenBucketRateLimiterOptions
         {
             TokenLimit = tokenLimit,
@@ -90,6 +93,27 @@ builder.Services.AddSingleton<PriceService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<PriceService>());
 
 var app = builder.Build();
+
+// FIRST in the pipeline, deliberately: the app runs behind a TLS-terminating Caddy, so the real
+// client address and scheme only exist in X-Forwarded-For / X-Forwarded-Proto. Everything below -
+// the security headers, the exception handler's logging, and above all the rate limiter's per-IP
+// partition key - has to see the corrected connection, not the proxy's. Only headers arriving from
+// a trusted proxy are honoured; see Security/TransportSecurity.cs for why that restriction is the
+// whole fix, and for the config keys that override the trusted set.
+var forwardedHeaderOptions = TransportSecurity.BuildForwardedHeadersOptions(app.Configuration);
+// Say out loud what we ended up trusting. Every way this can be mis-set - a peer outside the
+// default private ranges, a KnownNetworks value narrowed too far, an env var written in the scalar
+// form - otherwise produces a working-looking app whose limiter has quietly collapsed back to one
+// global bucket, with nothing in the log to explain it.
+Console.WriteLine(TransportSecurity.DescribeTrustedSources(forwardedHeaderOptions));
+var forwardedTrustDiagnostics = new ForwardedTrustDiagnostics(forwardedHeaderOptions);
+app.Use(async (context, next) =>
+{
+    // Ahead of UseForwardedHeaders, which is about to overwrite the peer address this reads.
+    forwardedTrustDiagnostics.Inspect(context);
+    await next();
+});
+app.UseForwardedHeaders(forwardedHeaderOptions);
 
 // Defense-in-depth security headers on every response (via OnStarting so they apply even to the
 // error responses written by UseExceptionHandler below). The CSP is conservative but tuned to what
