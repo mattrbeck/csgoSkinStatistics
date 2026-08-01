@@ -22,7 +22,7 @@ builder.Services.AddHttpClient("steam")
     // (inventory fetch, profile XML, vanity resolve) uses the default HttpCompletionOption
     // .ResponseContentRead, so HttpClient buffers the whole body before the caller ever sees it -
     // without a cap a hostile, compromised or simply malfunctioning steamcommunity.com could stream
-    // until the host runs out of memory. Set here rather than at each of the four call sites so
+    // until the host runs out of memory. Set here rather than at each of the three call sites so
     // there is one number to reason about.
     //
     // Sizing: the biggest thing this client fetches is one count=2000 inventory page. Modelling
