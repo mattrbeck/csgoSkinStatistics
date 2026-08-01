@@ -1,5 +1,7 @@
 using CSGOSkinAPI.Controllers;
 using CSGOSkinAPI.Models;
+using CSGOSkinAPI.Security;
+using CSGOSkinAPI.Services;
 using Microsoft.Extensions.Logging;
 using Xunit;
 
@@ -64,7 +66,7 @@ public class SecurityRegressionTests
     public void ForLog_StripsControlCharacters(string value)
     {
         // A logged value carrying CR/LF would let a caller append whole log lines of their own.
-        var logged = SkinController.ForLog(value);
+        var logged = LogSanitizer.ForLog(value);
 
         Assert.DoesNotContain('\n', logged);
         Assert.DoesNotContain('\r', logged);
@@ -74,7 +76,7 @@ public class SecurityRegressionTests
     [Fact]
     public void ForLog_TruncatesLongValues()
     {
-        var logged = SkinController.ForLog(new string('x', 5000));
+        var logged = LogSanitizer.ForLog(new string('x', 5000));
 
         Assert.True(logged.Length < 300, $"expected a clipped value, got {logged.Length} chars");
         Assert.EndsWith("...(truncated)", logged);
@@ -84,14 +86,14 @@ public class SecurityRegressionTests
     public void ForLog_LeavesOrdinaryValuesAlone()
     {
         const string url = "steam://run/730//+csgo_econ_action_preview S123A456D789";
-        Assert.Equal(url, SkinController.ForLog(url));
+        Assert.Equal(url, LogSanitizer.ForLog(url));
     }
 
     [Fact]
     public void ForLog_HandlesNullAndEmpty()
     {
-        Assert.Equal("(empty)", SkinController.ForLog(null));
-        Assert.Equal("(empty)", SkinController.ForLog(""));
+        Assert.Equal("(empty)", LogSanitizer.ForLog(null));
+        Assert.Equal("(empty)", LogSanitizer.ForLog(""));
     }
 
     [Theory]
@@ -114,7 +116,7 @@ public class SecurityRegressionTests
         //      helper in isolation never could.
         var log = new CapturingLogger();
 
-        Assert.Null(SkinController.ParseInspectUrl(url, log));
+        Assert.Null(InspectLink.ParseInspectUrl(url, log));
 
         var entry = Assert.Single(log.Entries);
         Assert.Equal(LogLevel.Warning, entry.Level);
@@ -136,7 +138,7 @@ public class SecurityRegressionTests
         // whole /api/inventory request with a 500 instead of just leaving the placeholder unfilled.
         var props = new List<SteamAssetProperty> { new() { propertyid = 6, string_value = "00AB" } };
 
-        var link = SkinController.BuildInspectLink(
+        var link = InspectLink.BuildInspectLink(
             "steam://run/730//+csgo_econ_action_preview %propid:99999999999999999999%",
             props, "76561198123456789", "519");
 

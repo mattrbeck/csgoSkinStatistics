@@ -14,9 +14,9 @@ namespace CSGOSkinAPI.Controllers
         // Malformed inspect links, which are a different kind of event and belong on a
         // different knob: they are not a fault of ours, the caller already has their answer
         // (a 400), their volume is set by whoever is calling rather than by anything the app
-        // is doing, and the line carries up to MaxLoggedLength characters of the caller's
-        // choosing. Sharing a category with the app's own diagnostics would mean muting a
-        // flood of them costs you the diagnostics too. CSGOSkinAPI.RateLimiting exists for
+        // is doing, and the line carries up to LogSanitizer.MaxLoggedLength characters of the
+        // caller's choosing. Sharing a category with the app's own diagnostics would mean muting
+        // a flood of them costs you the diagnostics too. CSGOSkinAPI.RateLimiting exists for
         // exactly the same reason. Both are documented in appsettings.json.
         internal const string InspectLinkLogCategory = "CSGOSkinAPI.InspectLinks";
         private readonly ILogger _inspectLogger = loggerFactory.CreateLogger(InspectLinkLogCategory);
@@ -44,13 +44,6 @@ namespace CSGOSkinAPI.Controllers
         // A cached inventory failure. Positive results are cached as the raw response byte[].
         private sealed record NegativeInventory(int StatusCode, string Error);
 
-        // Match on the command itself rather than the prefix, which changed from
-        // the legacy "rungame/730/<steamid>/" to "run/730//" in March 2026.
-        [GeneratedRegex(@"csgo_econ_action_preview ([SM])(\d+)A(\d+)D(\d+)", RegexOptions.Compiled)]
-        private static partial Regex InspectUrlRegex();
-        [GeneratedRegex(@"csgo_econ_action_preview ([0-9A-F]+)", RegexOptions.Compiled)]
-        private static partial Regex InspectUrlHexRegex();
-
         [HttpGet]
         public async Task<IActionResult> GetSkinData([FromQuery] string? url,
             [FromQuery] ulong s = 0, [FromQuery] ulong a = 0,
@@ -62,7 +55,7 @@ namespace CSGOSkinAPI.Controllers
                 // ParseInspectUrl has already logged the failure, with the URL as a field and
                 // under the inspect-link category; a second line here would say strictly less
                 // about the same request.
-                var parsed = ParseInspectUrl(url, _inspectLogger);
+                var parsed = InspectLink.ParseInspectUrl(url, _inspectLogger);
                 if (parsed == null)
                 {
                     return BadRequest(new { error = "Invalid inspect URL format" });
@@ -241,7 +234,7 @@ namespace CSGOSkinAPI.Controllers
                 var idsToLookUp = new List<ulong>();
                 foreach (var (asset, description, inspectLink) in inventory.InspectableAssets(steamid))
                 {
-                    var parsed = ParseInspectUrl(inspectLink, _inspectLogger);
+                    var parsed = InspectLink.ParseInspectUrl(inspectLink, _inspectLogger);
                     if (parsed.HasValue && parsed.Value.directItem == null)
                     {
                         idsToLookUp.Add(parsed.Value.a);
@@ -476,34 +469,6 @@ namespace CSGOSkinAPI.Controllers
             });
         }
 
-        // Longest prefix of an untrusted value we will put in a log line.
-        private const int MaxLoggedLength = 200;
-
-        // Renders an untrusted request value for the log. Applied to the two values a caller
-        // controls outright: the ?url= inspect link and the vanity name.
-        //
-        // Since these travel as *parameters* of a structured message template rather than as text
-        // spliced into it, a CR/LF can no longer forge a record in a structured sink - the value is
-        // one field, whatever is in it. What it can still do is forge a *line*: the default console
-        // formatter renders the template back into a single line of text, and this app's log is
-        // read through `docker compose logs`, so an embedded CR/LF there still produces output that
-        // looks like separate entries. Control characters therefore still become '?'.
-        //
-        // Truncation is independent of all that and outlives any sink change: ?url= is unbounded,
-        // and a request-sized value has no business being copied into a log record at all.
-        internal static string ForLog(string? value)
-        {
-            if (string.IsNullOrEmpty(value))
-            {
-                return "(empty)";
-            }
-
-            var clipped = value.Length > MaxLoggedLength
-                ? string.Concat(value.AsSpan(0, MaxLoggedLength), "...(truncated)")
-                : value;
-            return new string([.. clipped.Select(c => char.IsControl(c) ? '?' : c)]);
-        }
-
         // A 17-digit id64 in the "76561…" individual-account block. Checked numerically rather
         // than by formatting the value to a string twice.
         private static bool IsValidSteamId64(ulong steamId) =>
@@ -579,12 +544,12 @@ namespace CSGOSkinAPI.Controllers
                 }
 
                 _logger.LogWarning(
-                    "Failed to resolve custom URL '{Vanity}' to SteamId64", ForLog(customUrl));
+                    "Failed to resolve custom URL '{Vanity}' to SteamId64", LogSanitizer.ForLog(customUrl));
                 return null;
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Error resolving custom URL '{Vanity}'", ForLog(customUrl));
+                _logger.LogWarning(ex, "Error resolving custom URL '{Vanity}'", LogSanitizer.ForLog(customUrl));
                 return null;
             }
         }
@@ -649,117 +614,6 @@ namespace CSGOSkinAPI.Controllers
             if (steamId64 != null) return $"https://steamcommunity.com/profiles/{steamId64}/?xml=1";
             if (vanity != null) return $"https://steamcommunity.com/id/{vanity}/?xml=1";
             return null;
-        }
-
-        // Fill the placeholders Steam leaves in a description-level inspect link template:
-        // %propid:N% with the value of this asset's property N (for skins, propid 6 is the
-        // item certificate), and %owner_steamid%/%assetid% with the copy's identity.
-        internal static string BuildInspectLink(string actionLink, List<SteamAssetProperty>? assetProps, string ownerSteamId, string assetId)
-        {
-            var link = Regex.Replace(actionLink, @"%propid:(\d+)%", m =>
-            {
-                // TryParse, not Parse: the regex caps nothing, so a digit run longer than int can
-                // hold would throw OverflowException here and surface as a 500 for the whole
-                // inventory. An unparseable id is left as-is, like one with no matching property.
-                if (!int.TryParse(m.Groups[1].Value, out var pid))
-                {
-                    return m.Value;
-                }
-                var prop = assetProps?.FirstOrDefault(p => p.propertyid == pid);
-                return prop?.string_value ?? prop?.int_value ?? prop?.float_value ?? m.Value;
-            });
-            return link
-                .Replace("%owner_steamid%", ownerSteamId)
-                .Replace("%assetid%", assetId);
-        }
-
-        // Static because it is shared with InventoryWarmService (and driven directly by tests),
-        // so the logger arrives as an argument rather than through a field. Optional, and null-sunk
-        // when absent, so a test that is asserting on the parse result need not supply one.
-        internal static (ulong s, ulong a, ulong d, ulong m, CEconItemPreviewDataBlock? directItem)? ParseInspectUrl(
-            string url, ILogger? logger = null)
-        {
-            logger ??= NullLogger.Instance;
-            var decodedUrl = HttpUtility.UrlDecode(url);
-            var match = InspectUrlRegex().Match(decodedUrl);
-            if (!match.Success)
-            {
-                var hexMatch = InspectUrlHexRegex().Match(decodedUrl);
-                if (!hexMatch.Success)
-                {
-                    logger.LogWarning("Failed to decode URL: {InspectUrl}", ForLog(url));
-                    return null;
-                }
-                var hexValue = hexMatch.Groups[1].Value;
-                // Real inspect certs are a few hundred hex chars; cap the length so a crafted
-                // multi-megabyte payload can't force a huge allocation and protobuf parse on the
-                // request thread.
-                if (hexValue.Length > 2048)
-                {
-                    logger.LogWarning("Hex payload too long: {InspectUrl}", ForLog(url));
-                    return null;
-                }
-                // The regex matches odd-length runs too, which Convert.FromHexString rejects with a
-                // FormatException - guard it so a bad link is a 400, not an unhandled 500.
-                if (hexValue.Length % 2 != 0)
-                {
-                    logger.LogWarning("Hex payload has odd length: {InspectUrl}", ForLog(url));
-                    return null;
-                }
-                var rawBytes = Convert.FromHexString(hexValue);
-                // Need at least the leading byte, one protobuf byte, and the 4-byte checksum.
-                if (rawBytes.Length < 6)
-                {
-                    logger.LogWarning("Hex payload too short: {InspectUrl}", ForLog(url));
-                    return null;
-                }
-                // As of March 2026 the payload is XOR-obfuscated with its first byte
-                // as the key. Legacy masked links start with 0x00, so this is a no-op
-                // for them and deobfuscates the new self-encoded links.
-                var xorKey = rawBytes[0];
-                for (var i = 0; i < rawBytes.Length; i++)
-                {
-                    rawBytes[i] ^= xorKey;
-                }
-                // Drop the leading xor byte and the trailing 4 checksum bytes
-                var hexBytes = rawBytes[1..^4];
-                CEconItemPreviewDataBlock itemInfoProto;
-                try
-                {
-                    using var hexStream = new MemoryStream(hexBytes);
-                    itemInfoProto = Serializer.Deserialize<CEconItemPreviewDataBlock>(hexStream);
-                }
-                catch (Exception ex)
-                {
-                    // Valid hex that isn't a valid CEconItemPreviewDataBlock (garbage, or a
-                    // truncated/mis-typed protobuf) throws here - map it to a 400, not a 500.
-                    logger.LogWarning(ex, "Failed to decode inspect cert payload from {InspectUrl}", ForLog(url));
-                    return null;
-                }
-                return (0, itemInfoProto.itemid, 0, 0, itemInfoProto);
-            }
-
-            // TryParse, not Parse: the regex caps nothing, so a caller can supply a >20-digit run
-            // that overflows ulong. Treat that as a malformed link (null -> 400) rather than letting
-            // the OverflowException surface as a 500.
-            ulong s = 0, m = 0;
-            var firstParam = match.Groups[1].Value;
-            if (!ulong.TryParse(match.Groups[2].Value, out var firstValue) ||
-                !ulong.TryParse(match.Groups[3].Value, out var a) ||
-                !ulong.TryParse(match.Groups[4].Value, out var d))
-            {
-                logger.LogWarning("Inspect URL has out-of-range numeric fields: {InspectUrl}", ForLog(url));
-                return null;
-            }
-            if (firstParam == "S")
-            {
-                s = firstValue;
-            }
-            else if (firstParam == "M")
-            {
-                m = firstValue;
-            }
-            return (s, a, d, m, null);
         }
 
         private static object CreateResponse(CEconItemPreviewDataBlock item, ConstDataService constDataService, PriceService priceService, ulong s, ulong a, ulong d, ulong m)

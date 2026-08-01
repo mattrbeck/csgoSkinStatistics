@@ -104,7 +104,7 @@ namespace CSGOSkinAPI.Services
                 // Parsed here rather than in the shared walk because the endpoint parses the same
                 // link under its own CSGOSkinAPI.InspectLinks logger, and a malformed link found
                 // by the warmer belongs in this service's log, not that one.
-                var directItem = Controllers.SkinController.ParseInspectUrl(inspectLink, logger)?.directItem;
+                var directItem = InspectLink.ParseInspectUrl(inspectLink, logger)?.directItem;
                 if (directItem != null && directItem.itemid != 0)
                 {
                     await dbService.SaveItemWithExtrasAsync(directItem);

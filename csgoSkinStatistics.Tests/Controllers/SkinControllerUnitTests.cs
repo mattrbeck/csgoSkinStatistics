@@ -236,7 +236,7 @@ public class SkinControllerUnitTests(ConstDataFixture fixture) : IClassFixture<C
     {
         var url = "steam://rungame/730/76561202255233023/+csgo_econ_action_preview%20S76561198123456789A12345D67890";
 
-        var parsed = SkinController.ParseInspectUrl(url);
+        var parsed = InspectLink.ParseInspectUrl(url);
 
         Assert.NotNull(parsed);
         var (s, a, d, m, directItem) = parsed.Value;
@@ -252,7 +252,7 @@ public class SkinControllerUnitTests(ConstDataFixture fixture) : IClassFixture<C
     {
         var url = "steam://rungame/730/76561202255233023/+csgo_econ_action_preview%20M1A12345D67890";
 
-        var parsed = SkinController.ParseInspectUrl(url);
+        var parsed = InspectLink.ParseInspectUrl(url);
 
         Assert.NotNull(parsed);
         var (s, a, d, m, _) = parsed.Value;
@@ -267,7 +267,7 @@ public class SkinControllerUnitTests(ConstDataFixture fixture) : IClassFixture<C
     {
         // The prefix changed from "rungame/730/<steamid>/" to "run/730//" in March 2026; the parser
         // matches on the command, not the prefix, so both forms have to work.
-        var parsed = SkinController.ParseInspectUrl(
+        var parsed = InspectLink.ParseInspectUrl(
             "steam://run/730//+csgo_econ_action_preview%20S76561198123456789A12345D67890");
 
         Assert.NotNull(parsed);
@@ -277,7 +277,7 @@ public class SkinControllerUnitTests(ConstDataFixture fixture) : IClassFixture<C
     [Fact]
     public void ParseInspectUrl_NotAnInspectLink_ReturnsNull()
     {
-        Assert.Null(SkinController.ParseInspectUrl("https://example.com/not-a-link"));
+        Assert.Null(InspectLink.ParseInspectUrl("https://example.com/not-a-link"));
     }
 
     // --- inventory inspect-link templating ---------------------------------------------
@@ -285,7 +285,7 @@ public class SkinControllerUnitTests(ConstDataFixture fixture) : IClassFixture<C
     [Fact]
     public void BuildInspectLink_SubstitutesOwnerAndAsset()
     {
-        var link = SkinController.BuildInspectLink(
+        var link = InspectLink.BuildInspectLink(
             "steam://rungame/730/%owner_steamid%/+csgo_econ_action_preview S%owner_steamid%A%assetid%D123",
             assetProps: null,
             ownerSteamId: "76561198123456789",
@@ -305,7 +305,7 @@ public class SkinControllerUnitTests(ConstDataFixture fixture) : IClassFixture<C
             new() { propertyid = 6, string_value = "00DEADBEEF" },
         };
 
-        var link = SkinController.BuildInspectLink(
+        var link = InspectLink.BuildInspectLink(
             "steam://run/730//+csgo_econ_action_preview %propid:6%", props, "76561198123456789", "519");
 
         Assert.Equal("steam://run/730//+csgo_econ_action_preview 00DEADBEEF", link);
@@ -316,7 +316,7 @@ public class SkinControllerUnitTests(ConstDataFixture fixture) : IClassFixture<C
     {
         // An asset with no matching property must leave the placeholder alone rather than splice in
         // an empty string, so the link visibly fails to parse instead of silently pointing at junk.
-        var link = SkinController.BuildInspectLink(
+        var link = InspectLink.BuildInspectLink(
             "steam://run/730//+csgo_econ_action_preview %propid:6%", [], "76561198123456789", "519");
 
         Assert.Equal("steam://run/730//+csgo_econ_action_preview %propid:6%", link);
