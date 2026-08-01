@@ -41,11 +41,38 @@ jobs:
     - name: Install npm dependencies
       run: npm ci
 
+    # Coverage is collected through coverlet's MSBuild integration rather than the
+    # `--collect:"XPlat Code Coverage"` data collector: only the MSBuild integration exposes
+    # /p:Threshold, and running both integrations in one invocation is unsupported. The cobertura
+    # report still lands in TestResults/, so the artifact upload below is unchanged.
+    #
+    # COVERAGE RATCHET - floors, not goals. Measured 2026-07-31 (263 tests):
+    #   line 80.51%   branch 77.80%   method 92.27%
+    # Floors are set ~2-3 points under measured. ThresholdStat=total scores the whole run, not the
+    # worst module. RATCHET UPWARD ONLY: if a change pushes coverage under a floor, write the
+    # tests. Lowering a number here to turn a red build green removes the only thing this gate does.
+    # (%2c is an escaped comma - the dotnet CLI splits unescaped commas in -p: into new switches.)
+    #
+    # --blame-hang is the backstop for unbounded awaits: xunit has no default per-test timeout, so a
+    # test awaiting a TaskCompletionSource that is never completed hangs the runner until GitHub
+    # kills the job (6h) with no dump and no clue which test did it. 5m is per-test; the whole suite
+    # finishes in ~1s locally, so this fires only on a genuine hang, never on a slow runner.
     - name: Run backend tests
-      run: dotnet test csgoSkinStatistics.Tests --no-restore --verbosity normal --logger trx --results-directory TestResults --collect:"XPlat Code Coverage"
+      run: >-
+        dotnet test csgoSkinStatistics.Tests --no-restore --verbosity normal
+        --logger trx --results-directory TestResults
+        --blame-hang --blame-hang-timeout 5m
+        -p:CollectCoverage=true
+        -p:CoverletOutputFormat=cobertura
+        -p:CoverletOutput=../TestResults/coverage.cobertura.xml
+        -p:Threshold=78%2c75%2c90
+        -p:ThresholdType=line%2cbranch%2cmethod
+        -p:ThresholdStat=total
 
+    # --coverage is what makes jest.config.js's coverageThreshold do anything at all; without it the
+    # declared threshold is inert. See jest.config.js for the measured values and the ratchet rule.
     - name: Run frontend tests
-      run: npm test -- --watchAll=false
+      run: npm test -- --coverage --watchAll=false
 
     - name: Run linting
       run: npm run lint
