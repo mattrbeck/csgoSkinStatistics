@@ -39,8 +39,12 @@ builder.Services.AddHttpClient("steam")
     // (2684 B/description + 114 B/asset + 346 B/asset_properties). Our own serialization of that
     // same inventory is ~3 MB (see the MemoryCache SizeLimit comment below), which is consistent.
     // 32 MB is ~5x that worst case, so it has to be Steam changing shape by a wide margin - not an
-    // unusually large inventory - before a real response is refused. The profile XML and vanity
-    // resolve responses are ~2 KB and sit far under it.
+    // unusually large inventory - before a real response is refused.
+    //
+    // This is the *inventory* number, and only the inventory fetch should be paying it. The profile
+    // XML and vanity-resolve calls are ~2 KB and share this client, so they tighten it to 1 MB on
+    // their own copy - see SkinController.CreateProfileFeedClient, which is free to do that because
+    // CreateClient returns a fresh HttpClient per call.
     .ConfigureHttpClient(client => client.MaxResponseContentBufferSize = 32 * 1024 * 1024)
     .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
     {
@@ -293,8 +297,15 @@ _ = Task.Run(async () =>
     }
 });
 
-// Initialize ConstDataService (loads const.json)
-var constDataService = app.Services.GetRequiredService<ConstDataService>();
+// Construct ConstDataService now rather than inside whichever request first needs it. Its
+// constructor reads and deserializes the whole catalog set - const.json, stickers.json,
+// skin-images.json, fade.json, blue-gem.json, several MB in total - and that is not work to charge
+// to the first user through the door.
+//
+// The instance is deliberately discarded: it is a singleton, so the container holds the copy built
+// here and every later resolve returns this same warmed one. The call is made purely for that side
+// effect, hence the discard rather than a variable that reads like a mistake.
+_ = app.Services.GetRequiredService<ConstDataService>();
 
 // Disconnect from Steam as part of the host's graceful shutdown (which Ctrl-C / SIGTERM already
 // trigger) rather than from a Console.CancelKeyPress handler. The old handler tore Steam down and

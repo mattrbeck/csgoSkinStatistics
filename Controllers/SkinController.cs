@@ -333,18 +333,18 @@ namespace CSGOSkinAPI.Controllers
                 return BadRequest(new { error = "Unable to determine profile for the given Steam ID" });
             }
 
-            using var httpClient = httpClientFactory.CreateClient("steam");
-            httpClient.Timeout = TimeSpan.FromSeconds(5);
+            using var httpClient = CreateProfileFeedClient();
 
             // Fetching and reading the feed is the only part that can fail at the transport level.
             // Handled the same way GetInventoryData handles it - a connection reset, a timeout, or a
-            // response over the client's MaxResponseContentBufferSize (see Program.cs) is an upstream
-            // failure, not a bug in this server, so it answers 400 in the house error shape rather
-            // than bubbling to the global handler's generic 500. Anything else still bubbles.
+            // response over the client's MaxResponseContentBufferSize (see CreateProfileFeedClient)
+            // is an upstream failure, not a bug in this server, so it answers 400 in the house error
+            // shape rather than bubbling to the global handler's generic 500. Anything else still
+            // bubbles.
             string xml;
             try
             {
-                var response = await httpClient.GetAsync(xmlUrl);
+                using var response = await httpClient.GetAsync(xmlUrl);
                 if (!response.IsSuccessStatusCode)
                 {
                     return BadRequest(new { error = $"Failed to fetch profile: {response.StatusCode}" });
@@ -388,6 +388,32 @@ namespace CSGOSkinAPI.Controllers
             });
         }
 
+        // How much of a profile XML feed we are willing to buffer. Both callers below fetch
+        // steamcommunity.com's `?xml=1` feed, which is a small document: a real profile measures
+        // ~2 KB, and the only part of it that grows with the account is the <groups> list, which
+        // tops out around 50 KB for an account in the maximum number of groups.
+        //
+        // They share the "steam" client with the inventory fetch, whose 32 MB cap (Program.cs) is
+        // sized for a count=2000 inventory page - four orders of magnitude more than anything on
+        // this path, and memory a profile lookup should never be able to make the host buffer.
+        // 1 MB is ~20x the realistic worst case and ~500x a typical response, so it has headroom
+        // for a Steam that changes shape by a wide margin while still bounding the damage.
+        private const int ProfileFeedMaxResponseBytes = 1024 * 1024;
+
+        // The client both profile-feed calls use.
+        //
+        // Set per call rather than on the named client because IHttpClientFactory.CreateClient hands
+        // back a *fresh* HttpClient over the shared, pooled handler - which is exactly what the
+        // Timeout here has always relied on. The inventory path builds its own client through
+        // SteamInventoryDocument.FetchAsync and so keeps the 32 MB it genuinely needs.
+        private HttpClient CreateProfileFeedClient()
+        {
+            var httpClient = httpClientFactory.CreateClient("steam");
+            httpClient.Timeout = TimeSpan.FromSeconds(5);
+            httpClient.MaxResponseContentBufferSize = ProfileFeedMaxResponseBytes;
+            return httpClient;
+        }
+
         private async Task<ulong?> ResolveSteamIdAsync(string input)
         {
             var (steamId64, vanity) = SteamProfile.ParseSteamInput(input);
@@ -400,13 +426,12 @@ namespace CSGOSkinAPI.Controllers
         {
             try
             {
-                using var httpClient = httpClientFactory.CreateClient("steam");
-                httpClient.Timeout = TimeSpan.FromSeconds(5);
+                using var httpClient = CreateProfileFeedClient();
 
                 // The public profile XML feed exposes the SteamId64 without an API key.
                 var xmlUrl = $"https://steamcommunity.com/id/{customUrl}/?xml=1";
 
-                var response = await httpClient.GetAsync(xmlUrl);
+                using var response = await httpClient.GetAsync(xmlUrl);
                 if (!response.IsSuccessStatusCode)
                 {
                     _logger.LogWarning("Steam profile request failed: {StatusCode}", response.StatusCode);
