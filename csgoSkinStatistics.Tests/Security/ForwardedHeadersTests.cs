@@ -97,6 +97,14 @@ public sealed class ForwardedHeadersFixture : IDisposable
     // whatever the IPv4 one left behind.
     public ApiFactory PartitionedIpv6 { get; }
 
+    // An untrusted peer against a host whose console has been silenced by a provider-scoped rule -
+    // the strongest form of the turn-down that used to hide the trust-boundary lines, applied to a
+    // real Program.cs. The sink rides along in the host's own DI so what a test reads is whatever
+    // survived the app's real filter wiring, not a pipeline the test assembled for itself.
+    public ApiFactory LogsTurnedAllTheWayDown { get; }
+
+    public CapturingLoggerProvider TurnedDownSink { get; } = new();
+
     public ForwardedHeadersFixture()
     {
         Trusted = Create(TrustedPeer);
@@ -110,6 +118,10 @@ public sealed class ForwardedHeadersFixture : IDisposable
         });
         Partitioned = Create(TrustedPeer, TightBucket);
         PartitionedIpv6 = Create(TrustedPeer, TightBucket);
+        LogsTurnedAllTheWayDown = Create(UntrustedPeer, new Dictionary<string, string?>
+        {
+            ["Logging:Console:LogLevel:Default"] = "None",
+        }, TurnedDownSink);
     }
 
     private static Dictionary<string, string?> CustomTrustSettings => new()
@@ -128,12 +140,23 @@ public sealed class ForwardedHeadersFixture : IDisposable
         ["RateLimiting:QueueLimit"] = "0",
     };
 
-    private ApiFactory Create(IPAddress peer, Dictionary<string, string?>? settings = null)
+    private ApiFactory Create(IPAddress peer, Dictionary<string, string?>? settings = null,
+        CapturingLoggerProvider? sink = null)
     {
         var factory = new ApiFactory
         {
             ConfigureExtraServices = services =>
-                services.AddSingleton<IStartupFilter>(new PeerProbeStartupFilter(peer)),
+            {
+                services.AddSingleton<IStartupFilter>(new PeerProbeStartupFilter(peer));
+                // Registered as an ILoggerProvider in the host's own container, so the app's
+                // ILoggerFactory picks it up alongside the real console provider and it is subject
+                // to exactly the filter rules Program.cs ends up with. It is aliased "Console", so
+                // the Logging:Console:LogLevel:* keys bind to it as they would to the real one.
+                if (sink != null)
+                {
+                    services.AddSingleton<ILoggerProvider>(sink);
+                }
+            },
         };
         foreach (var (key, value) in settings ?? [])
         {
@@ -459,6 +482,29 @@ public sealed class ForwardedHeadersTests(ForwardedHeadersFixture fixture)
         EmitBothTrustBoundaryLines(factory);
 
         Assert.Empty(sink.Entries);
+    }
+
+    [Fact]
+    public async Task The_app_registers_the_pin_so_a_silenced_console_still_reports_an_untrusted_peer()
+    {
+        // The theories above prove PinTrustBoundaryLogging WORKS. They call it directly, so they
+        // say nothing about whether the app calls it - commenting the single registration line out
+        // of Program.cs left all of them green while production silently lost the whole
+        // protection. This test is the one that goes through the real thing: a real
+        // WebApplicationFactory<Program> host, so Program.cs's own wiring is what installs the
+        // pin, with Logging:Console:LogLevel:Default=None set the way an operator would set it.
+        //
+        // The untrusted-peer warning is what is asserted rather than the startup line. Both travel
+        // the same filter rules under the same pinned category, so either defends the
+        // registration; this one is the one a test can provoke on demand, and it is also the line
+        // whose absence is most costly - it is the only signal that a live deployment's rate
+        // limiter has collapsed to a single global bucket.
+        using var response = await Probe(fixture.LogsTurnedAllTheWayDown, forwardedFor: ClientIp);
+
+        Assert.Contains(fixture.TurnedDownSink.Entries, entry =>
+            entry.Level == LogLevel.Warning
+            && entry.Text.StartsWith(
+                "Ignoring forwarded headers from untrusted peer", StringComparison.Ordinal));
     }
 
     // --- forwarded headers end to end -----------------------------------------------------
