@@ -169,7 +169,11 @@ namespace CSGOSkinAPI.Controllers
                 _logger.LogDebug("Fetching inventory for {SteamId} from {InventoryUrl}",
                     steamId, SteamInventoryDocument.BuildUrl(steamid));
 
-                var response = await SteamInventoryDocument.FetchAsync(httpClientFactory, steamid);
+                // Owned by this caller (see SteamInventoryDocument.FetchAsync): the body is already
+                // buffered, and nothing below reads the response past ReadAsStringAsync, so the
+                // `using` frees the buffered content at the end of this block without shortening a
+                // lifetime anything still needs.
+                using var response = await SteamInventoryDocument.FetchAsync(httpClientFactory, steamid);
                 if (!response.IsSuccessStatusCode)
                 {
                     if (response.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
