@@ -247,6 +247,54 @@ public class InventoryWarmServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task CorruptCooldownTimestamp_StillCollapsesToASingleFetch()
+    {
+        // The cooldown is the only thing standing between a burst of cache misses and one full
+        // inventory fetch per miss, and Steam rate-limits that endpoint per server IP with a long
+        // ban behind a 429. So a last_warmed value that cannot be read back has to degrade to "warm
+        // once, then throttle" - never to "warm every time".
+        //
+        // A non-timestamp string is the shape that used to throw out of DateTime.Parse. The throw
+        // escaped WarmInventoryAsync before RecordWarmAsync could arm the cooldown, so the row was
+        // never overwritten and the owner was stuck: the drain loop caught the exception and the
+        // next enqueue hit exactly the same row again, forever.
+        var db = await NewDbAsync();
+        await WriteRawLastWarmedAsync(SteamA, "not-a-timestamp");
+        var (service, handler, _) = NewService(db, _ => Ok(EmptyInventory));
+
+        await service.StartAsync(CancellationToken.None);
+        // The real trigger, as in RepeatEnqueueOfTheSameOwner_FetchesOnce: several items from one
+        // inventory miss at once. SteamB is queued last purely as a drain marker - the queue has a
+        // single serial consumer, so B being fetched proves all three A's have been dealt with.
+        service.Enqueue(SteamA);
+        service.Enqueue(SteamA);
+        service.Enqueue(SteamA);
+        service.Enqueue(SteamB);
+        await WaitForAsync(() => handler.Requested(SteamB), "the queue to drain past the corrupt owner");
+        await service.StopAsync(CancellationToken.None);
+
+        // Bounded: the corrupt row costs the one warm it takes to re-establish the cooldown, and the
+        // repeats behind it collapse into it exactly as an uncorrupted owner's would.
+        Assert.Single(handler.Requests, r => r.Contains($"/inventory/{SteamA}/"));
+        // And the cooldown is armed again, so misses after this one cost nothing at all.
+        Assert.NotNull(await db.GetLastWarmAsync(SteamA));
+    }
+
+    // Writes last_warmed verbatim, bypassing the "o" round-trip format RecordWarmAtAsync uses, so a
+    // test can put a value in the column that no reader can turn back into a timestamp.
+    private async Task WriteRawLastWarmedAsync(ulong steamid, string lastWarmed)
+    {
+        using var connection = new SqliteConnection($"Data Source={_dbPath};foreign keys=true;");
+        await connection.OpenAsync();
+        using var command = new SqliteCommand(
+            @"INSERT OR REPLACE INTO inventory_warms (steamid, last_warmed, items_cached)
+              VALUES (@steamid, @last_warmed, 0)", connection);
+        command.Parameters.AddWithValue("@steamid", (long)steamid);
+        command.Parameters.AddWithValue("@last_warmed", lastWarmed);
+        await command.ExecuteNonQueryAsync();
+    }
+
+    [Fact]
     public async Task CooldownIsRecordedBeforeFetching_SoFailuresAreThrottledToo()
     {
         var db = await NewDbAsync();
