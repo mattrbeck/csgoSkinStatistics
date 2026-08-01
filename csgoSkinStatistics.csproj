@@ -5,6 +5,13 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!-- <Nullable>enable</Nullable> above already makes the compiler run full nullable reference
+         analysis on every build - it was only its output that nothing acted on, so CS8602/CS8604
+         findings scrolled past in the log and shipped. This turns that existing signal into a gate.
+         It lives in the project rather than on a CI switch so `dotnet build`, `dotnet test` and
+         `dotnet publish` all enforce the same bar, locally and in CI, at the moment the warning is
+         introduced. If a build fails here, fix the warning - do not turn this off. -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
 
   <ItemGroup>

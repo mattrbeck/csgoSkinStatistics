@@ -77,6 +77,11 @@ jobs:
     - name: Run linting
       run: npm run lint
 
+    # No -warnaserror here on purpose: TreatWarningsAsErrors is set in both .csproj files instead,
+    # so the nullable analysis that <Nullable>enable</Nullable> was already running gates this
+    # build, the `dotnet test` build above, `dotnet publish` in build-and-package, and every local
+    # build - not just this one step. A CI-only switch would let warnings accumulate on developer
+    # machines and in the test job and only surface here, at the end of the pipeline.
     - name: Build application
       run: dotnet build --no-restore --configuration Release
 

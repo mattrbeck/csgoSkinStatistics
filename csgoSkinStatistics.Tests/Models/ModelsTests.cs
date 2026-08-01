@@ -90,6 +90,16 @@ public class ModelsTests
         var deserialized = JsonSerializer.Deserialize<ConstData>(json);
 
         Assert.NotNull(deserialized);
+        // Every collection on ConstData is nullable, so surviving the round-trip is itself part of
+        // what this test claims. Asserting it explicitly fails with the property name rather than a
+        // bare NullReferenceException from the .Count/.Length below.
+        Assert.NotNull(deserialized.Items);
+        Assert.NotNull(deserialized.Skins);
+        Assert.NotNull(deserialized.Fireice);
+        Assert.NotNull(deserialized.FireiceOrder);
+        Assert.NotNull(deserialized.Doppler);
+        Assert.NotNull(deserialized.Kimonos);
+
         Assert.Equal(2, deserialized.Items.Count);
         Assert.Equal("AK-47", deserialized.Items["7"]);
         Assert.Equal(2, deserialized.Skins.Count);
@@ -152,6 +162,11 @@ public class ModelsTests
         var deserialized = JsonSerializer.Deserialize<SteamInventoryResponse>(json);
 
         Assert.NotNull(deserialized);
+        // assets/descriptions are nullable on the model; a round-trip that dropped them entirely
+        // should read as "assets was null", not as a NullReferenceException inside Assert.Single.
+        Assert.NotNull(deserialized.assets);
+        Assert.NotNull(deserialized.descriptions);
+
         Assert.Single(deserialized.assets);
         Assert.Single(deserialized.descriptions);
         Assert.Equal(730, deserialized.assets[0].appid);
