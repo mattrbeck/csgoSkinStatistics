@@ -440,17 +440,36 @@ namespace CSGOSkinAPI.Controllers
                 return BadRequest(new { error = "Unable to determine profile for the given Steam ID" });
             }
 
-            // Unhandled exceptions bubble to the global handler in Program.cs (generic 500).
             using var httpClient = httpClientFactory.CreateClient("steam");
             httpClient.Timeout = TimeSpan.FromSeconds(5);
 
-            var response = await httpClient.GetAsync(xmlUrl);
-            if (!response.IsSuccessStatusCode)
+            // Fetching and reading the feed is the only part that can fail at the transport level.
+            // Handled the same way GetInventoryData handles it - a connection reset, a timeout, or a
+            // response over the client's MaxResponseContentBufferSize (see Program.cs) is an upstream
+            // failure, not a bug in this server, so it answers 400 in the house error shape rather
+            // than bubbling to the global handler's generic 500. Anything else still bubbles.
+            string xml;
+            try
             {
-                return BadRequest(new { error = $"Failed to fetch profile: {response.StatusCode}" });
+                var response = await httpClient.GetAsync(xmlUrl);
+                if (!response.IsSuccessStatusCode)
+                {
+                    return BadRequest(new { error = $"Failed to fetch profile: {response.StatusCode}" });
+                }
+
+                xml = await response.Content.ReadAsStringAsync();
+            }
+            catch (TaskCanceledException)
+            {
+                return BadRequest(new { error = "Request timed out while fetching profile" });
+            }
+            catch (HttpRequestException ex)
+            {
+                Console.WriteLine($"HTTP error fetching profile: {ex.Message}");
+                return BadRequest(new { error = "Failed to connect to Steam API" });
             }
 
-            var profile = ParseProfileXml(await response.Content.ReadAsStringAsync());
+            var profile = ParseProfileXml(xml);
             if (profile.SteamId == null)
             {
                 return BadRequest(new { error = "Unable to resolve Steam profile" });

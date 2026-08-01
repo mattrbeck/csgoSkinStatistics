@@ -18,6 +18,24 @@ builder.Services.AddHttpClient();
 // connections periodically for DNS hygiene, and an infinite handler lifetime stops IHttpClientFactory
 // from recycling the handler (which would otherwise drop the warm connection pool every 2 minutes).
 builder.Services.AddHttpClient("steam")
+    // Cap how much of an upstream response we will buffer into memory. Every call on this client
+    // (inventory fetch, profile XML, vanity resolve) uses the default HttpCompletionOption
+    // .ResponseContentRead, so HttpClient buffers the whole body before the caller ever sees it -
+    // without a cap a hostile, compromised or simply malfunctioning steamcommunity.com could stream
+    // until the host runs out of memory. Set here rather than at each of the four call sites so
+    // there is one number to reason about.
+    //
+    // Sizing: the biggest thing this client fetches is one count=2000 inventory page. Modelling
+    // that response at its worst case - 2000 assets, 2000 *distinct* description blocks (real
+    // inventories share descriptions across copies of the same skin, so this over-counts heavily),
+    // each with the full descriptions/tags/actions/market_actions payload Steam sends, plus 2000
+    // asset_properties entries carrying the propid-6 certificate hex - gives ~6.0 MB
+    // (2684 B/description + 114 B/asset + 346 B/asset_properties). Our own serialization of that
+    // same inventory is ~3 MB (see the MemoryCache SizeLimit comment below), which is consistent.
+    // 32 MB is ~5x that worst case, so it has to be Steam changing shape by a wide margin - not an
+    // unusually large inventory - before a real response is refused. The profile XML and vanity
+    // resolve responses are ~2 KB and sit far under it.
+    .ConfigureHttpClient(client => client.MaxResponseContentBufferSize = 32 * 1024 * 1024)
     .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
     {
         PooledConnectionIdleTimeout = TimeSpan.FromMinutes(10),
@@ -28,6 +46,18 @@ builder.Services.AddHttpClient("steam")
 // client auto-negotiates and decompresses it. AutomaticDecompression.All includes Brotli and adds
 // the Accept-Encoding header itself.
 builder.Services.AddHttpClient("skinport")
+    // Same memory bound as the "steam" client above, but sized to a much larger feed. Measured
+    // 2026-08-01: the live /v1/items response for app 730 is 21,998 items, 758 KB on the wire
+    // (Brotli) and 9,099,357 bytes - 8.68 MB - once decompressed, at ~414 B/item. The cap applies
+    // to the *decompressed* stream (AutomaticDecompression below unwraps the body before it is
+    // buffered), so it is the 8.68 MB figure that matters, not the 758 KB one - a cap chosen off
+    // the wire size would strangle the feed on day one.
+    //
+    // 64 MB is ~7x today's feed: the CS2 catalogue would have to reach roughly 160,000 items -
+    // seven times its current size - before a legitimate response were refused. Losing this feed
+    // is not fatal either way (RefreshAsync keeps serving the last-known prices), but it is the
+    // response most likely to be strangled by a careless limit, so the headroom is deliberate.
+    .ConfigureHttpClient(client => client.MaxResponseContentBufferSize = 64 * 1024 * 1024)
     .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
     {
         AutomaticDecompression = System.Net.DecompressionMethods.All,
@@ -166,6 +196,50 @@ app.UseRewriter(new RewriteOptions()
     .AddRewrite("^inventory$", "index.html", skipRemainingRules: true));
 app.UseDefaultFiles(); // Must be before UseStaticFiles
 app.UseStaticFiles();
+
+// Every error the API returns is a status code plus a JSON `{ "error": "..." }` body - see
+// InvalidModelStateAsErrorAttribute in SkinController.cs. Two escape that: routing answers an
+// unknown /api path with a bare 404 and a wrong method on a known one with a bare 405, both before
+// an endpoint (and therefore any controller-scoped filter) is ever selected. This fills those in so
+// a caller has exactly one error body to parse.
+//
+// It has to wrap routing rather than sit after it: the 405 is produced by an endpoint the matcher
+// synthesizes, which short-circuits, so a terminal middleware placed after MapControllers would
+// never see it. Sitting here - after UseStaticFiles, before UseRouting - it wraps endpoint
+// selection and nothing else.
+//
+// Deliberately narrow, because rewriting response bodies from middleware is easy to over-apply:
+//   - only /api paths, so the /inventory rewrite, wwwroot files and a missing static file are all
+//     untouched and still answer exactly as before;
+//   - only 404 and 405, so no successful response is ever rewritten;
+//   - only when nothing has been written yet (no content type, no body, response not started), so
+//     an action's own NotFound(new { error = ... }) - which already carries the house shape - is
+//     left alone rather than overwritten.
+app.Use(async (context, next) =>
+{
+    await next();
+
+    var response = context.Response;
+    if (!context.Request.Path.StartsWithSegments("/api", StringComparison.OrdinalIgnoreCase)
+        || response.HasStarted
+        || response.ContentType != null
+        || response.ContentLength is not (null or 0))
+    {
+        return;
+    }
+
+    var error = response.StatusCode switch
+    {
+        StatusCodes.Status404NotFound => "Not found",
+        StatusCodes.Status405MethodNotAllowed => "Method not allowed",
+        _ => null,
+    };
+    if (error != null)
+    {
+        // The 405's Allow header is set by the matcher and survives this - only the body is added.
+        await response.WriteAsJsonAsync(new { error });
+    }
+});
 
 app.UseRouting();
 app.UseRateLimiter();
