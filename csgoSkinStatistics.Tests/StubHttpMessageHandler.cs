@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 
@@ -47,6 +48,73 @@ public sealed class StubHttpMessageHandler : HttpMessageHandler
     // status.
     public StubHttpMessageHandler Throw(string urlContains, Func<Exception> error)
         => Respond(urlContains, HttpResponseMessage () => throw error());
+
+    // An upstream answering with a body far larger than the app is willing to buffer - the case the
+    // named clients' MaxResponseContentBufferSize (Program.cs) exists for.
+    //
+    // The response *declares* `declaredBytes` in Content-Length while actually holding `bodyIfRead`.
+    // HttpClient compares Content-Length against the cap before reading a single byte, so a test can
+    // present a 40 MB response without allocating one - and if the cap is ever removed, the small
+    // body is read normally and the endpoint succeeds, so the assertion flips rather than passing
+    // for the wrong reason. Steam and Skinport both send Content-Length, so this is the realistic
+    // shape; RespondOversizedWithoutLength below covers the one that doesn't.
+    public StubHttpMessageHandler RespondOversized(string urlContains, long declaredBytes, string bodyIfRead,
+        string contentType = "application/json")
+        => Respond(urlContains, () =>
+        {
+            var content = new StringContent(bodyIfRead, Encoding.UTF8, contentType);
+            content.Headers.ContentLength = declaredBytes;
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = content };
+        });
+
+    // An upstream that declares no length and just keeps sending, so there is no Content-Length to
+    // reject up front and the client has to stop itself mid-stream. Bytes are produced as they are
+    // read, so nothing this size is ever held in the test; the total is finite so that a *missing*
+    // cap fails the test instead of hanging it.
+    public StubHttpMessageHandler RespondOversizedWithoutLength(string urlContains, long bytes,
+        string contentType = "application/json")
+        => Respond(urlContains, () =>
+        {
+            var content = new StreamContent(new EndlessStream(bytes));
+            content.Headers.ContentType = new MediaTypeHeaderValue(contentType);
+            content.Headers.ContentLength = null;
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = content };
+        });
+
+    // Yields `length` bytes of filler and then ends. Non-seekable so StreamContent cannot compute a
+    // length from it, which is the whole point.
+    private sealed class EndlessStream(long length) : Stream
+    {
+        private long _produced;
+
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override void Flush() { }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            var produce = (int)Math.Min(count, length - _produced);
+            if (produce <= 0)
+            {
+                return 0;
+            }
+            Array.Fill(buffer, (byte)'x', offset, produce);
+            _produced += produce;
+            return produce;
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
 
     public IReadOnlyList<string> Requests
     {
