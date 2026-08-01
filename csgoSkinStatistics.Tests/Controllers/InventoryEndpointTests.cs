@@ -11,9 +11,11 @@ namespace csgoSkinStatistics.Tests.Controllers;
 // step, the response cache, the single-flight gate and the three-array stitching. Steam is stubbed
 // at the HttpMessageHandler, so every case here is exact about what the endpoint asks Steam for and
 // how often.
-public class InventoryEndpointTests(ApiFactory factory) : IClassFixture<ApiFactory>
+public class InventoryEndpointTests(ApiFactory factory) : IClassFixture<ApiFactory>, IDisposable
 {
     private readonly ApiFactory _factory = factory;
+
+    public void Dispose() => _factory.ResetPerTestState();
 
     // The response cache is keyed by resolved SteamId64 and outlives an individual test (one host
     // serves the whole class), so every test claims an id of its own.
@@ -53,8 +55,9 @@ public class InventoryEndpointTests(ApiFactory factory) : IClassFixture<ApiFacto
     };
 
     // An inventory covering every branch of the stitching loop at once: an asset whose link decodes
-    // locally from its certificate, an asset whose link needs the item cache, an asset whose
-    // description carries no inspect action, and an asset with no description at all.
+    // locally from its certificate, an asset whose link needs the item cache, a second asset sharing
+    // the first one's classid under a different instanceid, an asset whose description carries no
+    // inspect action, and an asset with no description at all.
     private static SteamInventoryResponse FixtureInventory(int totalInventoryCount) => new()
     {
         total = totalInventoryCount,
@@ -65,6 +68,7 @@ public class InventoryEndpointTests(ApiFactory factory) : IClassFixture<ApiFacto
             new() { appid = 730, contextid = "2", assetid = "222", classid = "C2", instanceid = "I2", amount = "1" },
             new() { appid = 730, contextid = "2", assetid = "1003", classid = "C3", instanceid = "I3", amount = "1" },
             new() { appid = 730, contextid = "2", assetid = "1004", classid = "CX", instanceid = "IX", amount = "1" },
+            new() { appid = 730, contextid = "2", assetid = "1005", classid = "C1", instanceid = "I2", amount = "1" },
         ],
         descriptions =
         [
@@ -99,6 +103,26 @@ public class InventoryEndpointTests(ApiFactory factory) : IClassFixture<ApiFacto
             },
             // No actions at all (a case, a graffiti, ...) - never inspectable, so it is dropped.
             new() { classid = "C3", instanceid = "I3", name = "Chroma 3 Case" },
+            // Same classid as the first description, different instanceid. Steam does this routinely
+            // - a name tag, applied stickers or differing description text all mint a new instanceid
+            // under the same class - so the description index has to be keyed on the pair.
+            new()
+            {
+                classid = "C1",
+                instanceid = "I2",
+                name = "AK-47 | Fire Serpent",
+                market_name = "AK-47 | Fire Serpent (Field-Tested)",
+                market_hash_name = "AK-47 | Fire Serpent (Field-Tested)",
+                type = "Covert Rifle",
+                actions = [new() { name = "Inspect in Game...", link = OwnerTemplate }],
+                tags =
+                [
+                    new() { category = "Exterior", localized_tag_name = "Field-Tested" },
+                    new() { category = "Rarity", localized_tag_name = "Covert" },
+                    new() { category = "Quality", localized_tag_name = "Unique" },
+                    new() { category = "Type", localized_tag_name = "Rifle" },
+                ],
+            },
         ],
         asset_properties =
         [
@@ -139,10 +163,10 @@ public class InventoryEndpointTests(ApiFactory factory) : IClassFixture<ApiFacto
         Assert.Equal(1, json.GetProperty("success").GetInt32());
         Assert.Equal(steamId.ToString(), json.GetProperty("steamid").GetString());
 
-        // Two of the four assets are inspectable; the description-less one and the action-less one
+        // Three of the five assets are inspectable; the description-less one and the action-less one
         // are dropped rather than shipped without a link.
         var items = json.GetProperty("csgo_items").EnumerateArray().ToArray();
-        Assert.Equal(2, items.Length);
+        Assert.Equal(3, items.Length);
         Assert.DoesNotContain(items, i => i.GetProperty("assetid").GetString() is "1003" or "1004");
 
         var cert = items[0];
@@ -202,6 +226,19 @@ public class InventoryEndpointTests(ApiFactory factory) : IClassFixture<ApiFacto
         Assert.Equal(steamId, cached.GetProperty("existing_data").GetProperty("s").GetUInt64());
         Assert.Equal(999UL, cached.GetProperty("existing_data").GetProperty("d").GetUInt64());
 
+        // Same classid as `cert`, different instanceid - a different copy of the same skin. Keyed on
+        // classid alone this asset would inherit the C1/I1 description and come back renamed,
+        // retagged, and priced as the StatTrak variant, for part of a real user's inventory.
+        var sameClass = items[2];
+        Assert.Equal("1005", sameClass.GetProperty("assetid").GetString());
+        Assert.Equal("C1", sameClass.GetProperty("classid").GetString());
+        Assert.Equal("I2", sameClass.GetProperty("instanceid").GetString());
+        Assert.Equal("AK-47 | Fire Serpent", sameClass.GetProperty("name").GetString());
+        Assert.Equal("Unique", sameClass.GetProperty("quality").GetString());
+        Assert.Equal(JsonValueKind.Null, sameClass.GetProperty("stattrak_kills").ValueKind);
+        // Priced off its own market_hash_name, not the StatTrak neighbour's 240000.
+        Assert.Equal(125050, sameClass.GetProperty("price").GetProperty("suggested").GetInt32());
+
         Assert.Equal(1, _factory.Http.RequestsMatching(InventoryUrl(steamId)));
     }
 
@@ -222,8 +259,8 @@ public class InventoryEndpointTests(ApiFactory factory) : IClassFixture<ApiFacto
     public async Task TotalMatchingTheReturnedAssetCount_IsNotTruncated()
     {
         var steamId = NextSteamId();
-        // Four assets in the fixture, four reported by Steam - nothing was cut off.
-        _factory.Http.Respond(InventoryUrl(steamId), HttpStatusCode.OK, Serialize(FixtureInventory(totalInventoryCount: 4)));
+        // Five assets in the fixture, five reported by Steam - nothing was cut off.
+        _factory.Http.Respond(InventoryUrl(steamId), HttpStatusCode.OK, Serialize(FixtureInventory(totalInventoryCount: 5)));
 
         var json = await ReadJson(await _factory.CreateClient().GetAsync($"/api/inventory?steamid={steamId}"));
 
@@ -291,7 +328,7 @@ public class InventoryEndpointTests(ApiFactory factory) : IClassFixture<ApiFacto
     public async Task SecondViewer_IsServedFromMemoryWithoutRefetching()
     {
         var steamId = NextSteamId();
-        _factory.Http.Respond(InventoryUrl(steamId), HttpStatusCode.OK, Serialize(FixtureInventory(totalInventoryCount: 4)));
+        _factory.Http.Respond(InventoryUrl(steamId), HttpStatusCode.OK, Serialize(FixtureInventory(totalInventoryCount: 5)));
         var client = _factory.CreateClient();
 
         var first = await client.GetAsync($"/api/inventory?steamid={steamId}");
@@ -473,34 +510,40 @@ public class InventoryEndpointTests(ApiFactory factory) : IClassFixture<ApiFacto
         var steamId = NextSteamId();
         var leaderIsFetching = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        _factory.Http.Respond(InventoryUrl(steamId), HttpStatusCode.OK, Serialize(FixtureInventory(totalInventoryCount: 4)));
+        _factory.Http.Respond(InventoryUrl(steamId), HttpStatusCode.OK, Serialize(FixtureInventory(totalInventoryCount: 5)));
         _factory.Http.Hold = async () =>
         {
             leaderIsFetching.TrySetResult();
-            await release.Task;
+            // Bounded too: a leader parked in here forever would hang every viewer waiting on the
+            // gate behind it. Timing out fails the request instead, which fails the test.
+            await release.Task.WaitAsync(TimeSpan.FromSeconds(20));
         };
 
-        HttpResponseMessage[] responses;
+        var client = _factory.CreateClient();
+        var viewers = Enumerable.Range(0, 8)
+            .Select(_ => client.GetAsync($"/api/inventory?steamid={steamId}"))
+            .ToArray();
+
         try
         {
-            var client = _factory.CreateClient();
-            var viewers = Enumerable.Range(0, 8)
-                .Select(_ => client.GetAsync($"/api/inventory?steamid={steamId}"))
-                .ToArray();
-
-            await leaderIsFetching.Task;
+            // Every wait here is bounded. If nothing ever reaches the stub - a rate-limit rejection,
+            // a routing change, a cache key that hands every viewer a hit - this test has to go red,
+            // not park the whole run on a task no one will ever complete.
+            await leaderIsFetching.Task.WaitAsync(TimeSpan.FromSeconds(10));
             // The assertion below holds however these interleave - a viewer that arrives after the
             // leader finished simply reads the cache - but this pause is what actually parks the
             // other seven on the gate, which is the path worth exercising.
             await Task.Delay(250);
-            release.SetResult();
-
-            responses = await Task.WhenAll(viewers);
         }
         finally
         {
+            // Released from the finally so a failure above can never leave the leader parked inside
+            // the handler, which would hang the eight request tasks and host teardown with them.
+            release.TrySetResult();
             _factory.Http.Hold = null;
         }
+
+        var responses = await Task.WhenAll(viewers).WaitAsync(TimeSpan.FromSeconds(30));
 
         Assert.Equal(1, _factory.Http.RequestsMatching(InventoryUrl(steamId)));
         var bodies = await Task.WhenAll(responses.Select(r => r.Content.ReadAsStringAsync()));
@@ -546,7 +589,7 @@ public class InventoryEndpointTests(ApiFactory factory) : IClassFixture<ApiFacto
         var steamId = NextSteamId();
         const string vanity = "vanity-lookup";
         _factory.Http.RespondXml($"/id/{vanity}/", $"<profile><steamID64>{steamId}</steamID64></profile>");
-        _factory.Http.Respond(InventoryUrl(steamId), HttpStatusCode.OK, Serialize(FixtureInventory(totalInventoryCount: 4)));
+        _factory.Http.Respond(InventoryUrl(steamId), HttpStatusCode.OK, Serialize(FixtureInventory(totalInventoryCount: 5)));
         var client = _factory.CreateClient();
 
         var byVanity = await client.GetAsync($"/api/inventory?steamid={vanity}");

@@ -6,9 +6,11 @@ namespace csgoSkinStatistics.Tests.Controllers;
 
 // End-to-end coverage of GET /api/profile, which the browser calls alongside /api/inventory so item
 // rendering never waits on Steam's profile feed. The feed itself is stubbed.
-public class ProfileEndpointTests(ApiFactory factory) : IClassFixture<ApiFactory>
+public class ProfileEndpointTests(ApiFactory factory) : IClassFixture<ApiFactory>, IDisposable
 {
     private readonly ApiFactory _factory = factory;
+
+    public void Dispose() => _factory.ResetPerTestState();
 
     private static int _nextId;
     private static ulong NextSteamId() => 76561198100000000UL + (ulong)Interlocked.Increment(ref _nextId);

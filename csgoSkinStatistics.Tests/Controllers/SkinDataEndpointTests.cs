@@ -8,9 +8,11 @@ namespace csgoSkinStatistics.Tests.Controllers;
 // End-to-end coverage of GET /api, the single-item lookup. It has three ways to answer - decode a
 // self-contained certificate, read the item cache, or ask the Game Coordinator - and the order
 // between them is the point.
-public class SkinDataEndpointTests(ApiFactory factory) : IClassFixture<ApiFactory>
+public class SkinDataEndpointTests(ApiFactory factory) : IClassFixture<ApiFactory>, IDisposable
 {
     private readonly ApiFactory _factory = factory;
+
+    public void Dispose() => _factory.ResetPerTestState();
 
     private const ulong Owner = 76561198200000001UL;
 

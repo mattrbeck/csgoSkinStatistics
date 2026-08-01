@@ -13,8 +13,14 @@ namespace csgoSkinStatistics.Tests;
 // process boundaries stubbed: no Steam login, nothing that leaves the machine, and a throwaway
 // database and catalog directory per factory so two test classes can never share state on disk.
 //
-// One factory serves a whole test class (xunit runs a class's tests sequentially), so tests must
-// pick distinct steamids: the inventory cache lives for the life of the host.
+// One factory serves a whole test class (xunit runs a class's tests sequentially).
+//
+// Steamids must be distinct across EVERY class in the assembly, not just within one, and for the
+// whole life of the process. Two things are keyed by resolved SteamId64 and they have different
+// lifetimes: IMemoryCache is per-host, so a repeated id inside a class serves a stale response, but
+// SkinController.InventoryFetchGates is a `static` dictionary shared by every host in the process -
+// so two classes running in parallel on the same id contend on one gate across hosts, and get
+// either a double fetch or a stall. NextSteamId() in each test class hands out its own range.
 public sealed class ApiFactory : WebApplicationFactory<Program>
 {
     private readonly CatalogDirectory _catalogs;
@@ -62,6 +68,13 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
+        // TestServer leaves RemoteIpAddress null, so every request from every test in a class lands
+        // in the rate limiter's single "unknown" partition and draws on one shared token budget.
+        // Production's 40 tokens is under 2 requests of headroom for this class and gets tighter on
+        // faster hardware (less wall clock, so less replenishment). The limiter is infrastructure
+        // these tests aren't exercising; take it out of the picture rather than budget around it.
+        builder.UseSetting("RateLimiting:TokenLimit", "1000000");
+
         builder.ConfigureServices(services =>
         {
             // SteamService's public constructor throws without credentials, and Program.cs kicks off
@@ -90,6 +103,15 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
             services.AddHttpClient("steam").ConfigurePrimaryHttpMessageHandler(() => Http);
             services.AddHttpClient("skinport").ConfigurePrimaryHttpMessageHandler(() => Http);
         });
+    }
+
+    // Clears the state a single test sets on these class-scoped doubles - the stub's response hold
+    // and the fake GC's canned answer. Test classes call this from Dispose, which xunit runs after
+    // every test, so one test's setup can never still be in force during the next one.
+    public void ResetPerTestState()
+    {
+        Http.Hold = null;
+        Steam.Reset();
     }
 
     protected override IHost CreateHost(IHostBuilder builder)

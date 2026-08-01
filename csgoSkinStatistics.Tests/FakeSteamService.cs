@@ -17,6 +17,14 @@ public sealed class FakeSteamService() : SteamService(loadAccounts: false)
 
     public int Calls => Volatile.Read(ref _calls);
 
+    // This service is a class-scoped fixture, so a canned answer left behind would still be
+    // answering during the next test. Test classes reset it after every test.
+    public void Reset()
+    {
+        Respond = (_, _, _, _) => null;
+        Interlocked.Exchange(ref _calls, 0);
+    }
+
     public override Task<CEconItemPreviewDataBlock?> GetItemInfoAsync(ulong s, ulong a, ulong d, ulong m)
     {
         Interlocked.Increment(ref _calls);
