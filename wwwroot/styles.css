@@ -380,6 +380,76 @@ body.mode-item #item-card-outer { display: flex; }
   }
 }
 
+/* A hex inspect link decodes in the browser, so the card can render the raw values immediately
+   while the server fills in everything that needs a catalog (names, images, prices). Those
+   still-loading slots MUST NOT look like an answer: a "-" or a 0 would claim we looked and found
+   nothing. They get a shimmering bar sized to the value they will hold, so the shape of the card
+   is stable and the wait is obviously a wait. */
+.field-pending {
+  display: inline-block;
+  width: var(--pending-w, 6ch);
+  height: 0.85em;
+  vertical-align: -0.05em;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--light) 25%, #47566a 45%, var(--light) 65%);
+  background-size: 300% 100%;
+  animation: field-pending-sweep 1.3s ease-in-out infinite;
+}
+
+@keyframes field-pending-sweep {
+  from {
+    background-position: 120% 0;
+  }
+
+  to {
+    background-position: -20% 0;
+  }
+}
+
+/* The request failed outright. The value still exists - we just couldn't look it up - so say that,
+   rather than falling back to the "-" that means "this item has no such value". */
+.field-unavailable {
+  font-style: italic;
+  color: #8a97a6;
+}
+
+/* The skin image is an opaque Steam CDN hash the certificate doesn't carry. The frame's
+   placeholder glyph already means "there is no image for this item", so while we're waiting we
+   shimmer the frame and hide the glyph instead (see the rule beside .card-image-placeholder). */
+.card-image-frame.media-pending {
+  position: relative;
+  overflow: hidden;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--light) 25%, #47566a 45%, var(--light) 65%);
+  background-size: 300% 100%;
+  animation: field-pending-sweep 1.3s ease-in-out infinite;
+}
+
+/* Decal chips render from the cert's ids straight away, but their names and thumbnails are a
+   catalog lookup. buildStickerChips already draws a "?" chip for an id the catalog predates, so
+   these pulse to distinguish "still loading" from "genuinely unknown". */
+.sticker-chip.pending,
+.special-chip.pending {
+  opacity: 0.55;
+  animation: decal-pending-pulse 1.3s ease-in-out infinite;
+}
+
+@keyframes decal-pending-pulse {
+  50% {
+    opacity: 0.85;
+  }
+}
+
+/* Respect a reduced-motion preference: keep the distinct "unknown" appearance, drop the movement. */
+@media (prefers-reduced-motion: reduce) {
+  .field-pending,
+  .card-image-frame.media-pending,
+  .sticker-chip.pending,
+  .special-chip.pending {
+    animation: none;
+  }
+}
+
 /* Brief highlight when a repeat search moves an existing card back to the top. */
 .item-card.resurfaced {
   animation: resurface-flash 0.7s ease;
@@ -430,6 +500,12 @@ body.mode-item #item-card-outer { display: flex; }
 
 .card-image:not([src]) + .card-image-placeholder {
   display: block;
+}
+
+/* ...except while a cert-decoded card is waiting on the server for the image: "no image" and
+   "not looked up yet" must not render identically. The frame shimmers instead (see .media-pending). */
+.card-image-frame.media-pending .card-image-placeholder {
+  visibility: hidden;
 }
 
 .card-body {

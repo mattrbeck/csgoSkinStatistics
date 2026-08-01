@@ -207,11 +207,171 @@ function renderRecents() {
   host.hidden = false;
 }
 
+// ---------------------------------------------------------------------------
+// Optimistic client-side cert decode
+//
+// A hex inspect link carries the item's raw data inside itself, so the browser can read the
+// scalars without waiting for /api. wwwroot/cert-decode.js does that; this section loads it
+// lazily, renders what it produces, and reconciles when the server's fuller answer lands.
+//
+// Two rules govern everything below:
+//  1. The decoded data is UNAUTHENTICATED (the cert's trailing bytes are a CRC32, not a MAC), so
+//     it is never persisted, never sent anywhere, and never enters Recent lookups or any storage.
+//     It is a local render and nothing else.
+//  2. A field the client cannot know must LOOK unknown. Writing "-" or 0 into it would claim we
+//     looked and found nothing, which is a lie while the request is still in flight.
+// ---------------------------------------------------------------------------
+
+// Cheap enough to run on every search, and deliberately duplicated from cert-decode.js's
+// looksLikeHexCert: the whole point is to decide whether to download that module at all, so we
+// cannot ask it first. Kept in sync by tests/post-cert.test.js.
+function isHexCertKey(key) {
+  const s = String(key || "");
+  return s.length >= 34 && s.length <= 2048 && s.length % 2 === 0 && /^[0-9A-Fa-f]+$/.test(s);
+}
+
+// Memoised dynamic import, so the decoder is fetched once, only on the first hex-cert search, and
+// never at all for s/a/d links or profile lookups. A classic script resolves import() against the
+// document base URL, which is the site root here, so "./cert-decode.js" is /cert-decode.js.
+// Same-origin, so `script-src 'self'` permits it.
+let certDecoderPromise = null;
+// The resolved module, kept so the reconciliation step (which runs synchronously inside the fetch
+// handler) can reach it without awaiting. Null until the first successful import - which is fine,
+// because there is then no local decode to reconcile either.
+let certReconciler = null;
+function loadCertDecoder() {
+  if (!certDecoderPromise) {
+    // A failed import (offline, 404) must not break the ordinary server-backed flow, so it
+    // resolves to null and the caller simply skips the optimistic render.
+    certDecoderPromise = import("./cert-decode.js")
+      .then((mod) => { certReconciler = mod; return mod; })
+      .catch(() => null);
+  }
+  return certDecoderPromise;
+}
+
+// A field we are still waiting on the server for. Visually a shimmering bar, NOT a dash or a
+// zero - "we don't know yet" has to be distinguishable from "there is nothing here".
+function pendingField(chars) {
+  const el = document.createElement("span");
+  el.className = "field-pending";
+  el.style.setProperty("--pending-w", `${chars}ch`);
+  el.setAttribute("aria-label", "Loading");
+  el.title = "Waiting for the server";
+  return el;
+}
+
+// The server never answered. Swap every shimmer for an explicit, honest "unavailable" marker:
+// still not a dash, because the value exists - we just could not fetch it.
+function markServerFieldsUnavailable(card) {
+  card.querySelectorAll(".field-pending").forEach((el) => {
+    const mark = document.createElement("span");
+    mark.className = "field-unavailable";
+    mark.textContent = "unavailable";
+    mark.title = "The server could not be reached, so this could not be looked up";
+    el.replaceWith(mark);
+  });
+  card.querySelector(".card-image-frame")?.classList.remove("media-pending");
+  card.querySelectorAll(".sticker-chip.pending").forEach((chip) => chip.classList.remove("pending"));
+}
+
+// Render everything the cert alone can tell us. Server-only slots get a shimmer.
+// DOM nodes only, never innerHTML - every value here came from a link a stranger can craft.
+function populateCardOptimistic(card, item, url) {
+  card.classList.remove("loading");
+  card.dataset.source = "cert"; // marks the card as showing link-derived data only
+  const q = (sel) => card.querySelector(sel);
+
+  // Name: weapon/skin need const.json, so the whole name is pending. StatTrak, though, is a raw
+  // proto fact, so the badge (and the live kill count) render immediately.
+  const nameEl = q(".card-name");
+  nameEl.className = "card-name";
+  if (item.is_knife_or_glove) nameEl.classList.add("knife");
+  nameEl.replaceChildren(pendingField(18));
+  if (item.stattrak) {
+    const badge = document.createElement("span");
+    badge.className = "stattrak-badge";
+    badge.textContent = "ST";
+    if (item.stattrak_kills != null) {
+      const detail = document.createElement("span");
+      detail.className = "st-detail";
+      detail.textContent = `: ${item.stattrak_kills.toLocaleString()} Kills`;
+      badge.appendChild(detail);
+      badge.tabIndex = 0;
+    }
+    nameEl.appendChild(badge);
+  }
+
+  // The rarity NUMBER is in the cert, but its name and colour come from const.json, so both the
+  // label and the card's left edge stay pending rather than guessing a colour.
+  q(".card-rarity").replaceChildren(pendingField(9));
+
+  const hasSkin = Number(item.paintindex) > 0;
+  if (hasSkin) {
+    const paintwear = Number(item.paintwear_float);
+    q(".card-float").textContent = item.paintwear_float;
+    q(".card-wear-pill").replaceChildren(buildWearPill(paintwear));
+    q(".card-float-bar-slot").replaceChildren(buildFloatBar(paintwear, Number(item.paintindex), floatRanges));
+  } else {
+    q(".card-float-line").style.display = "none";
+  }
+  q(".card-seed").style.display = hasSkin ? "" : "none";
+  q(".card-paintseed").textContent = item.paintseed;
+
+  // Rare-pattern chip. Absence of a chip means "ordinary pattern", so on a skin we have to show a
+  // pending chip instead - otherwise a 98% Fade would read as unremarkable for the whole wait.
+  q(".card-pattern-line").querySelector(".special-chip")?.remove();
+  if (hasSkin) {
+    const chip = document.createElement("span");
+    chip.className = "special-chip pending";
+    chip.title = "Checking for a rare pattern";
+    chip.appendChild(pendingField(4));
+    q(".card-seed").after(chip);
+  }
+
+  // wear_name is computed from thresholds hardcoded in the server's GetWearFromFloat, not from a
+  // catalog, so the client reproduces it exactly. quality/origin names are const.json lookups.
+  // Written unconditionally, exactly as populateCard does: a paint-less item reports "Factory New"
+  // (paintwear 0 -> 0.0) on both sides, so the value doesn't change under the user when /api lands.
+  q(".card-wear").textContent = item.wear_name || "-";
+  q(".card-quality").replaceChildren(pendingField(7));
+  q(".card-origin").replaceChildren(pendingField(8));
+  q(".card-itemid").textContent = item.itemid == 0 ? "Unknown" : item.itemid;
+
+  // The image is an opaque Steam CDN hash the cert does not carry. The frame's placeholder glyph
+  // already means "no image", so shimmer the frame instead of showing it.
+  const img = q(".card-image");
+  img.removeAttribute("src");
+  q(".card-image-frame").classList.add("media-pending");
+
+  // We know each decal's id but not its name or picture. buildStickerChips already draws a "?"
+  // placeholder chip labelled "Sticker #<id>" for ids the catalog predates; the extra .pending
+  // class distinguishes "still loading" from that genuinely-unknown case.
+  const hasDecals = item.stickers.length > 0 || item.keychains.length > 0;
+  const stickers = q(".item-stickers");
+  if (hasDecals) {
+    stickers.replaceChildren(buildStickerChips(item.stickers, item.keychains));
+    stickers.querySelectorAll(".sticker-chip").forEach((chip) => chip.classList.add("pending"));
+  } else {
+    stickers.replaceChildren();
+  }
+  stickers.style.display = hasDecals ? "" : "none";
+
+  const inspect = q(".card-inspect");
+  inspect.href = url;
+  enableLongPressCopy(inspect);
+  q(".card-loadtime").textContent = "Decoded from the link";
+}
+
 // Fill a freshly-cloned card with one item's data. All lookups are scoped to the card so
 // many results can coexist on the page. Built as DOM nodes, never innerHTML: the names are
 // remote data.
 function populateCard(card, iteminfo, url, loadTime) {
   card.classList.remove("loading");
+  // The server's answer supersedes any optimistic render, so drop its pending affordances.
+  // Most slots are overwritten below anyway; these two are state on other elements.
+  delete card.dataset.source;
+  card.querySelector(".card-image-frame")?.classList.remove("media-pending");
   const q = (sel) => card.querySelector(sel);
 
   renderName(q(".card-name"), iteminfo);
@@ -228,9 +388,12 @@ function populateCard(card, iteminfo, url, loadTime) {
   const hasSkin = Number(iteminfo.paintindex) > 0;
   if (hasSkin && iteminfo.paintwear_float != null) {
     const paintwear = Number(iteminfo.paintwear_float);
+    // replaceChildren, not appendChild: an optimistic cert render may already have drawn a pill
+    // and a bar into these slots, and appending would stack a second copy on top.
+    q(".card-float-line").style.display = "";
     q(".card-float").textContent = iteminfo.paintwear_float;
-    q(".card-wear-pill").appendChild(buildWearPill(paintwear));
-    q(".card-float-bar-slot").appendChild(buildFloatBar(paintwear, Number(iteminfo.paintindex), floatRanges));
+    q(".card-wear-pill").replaceChildren(buildWearPill(paintwear));
+    q(".card-float-bar-slot").replaceChildren(buildFloatBar(paintwear, Number(iteminfo.paintindex), floatRanges));
   } else {
     q(".card-float-line").style.display = "none";
   }
@@ -502,12 +665,36 @@ function post(url, key) {
     card.classList.remove("pending");
   };
 
+  // Optimistic local decode, in parallel with the request below. `certItem` is set only if the
+  // decode actually landed BEFORE the server answered, which is what the reconciliation and the
+  // offline path key off. It is never persisted and never leaves the page.
+  let certItem = null;
+  if (isHexCertKey(key)) {
+    loadCertDecoder().then((decoder) => {
+      // settled ⇒ the server already answered (or errored) and owns the card now.
+      if (!decoder || settled) return;
+      const result = decoder.decodeCertToItemInfo(key);
+      if (!result.ok) return; // the server's verdict on a malformed cert is the one that counts
+      certItem = result.item;
+      reveal();
+      populateCardOptimistic(card, certItem, url);
+    });
+  }
+
   const start = performance.now();
   fetch(`/api?${new URLSearchParams({url})}`)
     .then((response) => response.json())
     .then((iteminfo) => {
       if (iteminfo.error) {
         reveal();
+        // We decoded the link ourselves, so we DO have real item data; the server just could not
+        // enrich it. Keep what we rendered and explain the gap rather than throwing it away.
+        if (certItem) {
+          markServerFieldsUnavailable(card);
+          card.querySelector(".card-submessage").textContent =
+            `Showing data decoded from the link only — ${iteminfo.error}`;
+          return;
+        }
         renderErrorCard(card, iteminfo.error);
         return;
       }
@@ -529,9 +716,21 @@ function post(url, key) {
       const loadTime = ((performance.now() - start) / 1000).toFixed(2);
       reveal();
       try {
+        // RECONCILIATION: the server wins, every field, unconditionally. It decoded the same cert
+        // with the authoritative parser AND has the catalogs, so populateCard simply overwrites
+        // the optimistic render. The only thing worth surfacing is a raw-field disagreement: an
+        // itemid encodes an immutable config, so the two decoders must agree on those, and if they
+        // don't, one of them is wrong and the user should not be the last to know.
+        // stattrak_kills and inventory are excluded from that check on purpose - they drift under a
+        // fixed itemid, and a cached server row can legitimately trail the live count.
         populateCard(card, iteminfo, url, loadTime);
+        if (certItem) {
+          reconcileCertRender(card, certItem, iteminfo);
+        }
         if (assetId) cardsByAssetId.set(assetId, card);
         card._iteminfo = iteminfo; // stash so a later re-view (from cache) can re-record it
+        // Note: only ever the SERVER's item. Recent lookups are localStorage-backed, and
+        // client-decoded data must never be persisted.
         addRecentItem(iteminfo, key);
       } catch (e) {
         renderErrorCard(card, "An error occurred while displaying the item data");
@@ -540,6 +739,17 @@ function post(url, key) {
     })
     .catch(() => {
       reveal();
+      // Offline / timeout / 500 with a local decode in hand: keep it. Losing real data the user
+      // can already see, to replace it with "Failed to load", is strictly worse than saying which
+      // parts are missing.
+      if (certItem) {
+        markServerFieldsUnavailable(card);
+        card.querySelector(".card-submessage").textContent =
+          "Offline — showing only what the inspect link itself contains.";
+        // Not cached for the session: the next search should retry the server.
+        cardsByInput.delete(key);
+        return;
+      }
       renderErrorCard(card, "Failed to load item details");
       // A one-off network blip shouldn't be resurfaced for the rest of the session the way a
       // server-reported error intentionally is. Drop the cached card so a re-search retries the
@@ -548,10 +758,29 @@ function post(url, key) {
     });
 }
 
+// Flag a client/server disagreement on a field that cannot legitimately differ. Purely additive:
+// the card already shows the server's values, this just says the local decode read them
+// differently. Silence here would hide a decoder bug behind a plausible-looking card.
+function reconcileCertRender(card, certItem, iteminfo) {
+  const decoder = certReconciler;
+  if (!decoder) return;
+  const mismatched = decoder.diffAgainstServer(certItem, iteminfo);
+  if (!mismatched.length) return;
+  card.dataset.certMismatch = mismatched.join(",");
+  const note = card.querySelector(".card-submessage");
+  note.textContent =
+    `Heads up: the link decoded differently to the server for ${mismatched.join(", ")}. Showing the server's values.`;
+  console.warn("cert decode disagreed with the server", mismatched, { certItem, iteminfo });
+}
+
 // Exposed for unit tests under Node/CommonJS. The browser has no `module`, so this is skipped
 // there and the functions stay ordinary globals loaded via <script>.
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { renderName, renderErrorCard };
+  module.exports = {
+    renderName, renderErrorCard, populateCard,
+    isHexCertKey, populateCardOptimistic, markServerFieldsUnavailable, reconcileCertRender,
+    post, initSearch,
+  };
 }
 
 // Bootstrap last, so everything this module defines (post(), LOADING_DELAY_MS, …) is

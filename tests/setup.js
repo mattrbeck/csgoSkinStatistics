@@ -1,6 +1,13 @@
 // Jest setup file
 require('@testing-library/jest-dom');
 
+// jsdom does not expose TextDecoder, but every browser we target does (it is how cert-decode.js
+// reads the UTF-8 `customname` string out of the protobuf). Supply Node's implementation so the
+// test environment matches the real one rather than silently exercising a fallback path.
+if (typeof global.TextDecoder === 'undefined') {
+  global.TextDecoder = require('util').TextDecoder;
+}
+
 // Mock console methods to reduce noise in tests
 global.console = {
   ...console,
