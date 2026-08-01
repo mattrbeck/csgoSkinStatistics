@@ -22,6 +22,17 @@ namespace CSGOSkinAPI.Services
 
         private readonly ILogger<ConstDataService> _logger;
 
+        // Warn once per unknown id rather than once per item. A catalogue that predates a case
+        // release is missing the same handful of ids on every item of every inventory viewed, and
+        // an /api/inventory request covers up to 2000 items - so the per-item form is a log flood
+        // that scales with traffic, which by this codebase's own level rule disqualifies it from
+        // being a Warning at all. Deduplicated it stays a Warning honestly: the first line already
+        // says everything the operator needs (regenerate const.json), and repeats add nothing.
+        // Per-instance, which for the DI singleton means per process; a test's own service gets
+        // its own set, which is what a test wants.
+        private readonly ConcurrentDictionary<uint, byte> _warnedMissingItems = new();
+        private readonly ConcurrentDictionary<uint, byte> _warnedMissingSkins = new();
+
         // Production: the catalogs sit beside the app, so they resolve against the working directory
         // exactly as a bare relative path would.
         public ConstDataService(ILogger<ConstDataService> logger)
@@ -169,7 +180,7 @@ namespace CSGOSkinAPI.Services
                 return weapon;
             }
 
-            if (warnIfMissing)
+            if (warnIfMissing && _warnedMissingItems.TryAdd(defIndex, 0))
             {
                 _logger.LogWarning("Item {DefIndex} is missing from constants", defIndex);
             }
@@ -183,7 +194,10 @@ namespace CSGOSkinAPI.Services
                 return pattern;
             }
 
-            _logger.LogWarning("Skin {PaintIndex} is missing from constants", paintIndex);
+            if (_warnedMissingSkins.TryAdd(paintIndex, 0))
+            {
+                _logger.LogWarning("Skin {PaintIndex} is missing from constants", paintIndex);
+            }
             return "";
         }
 

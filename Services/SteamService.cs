@@ -182,7 +182,13 @@ namespace CSGOSkinAPI.Services
                         return await tcs.Task; // GC responded (success or null item)
                     }
 
-                    _logger.LogDebug("[{SteamAccount}] Request timed out for job {ItemId}, trying next account...", accountManager.Account.Username, jobId);
+                    // Information, not Debug, even though it is an intermediate retry the loop
+                    // absorbs: this is the only signal that a specific account has gone bad. At
+                    // Debug an account silently failing every lookup presents in production as
+                    // nothing but latency, with the log staying quiet until ALL accounts fail.
+                    _logger.LogInformation(
+                        "[{SteamAccount}] Request timed out for job {ItemId}, trying next account...",
+                        accountManager.Account.Username, jobId);
                 }
 
                 _logger.LogError("All account attempts failed for itemid {ItemId}", jobId);

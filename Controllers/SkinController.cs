@@ -6,8 +6,21 @@ namespace CSGOSkinAPI.Controllers
     [Route("api")]
     [EnableRateLimiting("api")]
     [InvalidModelStateAsError]
-    public partial class SkinController(SteamService steamService, DatabaseService dbService, ConstDataService constDataService, IHttpClientFactory httpClientFactory, InventoryWarmService warmService, IMemoryCache cache, PriceService priceService, ILogger<SkinController> logger) : ControllerBase
+    public partial class SkinController(SteamService steamService, DatabaseService dbService, ConstDataService constDataService, IHttpClientFactory httpClientFactory, InventoryWarmService warmService, IMemoryCache cache, PriceService priceService, ILoggerFactory loggerFactory) : ControllerBase
     {
+        // Everything this controller reports about its own work.
+        private readonly ILogger _logger = loggerFactory.CreateLogger<SkinController>();
+
+        // Malformed inspect links, which are a different kind of event and belong on a
+        // different knob: they are not a fault of ours, the caller already has their answer
+        // (a 400), their volume is set by whoever is calling rather than by anything the app
+        // is doing, and the line carries up to MaxLoggedLength characters of the caller's
+        // choosing. Sharing a category with the app's own diagnostics would mean muting a
+        // flood of them costs you the diagnostics too. CSGOSkinAPI.RateLimiting exists for
+        // exactly the same reason. Both are documented in appsettings.json.
+        internal const string InspectLinkLogCategory = "CSGOSkinAPI.InspectLinks";
+        private readonly ILogger _inspectLogger = loggerFactory.CreateLogger(InspectLinkLogCategory);
+
         // SteamID64 of the first individual account; anything below is not a profile id.
         private const ulong MinSteamId64 = 76561197960265729;
 
@@ -46,10 +59,12 @@ namespace CSGOSkinAPI.Controllers
             // Unhandled exceptions bubble to the global handler in Program.cs (generic 500).
             if (!string.IsNullOrEmpty(url))
             {
-                var parsed = ParseInspectUrl(url, logger);
+                // ParseInspectUrl has already logged the failure, with the URL as a field and
+                // under the inspect-link category; a second line here would say strictly less
+                // about the same request.
+                var parsed = ParseInspectUrl(url, _inspectLogger);
                 if (parsed == null)
                 {
-                    logger.LogWarning("Failed to parse inspect URL");
                     return BadRequest(new { error = "Invalid inspect URL format" });
                 }
 
@@ -82,7 +97,7 @@ namespace CSGOSkinAPI.Controllers
             // links carry no owner id, so they can't be warmed.
             if (s >= MinSteamId64)
             {
-                logger.LogDebug(
+                _logger.LogDebug(
                     "Cache miss for item {ItemId}; queueing inventory warm for owner {SteamId}", a, s);
                 warmService.Enqueue(s);
             }
@@ -99,7 +114,7 @@ namespace CSGOSkinAPI.Controllers
             var itemInfo = await steamService.GetItemInfoAsync(s, a, d, m);
             if (itemInfo == null)
             {
-                logger.LogWarning("Steam GC returned no item for itemid {ItemId}", a);
+                _logger.LogWarning("Steam GC returned no item for itemid {ItemId}", a);
                 return NotFound(new { error = "Steam GC did not return an item" });
             }
 
@@ -162,7 +177,7 @@ namespace CSGOSkinAPI.Controllers
                 httpClient.Timeout = TimeSpan.FromSeconds(10);
                 
                 var inventoryUrl = $"https://steamcommunity.com/inventory/{steamid}/730/2?l=english&count=2000";
-                logger.LogDebug("Fetching inventory for {SteamId} from {InventoryUrl}", steamId, inventoryUrl);
+                _logger.LogDebug("Fetching inventory for {SteamId} from {InventoryUrl}", steamId, inventoryUrl);
                 
                 var response = await httpClient.GetAsync(inventoryUrl);
                 if (!response.IsSuccessStatusCode)
@@ -174,13 +189,13 @@ namespace CSGOSkinAPI.Controllers
                         var retryAfter = response.Headers.RetryAfter?.Delta;
                         if (retryAfter is TimeSpan retryDelay)
                         {
-                            logger.LogWarning(
+                            _logger.LogWarning(
                                 "Steam inventory rate limited (429) for {SteamId}; Retry-After {RetryAfterSeconds:0}s",
                                 steamId, retryDelay.TotalSeconds);
                         }
                         else
                         {
-                            logger.LogWarning(
+                            _logger.LogWarning(
                                 "Steam inventory rate limited (429) for {SteamId}", steamId);
                         }
                         return CacheInventoryFailure(cacheKey, StatusCodes.Status429TooManyRequests,
@@ -192,7 +207,7 @@ namespace CSGOSkinAPI.Controllers
                         return CacheInventoryFailure(cacheKey, StatusCodes.Status400BadRequest,
                             "Inventory is private or user does not exist", NegativeInventoryCacheTtl);
                     }
-                    logger.LogWarning(
+                    _logger.LogWarning(
                         "Steam inventory fetch for {SteamId} failed: {StatusCode} {StatusName}",
                         steamId, (int)response.StatusCode, response.StatusCode);
                     return CacheInventoryFailure(cacheKey, StatusCodes.Status400BadRequest,
@@ -273,7 +288,7 @@ namespace CSGOSkinAPI.Controllers
                     propsByAsset.TryGetValue(asset.assetid, out var assetProps);
                     var inspectLink = BuildInspectLink(inspectAction.link, assetProps, steamid, asset.assetid);
 
-                    var parsed = ParseInspectUrl(inspectLink, logger);
+                    var parsed = ParseInspectUrl(inspectLink, _inspectLogger);
                     if (parsed.HasValue && parsed.Value.directItem == null)
                     {
                         idsToLookUp.Add(parsed.Value.a);
@@ -367,7 +382,7 @@ namespace CSGOSkinAPI.Controllers
                     csgo_items = csgoItems
                 };
 
-                logger.LogDebug(
+                _logger.LogDebug(
                     "Successfully parsed {ParsedCount} CS2 items from {TotalCount} total items",
                     csgoItems.Count, inventoryData.total);
 
@@ -388,12 +403,12 @@ namespace CSGOSkinAPI.Controllers
             }
             catch (HttpRequestException ex)
             {
-                logger.LogWarning(ex, "HTTP error fetching inventory");
+                _logger.LogWarning(ex, "HTTP error fetching inventory");
                 return BadRequest(new { error = "Failed to connect to Steam API" });
             }
             catch (JsonException ex)
             {
-                logger.LogWarning(ex, "JSON parsing error reading the Steam inventory response");
+                _logger.LogWarning(ex, "JSON parsing error reading the Steam inventory response");
                 return BadRequest(new { error = "Invalid response from Steam API" });
             }
             // Anything else bubbles to the global handler in Program.cs (generic 500). Note the
@@ -479,7 +494,7 @@ namespace CSGOSkinAPI.Controllers
             }
             catch (HttpRequestException ex)
             {
-                logger.LogWarning(ex, "HTTP error fetching profile");
+                _logger.LogWarning(ex, "HTTP error fetching profile");
                 return BadRequest(new { error = "Failed to connect to Steam API" });
             }
 
@@ -600,7 +615,7 @@ namespace CSGOSkinAPI.Controllers
                 var response = await httpClient.GetAsync(xmlUrl);
                 if (!response.IsSuccessStatusCode)
                 {
-                    logger.LogWarning("Steam profile request failed: {StatusCode}", response.StatusCode);
+                    _logger.LogWarning("Steam profile request failed: {StatusCode}", response.StatusCode);
                     return null;
                 }
 
@@ -611,13 +626,13 @@ namespace CSGOSkinAPI.Controllers
                     return steamId;
                 }
 
-                logger.LogWarning(
+                _logger.LogWarning(
                     "Failed to resolve custom URL '{Vanity}' to SteamId64", ForLog(customUrl));
                 return null;
             }
             catch (Exception ex)
             {
-                logger.LogWarning(ex, "Error resolving custom URL '{Vanity}'", ForLog(customUrl));
+                _logger.LogWarning(ex, "Error resolving custom URL '{Vanity}'", ForLog(customUrl));
                 return null;
             }
         }
