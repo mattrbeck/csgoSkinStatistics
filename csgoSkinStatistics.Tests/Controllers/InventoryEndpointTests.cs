@@ -567,18 +567,31 @@ public class InventoryEndpointTests(ApiFactory factory) : IClassFixture<ApiFacto
     }
 
     [Theory]
-    [InlineData("/api/inventory")]
-    [InlineData("/api/inventory?steamid=")]
-    public async Task MissingSteamId_Is400FromModelBinding(string path)
+    [InlineData("/api/inventory")]                 // no parameter at all
+    [InlineData("/api/inventory?steamid=")]        // present but empty
+    [InlineData("/api/inventory?steamid=%20")]     // a single space
+    [InlineData("/api/inventory?steamid=%20%20%20")] // whitespace only
+    [InlineData("/api/inventory?steamid=%09")]     // a tab
+    public async Task MissingOrBlankSteamId_Is400InTheSameErrorShapeAsEveryOtherFailure(string path)
     {
-        // `steamid` is a non-nullable string on an [ApiController], so MVC treats it as required and
-        // rejects a missing or blank value with a ValidationProblem before the action runs. The
-        // action's own IsNullOrEmpty guard is therefore never reached over HTTP; what callers
-        // actually see is this, so this is what's pinned.
+        // `steamid` is nullable precisely so this reaches the action's own guard. A non-nullable
+        // string on an [ApiController] is implicitly required, and MVC would answer a missing or
+        // blank value with an RFC-9110 ProblemDetails - application/problem+json, no `error` field -
+        // making this the one error on the endpoint a caller couldn't read like the rest.
+        var before = _factory.Http.RequestsMatching("steamcommunity.com");
+
         var response = await _factory.CreateClient().GetAsync(path);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        Assert.Contains("steamid", (await ReadJson(response)).GetProperty("errors").ToString());
+        Assert.Equal("application/json", response.Content.Headers.ContentType?.MediaType);
+        var json = await ReadJson(response);
+        Assert.Equal("Steam ID is required", json.GetProperty("error").GetString());
+        Assert.False(json.TryGetProperty("errors", out _));
+        Assert.False(json.TryGetProperty("title", out _));
+        // Whitespace was rejected before by the implicit RequiredAttribute, which trims. The guard
+        // is IsNullOrWhiteSpace rather than IsNullOrEmpty so a blank value still never travels on
+        // into a resolve or a steamcommunity.com fetch.
+        Assert.Equal(before, _factory.Http.RequestsMatching("steamcommunity.com"));
     }
 
     [Fact]

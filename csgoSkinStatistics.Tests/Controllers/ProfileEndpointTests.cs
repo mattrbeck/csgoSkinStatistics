@@ -123,16 +123,28 @@ public class ProfileEndpointTests(ApiFactory factory) : IClassFixture<ApiFactory
     }
 
     [Theory]
-    [InlineData("/api/profile")]
-    [InlineData("/api/profile?steamid=")]
-    public async Task MissingSteamId_Is400FromModelBinding(string path)
+    [InlineData("/api/profile")]                 // no parameter at all
+    [InlineData("/api/profile?steamid=")]        // present but empty
+    [InlineData("/api/profile?steamid=%20")]     // a single space
+    [InlineData("/api/profile?steamid=%20%20%20")] // whitespace only
+    [InlineData("/api/profile?steamid=%09")]     // a tab
+    public async Task MissingOrBlankSteamId_Is400InTheSameErrorShapeAsEveryOtherFailure(string path)
     {
-        // Same as /api/inventory: the non-nullable parameter is implicitly required, so MVC rejects
-        // this before the action's own IsNullOrEmpty guard can run.
+        // Same as /api/inventory: the parameter is nullable so the action's own guard answers, in
+        // the API's one error shape, instead of MVC's implicit-required ProblemDetails.
+        var before = _factory.Http.RequestsMatching("steamcommunity.com");
+
         var response = await _factory.CreateClient().GetAsync(path);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        Assert.Contains("steamid", (await ReadJson(response)).GetProperty("errors").ToString());
+        Assert.Equal("application/json", response.Content.Headers.ContentType?.MediaType);
+        var json = await ReadJson(response);
+        Assert.Equal("Steam ID is required", json.GetProperty("error").GetString());
+        Assert.False(json.TryGetProperty("errors", out _));
+        Assert.False(json.TryGetProperty("title", out _));
+        // A blank value must not become a steamcommunity.com fetch - which is what IsNullOrEmpty
+        // would have allowed for the whitespace cases.
+        Assert.Equal(before, _factory.Http.RequestsMatching("steamcommunity.com"));
     }
 
     [Fact]

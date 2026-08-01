@@ -727,12 +727,26 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
         throw new Error(response.ok ? 'Invalid response from server' : `Request failed (${response.status})`);
       }
 
-      if (inventoryData.error) {
+      if (inventoryData && inventoryData.error) {
         throw new Error(inventoryData.error);
       }
 
-      // Only cache genuine successes: an { error } body threw above, so reaching here means a real
-      // inventory payload worth replaying on the next reload.
+      // The status, not the body, decides whether this was a success. Sniffing for `.error` alone
+      // trusted the server to always use that shape: any other error body - an RFC-9110
+      // ProblemDetails from model binding, a JSON error page from a proxy - has no `.error`, so it
+      // sailed past the check above and got written into sessionStorage as though it were an
+      // inventory, then replayed on the next reload.
+      if (!response.ok) {
+        throw new Error(`Request failed (${response.status})`);
+      }
+      // And a 2xx still has to look like an inventory before it is worth storing: the replay path
+      // reads csgo_items straight off the cached entry.
+      if (!inventoryData || !Array.isArray(inventoryData.csgo_items)) {
+        throw new Error('Invalid response from server');
+      }
+
+      // Only cache genuine successes: reaching here means a 2xx that carried no `error`, i.e. a
+      // real inventory payload worth replaying on the next reload.
       writeInventoryCache(userInput, inventoryData);
     }
 
