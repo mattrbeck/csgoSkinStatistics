@@ -222,94 +222,13 @@ namespace CSGOSkinAPI.Controllers
                         "Invalid inventory data or inventory is empty", NegativeInventoryCacheTtl);
                 }
 
-                // First pass: parse each inspectable asset's link and collect the itemids that need
-                // a cache lookup (everything that didn't decode locally from a cert) so they can be
-                // fetched in one batch instead of one connection per asset.
-                //
-                // Parsed here, not in the shared walk, because these links are logged under this
-                // controller's separate CSGOSkinAPI.InspectLinks category; the warmer logs its own
-                // parse failures under its own.
-                var prepared = new List<(SteamAsset asset, SteamDescription description, string inspectLink,
-                    (ulong s, ulong a, ulong d, ulong m, CEconItemPreviewDataBlock? directItem)? parsed)>();
-                var idsToLookUp = new List<ulong>();
-                foreach (var (asset, description, inspectLink) in inventory.InspectableAssets(steamid))
-                {
-                    var parsed = InspectLink.ParseInspectUrl(inspectLink, _inspectLogger);
-                    if (parsed.HasValue && parsed.Value.directItem == null)
-                    {
-                        idsToLookUp.Add(parsed.Value.a);
-                    }
-                    prepared.Add((asset, description, inspectLink, parsed));
-                }
-
-                // One batched cache read for every non-cert item, over a single connection.
-                var cachedItems = await dbService.GetItemsAsync(idsToLookUp);
-
-                var csgoItems = new List<object>();
-                foreach (var (asset, description, inspectLink, parsed) in prepared)
-                {
-                    // Extract wear, rarity, and item type from tags
-                    var wearTag = description.tags?.FirstOrDefault(t => t.category == "Exterior");
-                    var rarityTag = description.tags?.FirstOrDefault(t => t.category == "Rarity");
-                    var qualityTag = description.tags?.FirstOrDefault(t => t.category == "Quality");
-                    var typeTag = description.tags?.FirstOrDefault(t => t.category == "Type");
-
-                    // StatTrak kill count, when Steam exposes it on the StatTrak score line
-                    // (e.g. "StatTrak™ Confirmed Kills: 1234"). Some copies only carry the
-                    // generic "This item tracks Confirmed Kills." line, which has no number.
-                    int? stattrakKills = null;
-                    var scoreLine = description.descriptions?
-                        .FirstOrDefault(l => l.name == "stattrak_score")?.value;
-                    if (scoreLine != null)
-                    {
-                        var killMatch = Regex.Match(scoreLine, @"Confirmed Kills:\s*([\d,]+)");
-                        if (killMatch.Success &&
-                            int.TryParse(killMatch.Groups[1].Value.Replace(",", ""), out var kills))
-                        {
-                            stattrakKills = kills;
-                        }
-                    }
-
-                    // Attach decoded data: a cert decodes locally, otherwise fall back to the batched
-                    // cache hit (absent if we've never seen this itemid).
-                    object? existingItemData = null;
-                    if (parsed.HasValue)
-                    {
-                        var (s, a, d, m, directItem) = parsed.Value;
-                        if (directItem != null)
-                        {
-                            existingItemData = ItemResponse.CreateResponse(directItem, constDataService, priceService, s, a, d, m);
-                        }
-                        else if (cachedItems.TryGetValue(a, out var existingItem))
-                        {
-                            existingItemData = ItemResponse.CreateResponse(existingItem, constDataService, priceService, s, a, d, m);
-                        }
-                    }
-
-                    csgoItems.Add(new
-                    {
-                        name = description.name ?? description.market_name ?? "Unknown Item",
-                        market_name = description.market_name,
-                        // Base price keyed on Steam's own market_hash_name (authoritative,
-                        // language-independent), so every item is priced even when it has no
-                        // decoded existing_data yet.
-                        price = ItemResponse.BuildPrice(priceService, description.market_hash_name ?? ""),
-                        type = description.type,
-                        inspect_link = inspectLink,
-                        wear = wearTag?.localized_tag_name,
-                        rarity = rarityTag?.localized_tag_name,
-                        quality = qualityTag?.localized_tag_name,
-                        item_type = typeTag?.localized_tag_name,
-                        stattrak_kills = stattrakKills,
-                        name_color = description.name_color,
-                        icon_url = description.icon_url,
-                        icon_url_large = description.icon_url_large,
-                        assetid = asset.assetid,
-                        classid = asset.classid,
-                        instanceid = asset.instanceid,
-                        existing_data = existingItemData
-                    });
-                }
+                // The per-item projection - tags, the StatTrak score line, prices, the batched
+                // item-cache read - lives in InventoryItemResponse, next to the /api projection it
+                // shares BuildPrice and CreateResponse with. It gets this controller's inspect-link
+                // logger because a malformed link found while serving a request belongs in
+                // CSGOSkinAPI.InspectLinks, not in the warmer's log.
+                var csgoItems = await InventoryItemResponse.BuildItemsAsync(
+                    inventory, steamid, dbService, constDataService, priceService, _inspectLogger);
 
                 // Profile info (avatar, persona, trade-ban) is fetched separately by the browser
                 // via /api/profile so item rendering never waits on Steam's profile feed.
@@ -414,18 +333,18 @@ namespace CSGOSkinAPI.Controllers
                 return BadRequest(new { error = "Unable to determine profile for the given Steam ID" });
             }
 
-            using var httpClient = httpClientFactory.CreateClient("steam");
-            httpClient.Timeout = TimeSpan.FromSeconds(5);
+            using var httpClient = CreateProfileFeedClient();
 
             // Fetching and reading the feed is the only part that can fail at the transport level.
             // Handled the same way GetInventoryData handles it - a connection reset, a timeout, or a
-            // response over the client's MaxResponseContentBufferSize (see Program.cs) is an upstream
-            // failure, not a bug in this server, so it answers 400 in the house error shape rather
-            // than bubbling to the global handler's generic 500. Anything else still bubbles.
+            // response over the client's MaxResponseContentBufferSize (see CreateProfileFeedClient)
+            // is an upstream failure, not a bug in this server, so it answers 400 in the house error
+            // shape rather than bubbling to the global handler's generic 500. Anything else still
+            // bubbles.
             string xml;
             try
             {
-                var response = await httpClient.GetAsync(xmlUrl);
+                using var response = await httpClient.GetAsync(xmlUrl);
                 if (!response.IsSuccessStatusCode)
                 {
                     return BadRequest(new { error = $"Failed to fetch profile: {response.StatusCode}" });
@@ -469,6 +388,32 @@ namespace CSGOSkinAPI.Controllers
             });
         }
 
+        // How much of a profile XML feed we are willing to buffer. Both callers below fetch
+        // steamcommunity.com's `?xml=1` feed, which is a small document: a real profile measures
+        // ~2 KB, and the only part of it that grows with the account is the <groups> list, which
+        // tops out around 50 KB for an account in the maximum number of groups.
+        //
+        // They share the "steam" client with the inventory fetch, whose 32 MB cap (Program.cs) is
+        // sized for a count=2000 inventory page - four orders of magnitude more than anything on
+        // this path, and memory a profile lookup should never be able to make the host buffer.
+        // 1 MB is ~20x the realistic worst case and ~500x a typical response, so it has headroom
+        // for a Steam that changes shape by a wide margin while still bounding the damage.
+        private const int ProfileFeedMaxResponseBytes = 1024 * 1024;
+
+        // The client both profile-feed calls use.
+        //
+        // Set per call rather than on the named client because IHttpClientFactory.CreateClient hands
+        // back a *fresh* HttpClient over the shared, pooled handler - which is exactly what the
+        // Timeout here has always relied on. The inventory path builds its own client through
+        // SteamInventoryDocument.FetchAsync and so keeps the 32 MB it genuinely needs.
+        private HttpClient CreateProfileFeedClient()
+        {
+            var httpClient = httpClientFactory.CreateClient("steam");
+            httpClient.Timeout = TimeSpan.FromSeconds(5);
+            httpClient.MaxResponseContentBufferSize = ProfileFeedMaxResponseBytes;
+            return httpClient;
+        }
+
         private async Task<ulong?> ResolveSteamIdAsync(string input)
         {
             var (steamId64, vanity) = SteamProfile.ParseSteamInput(input);
@@ -481,13 +426,12 @@ namespace CSGOSkinAPI.Controllers
         {
             try
             {
-                using var httpClient = httpClientFactory.CreateClient("steam");
-                httpClient.Timeout = TimeSpan.FromSeconds(5);
+                using var httpClient = CreateProfileFeedClient();
 
                 // The public profile XML feed exposes the SteamId64 without an API key.
                 var xmlUrl = $"https://steamcommunity.com/id/{customUrl}/?xml=1";
 
-                var response = await httpClient.GetAsync(xmlUrl);
+                using var response = await httpClient.GetAsync(xmlUrl);
                 if (!response.IsSuccessStatusCode)
                 {
                     _logger.LogWarning("Steam profile request failed: {StatusCode}", response.StatusCode);

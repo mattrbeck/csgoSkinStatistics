@@ -557,12 +557,83 @@ public class DatabaseServiceTests : IDisposable
             await insert.ExecuteNonQueryAsync();
         }
 
-        // Behaviour is unchanged - the owner still reads as never warmed - but it is no longer silent.
+        // The owner reads as never warmed, and it is not silent.
         Assert.Null(await service.GetLastWarmAsync(steamid));
 
         var warning = Assert.Single(logger.AtLevel(LogLevel.Warning));
         Assert.Equal(steamid, warning["SteamId"]);
         Assert.Equal("Byte[]", warning["ValueType"]);
+
+        // ...and the row is gone, so "never warmed" is now the truth rather than an artefact of a
+        // value nothing can read. See the unparseable-text case below for why that matters.
+        Assert.Equal(0, await CountWarmRowsAsync(steamid));
+    }
+
+    // A last_warmed that is TEXT - so it survives the column's TEXT affinity untouched - but is not
+    // a timestamp. This is the shape that used to throw FormatException straight out of
+    // DateTime.Parse, and the throw is what made it unbounded: it escaped through
+    // InventoryWarmService.WarmInventoryAsync *before* the RecordWarmAsync that arms the cooldown,
+    // so the row was never overwritten and every subsequent enqueue of that owner hit it again.
+    [Fact]
+    public async Task GetLastWarmAsync_UnparseableTextTimestamp_DeletesTheRowInsteadOfThrowing()
+    {
+        var logger = new CapturingLogger<DatabaseService>();
+        var service = new DatabaseService(_testDbPath, logger);
+        await service.InitializeDatabaseAsync();
+
+        const ulong steamid = 76561198000000010;
+        await using (var connection = new SqliteConnection($"Data Source={_testDbPath};foreign keys=true;"))
+        {
+            await connection.OpenAsync();
+            using var insert = new SqliteCommand(
+                "INSERT INTO inventory_warms (steamid, last_warmed, items_cached) VALUES (@steamid, 'not-a-timestamp', 3)",
+                connection);
+            insert.Parameters.AddWithValue("@steamid", (long)steamid);
+            await insert.ExecuteNonQueryAsync();
+        }
+
+        Assert.Null(await service.GetLastWarmAsync(steamid));
+
+        var warning = Assert.Single(logger.AtLevel(LogLevel.Warning));
+        Assert.Equal(steamid, warning["SteamId"]);
+        Assert.Equal("String", warning["ValueType"]);
+
+        // The repair: the unreadable row is removed, so the owner is in a state the schema and every
+        // caller represent exactly, and the next RecordWarmAsync re-establishes the cooldown from a
+        // real warm. Leaving it in place would let any caller that reads the cooldown without going
+        // on to record a warm re-read it forever.
+        Assert.Equal(0, await CountWarmRowsAsync(steamid));
+
+        // Repaired for good: a second read is the ordinary never-warmed case, and says nothing.
+        Assert.Null(await service.GetLastWarmAsync(steamid));
+        Assert.Single(logger.AtLevel(LogLevel.Warning));
+    }
+
+    // A well-formed row is left strictly alone - the repair must only ever fire on a value that
+    // cannot be read back.
+    [Fact]
+    public async Task GetLastWarmAsync_ValidTimestamp_IsNeitherWarnedAboutNorDeleted()
+    {
+        var logger = new CapturingLogger<DatabaseService>();
+        var service = new DatabaseService(_testDbPath, logger);
+        await service.InitializeDatabaseAsync();
+
+        const ulong steamid = 76561198000000011;
+        await service.RecordWarmAsync(steamid, 12);
+
+        Assert.NotNull(await service.GetLastWarmAsync(steamid));
+        Assert.Empty(logger.AtLevel(LogLevel.Warning));
+        Assert.Equal(1, await CountWarmRowsAsync(steamid));
+    }
+
+    private async Task<int> CountWarmRowsAsync(ulong steamid)
+    {
+        await using var connection = new SqliteConnection($"Data Source={_testDbPath};foreign keys=true;");
+        await connection.OpenAsync();
+        using var command = new SqliteCommand(
+            "SELECT COUNT(*) FROM inventory_warms WHERE steamid = @steamid", connection);
+        command.Parameters.AddWithValue("@steamid", (long)steamid);
+        return Convert.ToInt32(await command.ExecuteScalarAsync());
     }
 
     [Fact]

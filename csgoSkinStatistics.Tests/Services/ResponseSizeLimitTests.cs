@@ -34,6 +34,13 @@ public class ResponseSizeLimitTests(ApiFactory factory) : IClassFixture<ApiFacto
     private const long OverSteamCap = 40L * 1024 * 1024;
     private const long OverSkinportCap = 80L * 1024 * 1024;
 
+    // Over the 1 MB profile-feed cap but far under the 32 MB inventory one. The two caps are set in
+    // different places - the inventory number on the named client in Program.cs, the profile number
+    // per call in SkinController.CreateProfileFeedClient - and only a size in the gap between them
+    // can tell which one a given call is actually running. The tests above, at 40 MB, are over both
+    // and so would pass just as happily if the profile path had never been tightened.
+    private const long BetweenTheProfileAndInventoryCaps = 4L * 1024 * 1024;
+
     // What each oversize stub would hand back if the cap were gone: a perfectly good response. That
     // is deliberate - it means a lost cap shows up as a *success* where these tests expect a
     // failure, rather than as some other error that might pass by accident.
@@ -110,6 +117,71 @@ public class ResponseSizeLimitTests(ApiFactory factory) : IClassFixture<ApiFacto
         // The resolve never produced an id, so nothing went on to ask Steam for the inventory.
         Assert.Equal(0, _factory.Http.RequestsMatching(InventoryUrl(steamId)));
     }
+
+    [Fact]
+    public async Task ProfileFeedOverItsOwnCap_IsRefusedThoughItWouldFitTheInventoryCap()
+    {
+        // A profile XML feed is ~2 KB; the <groups> list is the only part that grows with the
+        // account and tops out well under 100 KB. 4 MB is not a profile, and it must not be
+        // buffered just because the inventory fetch on the same named client is allowed 32 MB.
+        var steamId = NextSteamId();
+        _factory.Http.RespondOversized($"/profiles/{steamId}/", BetweenTheProfileAndInventoryCaps,
+            ValidProfileXml(steamId), "text/xml");
+
+        var response = await _factory.CreateClient().GetAsync($"/api/profile?steamid={steamId}");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("Failed to connect to Steam API", (await ReadJson(response)).GetProperty("error").GetString());
+    }
+
+    [Fact]
+    public async Task VanityResolveOverTheProfileCap_IsRefusedThoughItWouldFitTheInventoryCap()
+    {
+        // The vanity resolve reads the same feed off the same client, so it carries the same bound.
+        var steamId = NextSteamId();
+        const string vanity = "bloated-vanity";
+        _factory.Http.RespondOversized($"/id/{vanity}/", BetweenTheProfileAndInventoryCaps,
+            ValidProfileXml(steamId), "text/xml");
+        _factory.Http.Respond(InventoryUrl(steamId), HttpStatusCode.OK, ValidInventoryJson());
+
+        var response = await _factory.CreateClient().GetAsync($"/api/inventory?steamid={vanity}");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("Unable to resolve Steam ID or inventory",
+            (await ReadJson(response)).GetProperty("error").GetString());
+        Assert.Equal(0, _factory.Http.RequestsMatching(InventoryUrl(steamId)));
+    }
+
+    [Fact]
+    public async Task InventoryLargerThanTheProfileCap_IsStillServed()
+    {
+        // The other edge of the same change: tightening the profile calls must not tighten the
+        // inventory fetch, which genuinely needs its 32 MB. This body is a real one rather than a
+        // declared length - the point is that it is read all the way through - and at ~2 MB it sits
+        // above the profile cap and far below the inventory one. Leak the 1 MB bound onto the
+        // inventory client and this stops being a 200.
+        var steamId = NextSteamId();
+        _factory.Http.Respond(InventoryUrl(steamId), HttpStatusCode.OK, PaddedInventoryJson(2 * 1024 * 1024));
+
+        var response = await _factory.CreateClient().GetAsync($"/api/inventory?steamid={steamId}");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var json = await ReadJson(response);
+        Assert.Equal(1, json.GetProperty("success").GetInt32());
+        Assert.Empty(json.GetProperty("csgo_items").EnumerateArray());
+    }
+
+    // A valid, genuinely large inventory page. The bulk rides in a description's name, and the
+    // assets array is left empty, so the response is big without the test having to build - or the
+    // endpoint having to stitch - thousands of items.
+    private static string PaddedInventoryJson(int paddingBytes) => JsonSerializer.Serialize(
+        new SteamInventoryResponse
+        {
+            assets = [],
+            descriptions = [new SteamDescription { classid = "c1", instanceid = "i1", name = new string('x', paddingBytes) }],
+            total = 0,
+            success = 1,
+        });
 
     [Fact]
     public async Task OversizeSkinportFeed_KeepsTheLastKnownPrices()

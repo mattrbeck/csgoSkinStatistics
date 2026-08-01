@@ -542,25 +542,48 @@ namespace CSGOSkinAPI.Services
             command.Parameters.AddWithValue("@steamid", (long)steamid);
 
             var value = await command.ExecuteScalarAsync();
-            if (value is string text)
+            if (value is string text
+                && DateTime.TryParse(text, null, DateTimeStyles.RoundtripKind, out var lastWarmed))
             {
-                return DateTime.Parse(text, null, System.Globalization.DateTimeStyles.RoundtripKind);
+                return lastWarmed;
             }
 
             // No row for this owner is the ordinary case (never warmed) and returns null silently.
-            // A row that exists but whose last_warmed is not TEXT is not ordinary: SQLite columns
-            // are dynamically typed, so a hand-edited or externally-written row can hold anything,
-            // and it reads here as "never warmed". The warm service then re-fetches this owner's
-            // whole inventory on every single cache miss - the 24h cooldown this value exists to
-            // enforce is silently off for them. Actionable (delete the row), and rare enough that a
-            // Warning cannot become noise.
-            if (value is not null and not DBNull)
+            if (value is null or DBNull)
             {
-                _logger.LogWarning(
-                    "inventory_warms row for {SteamId} has a non-text last_warmed ({ValueType}); "
-                    + "treating the owner as never warmed, so the warm cooldown will not apply.",
-                    steamid, value.GetType().Name);
+                return null;
             }
+
+            // A row that exists but whose last_warmed cannot be read back as a timestamp. SQLite
+            // columns are dynamically typed, so a hand-edited or externally-written row can hold a
+            // BLOB or a number (which reads here as "not a string"), or a string that simply isn't a
+            // date - and that last shape used to throw FormatException straight out of DateTime.Parse.
+            //
+            // Both shapes disarm the 24h cooldown this value exists to enforce, and Steam rate-limits
+            // the inventory endpoint per server IP with a long ban behind a 429, so neither may be
+            // left to repeat. The throw was the worse of the two: it escaped
+            // InventoryWarmService.WarmInventoryAsync *before* the RecordWarmAsync that arms the
+            // cooldown, so the row was never overwritten and the drain loop hit it again on every
+            // subsequent enqueue of that owner - forever, with no warm ever succeeding.
+            //
+            // Delete the row rather than stamping a repaired timestamp over it. "Never warmed" is a
+            // state the schema and every caller already represent exactly, and it is the honest one:
+            // we do not know when, or whether, this owner was warmed. Writing UtcNow instead would
+            // invent a warm that never happened and suppress a real one for 24h, and there would be
+            // no truthful items_cached to write beside it. Deleting also keeps the fix independent of
+            // what the caller does next: the warmer happens to follow a null with RecordWarmAsync
+            // (INSERT OR REPLACE on the steamid primary key), which would mask this, but a caller
+            // that reads the cooldown without recording a warm would otherwise re-read the same
+            // unreadable row indefinitely.
+            _logger.LogWarning(
+                "inventory_warms row for {SteamId} has an unreadable last_warmed ({ValueType}); "
+                + "deleting the row so the warm cooldown re-establishes on the next warm.",
+                steamid, value.GetType().Name);
+
+            using var deleteCommand = new SqliteCommand(
+                "DELETE FROM inventory_warms WHERE steamid = @steamid", connection);
+            deleteCommand.Parameters.AddWithValue("@steamid", (long)steamid);
+            await deleteCommand.ExecuteNonQueryAsync();
 
             return null;
         }
