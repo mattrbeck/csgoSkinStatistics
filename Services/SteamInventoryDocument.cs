@@ -165,7 +165,7 @@ namespace CSGOSkinAPI.Services
                 }
 
                 _propertiesByAsset.TryGetValue(asset.assetid, out var assetProps);
-                var inspectLink = Controllers.SkinController.BuildInspectLink(
+                var inspectLink = InspectLink.BuildInspectLink(
                     inspectAction.link, assetProps, ownerSteamId, asset.assetid);
                 yield return new InspectableAsset(asset, description, inspectLink);
             }

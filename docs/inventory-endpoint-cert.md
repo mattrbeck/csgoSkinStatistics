@@ -61,7 +61,7 @@ it cannot carry per-copy data inline. Steam templates it with placeholders:
 Once substituted into the link, the link is the hex form our existing parser
 decodes locally — no GC needed.
 
-### Decode algorithm (`ParseInspectUrl`, `Program.cs`)
+### Decode algorithm (`ParseInspectUrl`, `Services/InspectLink.cs`)
 
 ```
 hex     = <the [0-9A-F]+ after csgo_econ_action_preview>
