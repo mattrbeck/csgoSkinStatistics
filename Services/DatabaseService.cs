@@ -3,11 +3,20 @@ namespace CSGOSkinAPI.Services
     public class DatabaseService
     {
         private readonly string _connectionString;
+        private readonly string _databasePath;
+        private readonly ILogger<DatabaseService> _logger;
 
-        public DatabaseService(string? databasePath = null)
+        // The logger is an optional trailing parameter rather than a required leading one because
+        // `databasePath` already has to stay first and defaulted: the DI registration in Program.cs
+        // is a plain AddSingleton<DatabaseService>(), which resolves the logger from the container
+        // and falls back to the default for the path, while tests construct the service directly
+        // with only a throwaway path. NullLogger keeps those direct constructions silent rather
+        // than making every call site pass a sink it does not care about.
+        public DatabaseService(string? databasePath = null, ILogger<DatabaseService>? logger = null)
         {
-            var dbPath = databasePath ?? "searches.db";
-            _connectionString = $"Data Source={dbPath};foreign keys=true;";
+            _databasePath = databasePath ?? "searches.db";
+            _connectionString = $"Data Source={_databasePath};foreign keys=true;";
+            _logger = logger ?? NullLogger<DatabaseService>.Instance;
         }
 
         // Opens a connection with a busy timeout so a read that lands during a write waits for the
@@ -67,12 +76,22 @@ namespace CSGOSkinAPI.Services
                 using var alterCommand = new SqliteCommand(
                     "ALTER TABLE searches ADD COLUMN killeatervalue INTEGER", connection);
                 await alterCommand.ExecuteNonQueryAsync();
+                // Information, and only on the branch that actually altered the file: on a fresh
+                // database the CREATE above already carries the column, so this line appearing at
+                // all means an older cache was upgraded in place - exactly the once-in-a-deployment
+                // event an operator wants in the log.
+                _logger.LogInformation(
+                    "Applied schema migration: added column {ColumnName} to {TableName}.",
+                    "killeatervalue", "searches");
             }
             catch (SqliteException ex) when (ex.SqliteErrorCode == 1 && ex.Message.Contains("duplicate column name"))
             {
                 // Column already exists - the migration already ran. Any other SqliteException
                 // (I/O error, SQLITE_BUSY, corruption) is left to propagate rather than be silently
                 // mistaken for "already migrated" and surface later as a GetOrdinal failure on reads.
+                _logger.LogDebug(
+                    "Schema migration for {TableName}.{ColumnName} already applied.",
+                    "searches", "killeatervalue");
             }
 
 
@@ -107,11 +126,17 @@ namespace CSGOSkinAPI.Services
                     using var alterCommand = new SqliteCommand(
                         $"ALTER TABLE {tableName} ADD COLUMN wrapped_sticker INTEGER", connection);
                     await alterCommand.ExecuteNonQueryAsync();
+                    _logger.LogInformation(
+                        "Applied schema migration: added column {ColumnName} to {TableName}.",
+                        "wrapped_sticker", tableName);
                 }
                 catch (SqliteException ex) when (ex.SqliteErrorCode == 1 && ex.Message.Contains("duplicate column name"))
                 {
                     // Column already exists - the migration already ran. Any other SqliteException
                     // is left to propagate rather than be silently mistaken for "already migrated".
+                    _logger.LogDebug(
+                        "Schema migration for {TableName}.{ColumnName} already applied.",
+                        tableName, "wrapped_sticker");
                 }
 
                 var createIndexCommand = @$"CREATE INDEX IF NOT EXISTS itemid on {tableName} (itemid)";
@@ -144,6 +169,11 @@ namespace CSGOSkinAPI.Services
                 )";
             using var pricesCommand = new SqliteCommand(createPricesTableCommand, connection);
             await pricesCommand.ExecuteNonQueryAsync();
+
+            // Lifecycle: once per process start. The path is the field an operator most often wants
+            // when the cache appears empty - it is relative by default, so which working directory
+            // the app was launched from decides which file it actually opened.
+            _logger.LogInformation("Database schema ready at {DatabasePath}.", _databasePath);
         }
 
         // Load the whole persisted price map, each row carrying its own last-seen time (updated_at
@@ -165,6 +195,12 @@ namespace CSGOSkinAPI.Services
                 var updatedAt = DateTime.Parse(reader.GetString(3), null, DateTimeStyles.RoundtripKind);
                 prices[name] = (min, suggested, updatedAt);
             }
+
+            // Debug, not Information: PriceService already reports a non-empty load at Information,
+            // and this fires on every refresh cycle rather than once. Its value is the zero case
+            // that PriceService's guard skips - "the snapshot is empty" looks identical to "the
+            // snapshot never loaded" from the outside otherwise.
+            _logger.LogDebug("Loaded {PriceRowCount} persisted price rows.", prices.Count);
             return prices;
         }
 
@@ -190,6 +226,12 @@ namespace CSGOSkinAPI.Services
             }
 
             await transaction.CommitAsync();
+
+            // One line for the whole feed, after the commit. Deliberately not per row: the Skinport
+            // catalogue is tens of thousands of entries and this loop is the single largest write in
+            // the app.
+            _logger.LogDebug(
+                "Persisted {PriceRowCount} price rows stamped {PricesUpdatedAt:u}.", prices.Count, updatedAt);
         }
 
         public async Task<List<CEconItemPreviewDataBlock.Sticker>> GetStickersAsync(ulong itemId, bool stickersTable)
@@ -357,6 +399,14 @@ namespace CSGOSkinAPI.Services
                 item.keychains.AddRange(await ReadStickersAsync(item.itemid, false, connection));
             }
 
+            // One summary line per call, never per chunk and never per row: an inventory page asks
+            // about ~2000 ids here and each found id then runs two ReadStickersAsync queries, so
+            // anything finer would be thousands of lines for a single page view. The hit ratio is
+            // the number that actually matters operationally - it says how much of the inventory
+            // the warm service has managed to cache.
+            _logger.LogDebug(
+                "Batched cache read: {FoundCount} of {RequestedCount} item ids were cached.",
+                result.Count, ids.Count);
             return result;
         }
 
@@ -400,6 +450,14 @@ namespace CSGOSkinAPI.Services
             // float/seed worth caching, so skip them. (See docs/inventory-endpoint-cert.md.)
             if (itemInfo.itemid == 0)
             {
+                // Debug, not Warning: this is the designed outcome for a whole class of item, not a
+                // fault, and it scales with traffic - a warm walks a 2000-item inventory and every
+                // music kit, graffiti and pass in it lands here. Warning per item is precisely the
+                // noise the ConstDataService review flagged. defindex is carried so an operator can
+                // still tell *which* type was skipped without a line per item telling them.
+                _logger.LogDebug(
+                    "Skipped caching a non-keyable item (defindex {DefIndex}): itemid is 0.",
+                    itemInfo.defindex);
                 return;
             }
 
@@ -484,9 +542,27 @@ namespace CSGOSkinAPI.Services
             command.Parameters.AddWithValue("@steamid", (long)steamid);
 
             var value = await command.ExecuteScalarAsync();
-            return value is string text
-                ? DateTime.Parse(text, null, System.Globalization.DateTimeStyles.RoundtripKind)
-                : null;
+            if (value is string text)
+            {
+                return DateTime.Parse(text, null, System.Globalization.DateTimeStyles.RoundtripKind);
+            }
+
+            // No row for this owner is the ordinary case (never warmed) and returns null silently.
+            // A row that exists but whose last_warmed is not TEXT is not ordinary: SQLite columns
+            // are dynamically typed, so a hand-edited or externally-written row can hold anything,
+            // and it reads here as "never warmed". The warm service then re-fetches this owner's
+            // whole inventory on every single cache miss - the 24h cooldown this value exists to
+            // enforce is silently off for them. Actionable (delete the row), and rare enough that a
+            // Warning cannot become noise.
+            if (value is not null and not DBNull)
+            {
+                _logger.LogWarning(
+                    "inventory_warms row for {SteamId} has a non-text last_warmed ({ValueType}); "
+                    + "treating the owner as never warmed, so the warm cooldown will not apply.",
+                    steamid, value.GetType().Name);
+            }
+
+            return null;
         }
 
         public async Task RecordWarmAsync(ulong steamid, int itemsCached)
@@ -501,6 +577,13 @@ namespace CSGOSkinAPI.Services
             command.Parameters.AddWithValue("@last_warmed", DateTime.UtcNow.ToString("o"));
             command.Parameters.AddWithValue("@items_cached", itemsCached);
             await command.ExecuteNonQueryAsync();
+
+            // Debug: InventoryWarmService already reports the completed warm at Information. This
+            // one is the write itself, which it also performs *before* fetching (with a count of 0)
+            // to arm the cooldown - so a Debug pair here is what distinguishes "the warm was
+            // attempted and the throttle armed" from "the warm never started".
+            _logger.LogDebug(
+                "Recorded warm for {SteamId} with {CachedCount} cached items.", steamid, itemsCached);
         }
     }
 }

@@ -1,4 +1,6 @@
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using CSGOSkinAPI.Services;
 using CSGOSkinAPI.Models;
 using SteamKit2.GC.CSGO.Internal;
@@ -11,27 +13,52 @@ public class DatabaseServiceTests : IDisposable
 {
     private readonly DatabaseService _databaseService;
     private readonly string _testDbPath;
+    private readonly string _testDirectory;
 
     public DatabaseServiceTests()
     {
-        // Create a unique database file for this test instance
-        _testDbPath = $"test_searches_{Guid.NewGuid():N}.db";
-
-        // Clean up any existing test database
-        if (File.Exists(_testDbPath))
-        {
-            File.Delete(_testDbPath);
-        }
+        // Each test instance gets its own directory, for the same reason CatalogDirectory exists:
+        // the database used to be a bare "test_searches_<guid>.db", which resolves against the
+        // shared test working directory that every other test class also runs in. Dispose deleted
+        // the .db but not the -wal/-shm siblings WAL mode creates beside it, so every run left two
+        // files per test behind in bin/Debug/net10.0 forever. A directory of its own means cleanup
+        // is one recursive delete that cannot miss a sibling, and nothing this class writes can
+        // collide with a concurrently-running class.
+        _testDirectory = Path.Combine(Path.GetTempPath(), $"csgoskin-tests-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(_testDirectory);
+        _testDbPath = Path.Combine(_testDirectory, "searches.db");
 
         _databaseService = new DatabaseService(_testDbPath);
     }
 
     public void Dispose()
     {
-        // Clean up test database
-        if (File.Exists(_testDbPath))
+        // Delete the WAL siblings explicitly before the directory, exactly as ApiFactory does: a
+        // connection still held open by the pool makes the file undeletable on some platforms, and
+        // swallowing that per-file leaves the rest of the cleanup to run instead of aborting it.
+        foreach (var suffix in new[] { "", "-wal", "-shm" })
         {
-            File.Delete(_testDbPath);
+            try
+            {
+                File.Delete(_testDbPath + suffix);
+            }
+            catch (IOException)
+            {
+                // Still held open by a pooled connection; it's under a temp directory either way.
+            }
+        }
+
+        try
+        {
+            Directory.Delete(_testDirectory, recursive: true);
+        }
+        catch (DirectoryNotFoundException)
+        {
+            // Already gone - nothing to clean up.
+        }
+        catch (IOException)
+        {
+            // A file inside is still open; the directory is under the OS temp root regardless.
         }
     }
 
@@ -457,5 +484,113 @@ public class DatabaseServiceTests : IDisposable
         Assert.True(await reader.ReadAsync());
         Assert.Equal(1, reader.GetInt32(0));
         Assert.Equal(196, reader.GetInt32(1));
+    }
+
+    [Fact]
+    public async Task InitializeDatabaseAsync_LogsSchemaReadyAtInformation()
+    {
+        var logger = new CapturingLogger<DatabaseService>();
+        var service = new DatabaseService(_testDbPath, logger);
+
+        await service.InitializeDatabaseAsync();
+
+        // Exactly one Information line on a fresh database: the lifecycle event. The migrations all
+        // no-op here (the CREATEs already carry both back-filled columns), so anything else at this
+        // level would mean startup had started reporting routine work as lifecycle.
+        var entry = Assert.Single(logger.AtLevel(LogLevel.Information));
+        Assert.Equal(_testDbPath, entry["DatabasePath"]);
+    }
+
+    [Fact]
+    public async Task InitializeDatabaseAsync_LogsTheMigrationItActuallyApplies()
+    {
+        // A database from before killeatervalue shipped: the table exists, so CREATE TABLE IF NOT
+        // EXISTS leaves it alone and the ALTER genuinely runs. This is the one path where the
+        // migration is a real event rather than a no-op, and the only way an operator learns an
+        // existing cache file was upgraded underneath them.
+        var legacyPath = Path.Combine(_testDirectory, "legacy.db");
+        await using (var connection = new SqliteConnection($"Data Source={legacyPath};foreign keys=true;"))
+        {
+            await connection.OpenAsync();
+            using var create = new SqliteCommand(@"
+                CREATE TABLE searches (
+                    itemid INTEGER PRIMARY KEY NOT NULL,
+                    defindex INTEGER NOT NULL,
+                    paintindex INTEGER NOT NULL,
+                    rarity INTEGER NOT NULL,
+                    quality INTEGER NOT NULL,
+                    paintwear INTEGER NOT NULL,
+                    paintseed INTEGER NOT NULL,
+                    inventory INTEGER NOT NULL,
+                    origin INTEGER NOT NULL,
+                    stattrak INTEGER NOT NULL
+                )", connection);
+            await create.ExecuteNonQueryAsync();
+        }
+
+        var logger = new CapturingLogger<DatabaseService>();
+        await new DatabaseService(legacyPath, logger).InitializeDatabaseAsync();
+
+        var migration = Assert.Single(
+            logger.AtLevel(LogLevel.Information), e => "killeatervalue".Equals(e["ColumnName"]));
+        Assert.Equal("searches", migration["TableName"]);
+    }
+
+    [Fact]
+    public async Task GetLastWarmAsync_NonTextTimestamp_WarnsInsteadOfSilentlyReportingNeverWarmed()
+    {
+        var logger = new CapturingLogger<DatabaseService>();
+        var service = new DatabaseService(_testDbPath, logger);
+        await service.InitializeDatabaseAsync();
+
+        const ulong steamid = 76561198000000009;
+        await using (var connection = new SqliteConnection($"Data Source={_testDbPath};foreign keys=true;"))
+        {
+            await connection.OpenAsync();
+            // A BLOB, not an integer: last_warmed is declared TEXT, and TEXT affinity would coerce a
+            // number into text on the way in. BLOBs are stored as-is, so this is how a row that is
+            // genuinely not a timestamp reaches the reader.
+            using var insert = new SqliteCommand(
+                "INSERT INTO inventory_warms (steamid, last_warmed, items_cached) VALUES (@steamid, X'00FF', 0)",
+                connection);
+            insert.Parameters.AddWithValue("@steamid", (long)steamid);
+            await insert.ExecuteNonQueryAsync();
+        }
+
+        // Behaviour is unchanged - the owner still reads as never warmed - but it is no longer silent.
+        Assert.Null(await service.GetLastWarmAsync(steamid));
+
+        var warning = Assert.Single(logger.AtLevel(LogLevel.Warning));
+        Assert.Equal(steamid, warning["SteamId"]);
+        Assert.Equal("Byte[]", warning["ValueType"]);
+    }
+
+    [Fact]
+    public async Task DiRegistration_SuppliesTheLogger()
+    {
+        var provider = new CapturingLoggerProvider();
+        var services = new ServiceCollection();
+        services.AddLogging(builder => builder.SetMinimumLevel(LogLevel.Debug).AddProvider(provider));
+        // The exact shape Program.cs uses: no factory, so the container itself has to pick the
+        // constructor and fill the trailing optional ILogger parameter.
+        services.AddSingleton<DatabaseService>();
+
+        using var serviceProvider = services.BuildServiceProvider();
+
+        // Resolving proves the container can still satisfy the constructor now that it has a second
+        // parameter. This instance keeps the default path and never opens it, so it writes nothing.
+        Assert.NotNull(serviceProvider.GetRequiredService<DatabaseService>());
+
+        // Same rule, with the path supplied explicitly, so the instance that does touch a file puts
+        // it under this test's own directory.
+        var dbPath = Path.Combine(_testDirectory, "di.db");
+        var service = ActivatorUtilities.CreateInstance<DatabaseService>(serviceProvider, dbPath);
+        await service.InitializeDatabaseAsync();
+
+        // Through the real filter pipeline and under the real category - if the logger had been left
+        // null and fallen back to NullLogger, nothing would arrive here at all.
+        Assert.Contains(
+            provider.Entries,
+            e => e.Level == LogLevel.Information && dbPath.Equals(e["DatabasePath"]));
     }
 }
