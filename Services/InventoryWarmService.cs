@@ -115,7 +115,7 @@ namespace CSGOSkinAPI.Services
                 // legacy S/A/D links parse but would need the GC, so they are skipped.
                 // SaveItemWithExtrasAsync additionally guards the itemid==0 non-paint
                 // types that cannot be keyed.
-                var directItem = Controllers.SkinController.ParseInspectUrl(inspectLink)?.directItem;
+                var directItem = Controllers.SkinController.ParseInspectUrl(inspectLink, logger)?.directItem;
                 if (directItem != null && directItem.itemid != 0)
                 {
                     await dbService.SaveItemWithExtrasAsync(directItem);
