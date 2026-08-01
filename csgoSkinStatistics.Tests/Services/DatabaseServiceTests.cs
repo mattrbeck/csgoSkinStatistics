@@ -11,27 +11,52 @@ public class DatabaseServiceTests : IDisposable
 {
     private readonly DatabaseService _databaseService;
     private readonly string _testDbPath;
+    private readonly string _testDirectory;
 
     public DatabaseServiceTests()
     {
-        // Create a unique database file for this test instance
-        _testDbPath = $"test_searches_{Guid.NewGuid():N}.db";
-
-        // Clean up any existing test database
-        if (File.Exists(_testDbPath))
-        {
-            File.Delete(_testDbPath);
-        }
+        // Each test instance gets its own directory, for the same reason CatalogDirectory exists:
+        // the database used to be a bare "test_searches_<guid>.db", which resolves against the
+        // shared test working directory that every other test class also runs in. Dispose deleted
+        // the .db but not the -wal/-shm siblings WAL mode creates beside it, so every run left two
+        // files per test behind in bin/Debug/net10.0 forever. A directory of its own means cleanup
+        // is one recursive delete that cannot miss a sibling, and nothing this class writes can
+        // collide with a concurrently-running class.
+        _testDirectory = Path.Combine(Path.GetTempPath(), $"csgoskin-tests-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(_testDirectory);
+        _testDbPath = Path.Combine(_testDirectory, "searches.db");
 
         _databaseService = new DatabaseService(_testDbPath);
     }
 
     public void Dispose()
     {
-        // Clean up test database
-        if (File.Exists(_testDbPath))
+        // Delete the WAL siblings explicitly before the directory, exactly as ApiFactory does: a
+        // connection still held open by the pool makes the file undeletable on some platforms, and
+        // swallowing that per-file leaves the rest of the cleanup to run instead of aborting it.
+        foreach (var suffix in new[] { "", "-wal", "-shm" })
         {
-            File.Delete(_testDbPath);
+            try
+            {
+                File.Delete(_testDbPath + suffix);
+            }
+            catch (IOException)
+            {
+                // Still held open by a pooled connection; it's under a temp directory either way.
+            }
+        }
+
+        try
+        {
+            Directory.Delete(_testDirectory, recursive: true);
+        }
+        catch (DirectoryNotFoundException)
+        {
+            // Already gone - nothing to clean up.
+        }
+        catch (IOException)
+        {
+            // A file inside is still open; the directory is under the OS temp root regardless.
         }
     }
 
