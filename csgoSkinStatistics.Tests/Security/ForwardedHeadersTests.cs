@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Xunit;
 
 namespace csgoSkinStatistics.Tests.Security;
@@ -305,15 +306,41 @@ public sealed class ForwardedHeadersTests(ForwardedHeadersFixture fixture)
     public void The_startup_line_names_the_resolved_networks_proxies_and_hop_limit()
     {
         // The one thing an operator can grep for in `docker compose logs` to see what the app
-        // actually trusts, rather than what they meant it to.
-        var description = TransportSecurity.DescribeTrustedSources(
-            TransportSecurity.BuildForwardedHeadersOptions(Config(
-                ($"{TransportSecurity.KnownProxiesKey}:0", "203.0.113.9"))));
+        // actually trusts, rather than what they meant it to. Asserted through the same call
+        // Program.cs makes, so the test pins the emitted line rather than a helper beside it.
+        var log = new CapturingLogger();
 
-        Assert.Contains("10.0.0.0/8", description);
-        Assert.Contains("192.168.0.0/16", description);
-        Assert.Contains("203.0.113.9", description);
-        Assert.Contains("forwardLimit=1", description);
+        TransportSecurity.LogTrustedSources(log, TransportSecurity.BuildForwardedHeadersOptions(
+            Config(($"{TransportSecurity.KnownProxiesKey}:0", "203.0.113.9"))));
+
+        var entry = Assert.Single(log.Entries);
+        // Information, not Debug: a mis-set boundary is silent otherwise, so this has to survive a
+        // production log level. appsettings.json pins CSGOSkinAPI.Security here for that reason.
+        Assert.Equal(LogLevel.Information, entry.Level);
+        Assert.Contains("10.0.0.0/8", entry.Text);
+        Assert.Contains("192.168.0.0/16", entry.Text);
+        Assert.Contains("203.0.113.9", entry.Text);
+        Assert.Contains("forwardLimit=1", entry.Text);
+        // The resolved set is queryable, not just greppable. Contains rather than Equal because
+        // the framework seeds loopback into both lists before we ever see the options.
+        Assert.Contains("203.0.113.9", Assert.IsType<string>(entry["TrustedProxies"]));
+        Assert.Equal("1", entry["ForwardLimit"]);
+    }
+
+    [Fact]
+    public void The_shipped_configuration_keeps_the_trust_boundary_lines_visible()
+    {
+        // Both lines above are pointless if a production log level filters them out, and the
+        // obvious tidy-up - "CSGOSkinAPI.Security is the same as the CSGOSkinAPI default, drop it"
+        // - is exactly what makes turning the app down silence them. Read from the shipped
+        // appsettings.json rather than a literal, so the pin is what is asserted. (Parsing it here
+        // also proves the explanatory comments in that file are legal: ASP.NET Core's JSON
+        // configuration provider skips comments, and nothing else in the repo reads it.)
+        var config = new ConfigurationBuilder()
+            .AddJsonFile("appsettings.json", optional: false)
+            .Build();
+
+        Assert.Equal("Information", config["Logging:LogLevel:CSGOSkinAPI.Security"]);
     }
 
     // --- forwarded headers end to end -----------------------------------------------------
@@ -434,12 +461,12 @@ public sealed class ForwardedHeadersTests(ForwardedHeadersFixture fixture)
 
     // --- the untrusted-peer warning -------------------------------------------------------
 
-    private static (ForwardedTrustDiagnostics Diagnostics, List<string> Log) Diagnostics(
+    private static (ForwardedTrustDiagnostics Diagnostics, CapturingLogger Log) Diagnostics(
         params (string Key, string Value)[] settings)
     {
-        List<string> log = [];
+        var log = new CapturingLogger();
         var options = TransportSecurity.BuildForwardedHeadersOptions(Config(settings));
-        return (new ForwardedTrustDiagnostics(options, log.Add), log);
+        return (new ForwardedTrustDiagnostics(options, log), log);
     }
 
     private static DefaultHttpContext Request(string peer, bool forwarded = true)
@@ -465,16 +492,21 @@ public sealed class ForwardedHeadersTests(ForwardedHeadersFixture fixture)
 
         Assert.True(diagnostics.Inspect(Request("203.0.113.9")));
 
-        var line = Assert.Single(log);
-        Assert.Contains("203.0.113.9", line);
+        var entry = Assert.Single(log.Entries);
+        // Warning, so it stands out from routine traffic and survives a production log level.
+        Assert.Equal(LogLevel.Warning, entry.Level);
+        Assert.Contains("203.0.113.9", entry.Text);
         // Names the fix, and prints what is actually trusted so the log alone is enough to act on.
-        Assert.Contains(TransportSecurity.KnownNetworksKey, line);
-        Assert.Contains("10.0.0.0/8", line);
+        Assert.Contains(TransportSecurity.KnownNetworksKey, entry.Text);
+        Assert.Contains("10.0.0.0/8", entry.Text);
+        // The peer and the boundary it failed against are fields, not just words in a sentence.
+        Assert.Equal("203.0.113.9", entry["UntrustedPeer"]);
+        Assert.Contains("10.0.0.0/8", Assert.IsType<string>(entry["TrustedNetworks"]));
 
         // Once, not once per request: this must not become a log flood under load.
         Assert.False(diagnostics.Inspect(Request("203.0.113.9")));
         Assert.False(diagnostics.Inspect(Request("198.51.100.1")));
-        Assert.Single(log);
+        Assert.Single(log.Entries);
     }
 
     [Fact]
@@ -487,7 +519,7 @@ public sealed class ForwardedHeadersTests(ForwardedHeadersFixture fixture)
         // Untrusted peer with no forwarded header - i.e. an ordinary direct client, not a proxy
         // problem. Warning here would fire on every request of a directly-exposed deployment.
         Assert.False(diagnostics.Inspect(Request("203.0.113.9", forwarded: false)));
-        Assert.Empty(log);
+        Assert.Empty(log.Entries);
     }
 
     [Fact]
@@ -497,7 +529,7 @@ public sealed class ForwardedHeadersTests(ForwardedHeadersFixture fixture)
 
         Assert.False(diagnostics.Inspect(Request("::ffff:10.0.0.5")));
         Assert.True(diagnostics.Inspect(Request("::ffff:203.0.113.9")));
-        Assert.Single(log);
+        Assert.Single(log.Entries);
     }
 
     [Fact]
@@ -507,7 +539,7 @@ public sealed class ForwardedHeadersTests(ForwardedHeadersFixture fixture)
         var (diagnostics, log) = Diagnostics(($"{TransportSecurity.KnownNetworksKey}:0", "  "));
 
         Assert.True(diagnostics.Inspect(Request("10.0.0.5")));
-        Assert.Single(log);
+        Assert.Single(log.Entries);
     }
 
     // --- the partition key ----------------------------------------------------------------

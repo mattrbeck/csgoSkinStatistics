@@ -73,7 +73,7 @@ namespace CSGOSkinAPI.Security
             // trust boundary: all of RFC1918 stays trusted, which on a shared bridge network or in
             // a VPC still means untrusted neighbours can forge a client IP at us. To actually
             // narrow it, set KnownNetworks - a single host is fine, e.g. "198.51.100.7/32".
-            // Whatever you end up with is printed at startup by DescribeTrustedSources, so check
+            // Whatever you end up with is logged at startup by LogTrustedSources, so check
             // the log rather than trusting intent.
             var networks = ReadList(config, KnownNetworksKey) ?? DefaultKnownNetworks;
             foreach (var cidr in networks)
@@ -104,18 +104,31 @@ namespace CSGOSkinAPI.Security
             return values?.Select(v => v.Trim()).Where(v => v.Length > 0).ToArray();
         }
 
-        // Printed once at startup. A mis-set trust boundary is otherwise entirely silent: the
-        // middleware's own diagnostic is Debug and this app's minimum level is Information, so a
-        // deployment whose peer address falls outside the trusted set behaves exactly like the
-        // unfixed app - one global token bucket - with nothing in the log to say so. This line
-        // makes the resolved set greppable in `docker compose logs` on day one.
-        public static string DescribeTrustedSources(ForwardedHeadersOptions options)
-        {
-            var networks = string.Join(", ", options.KnownIPNetworks);
-            var proxies = string.Join(", ", options.KnownProxies);
-            return $"Trusted forwarded-header sources: networks=[{networks}] proxies=[{proxies}] "
-                + $"forwardLimit={options.ForwardLimit?.ToString() ?? "unlimited"}";
-        }
+        // The resolved trust boundary, as a message template. A template rather than a formatted
+        // string so the three values arrive as queryable fields, and a const so it can be
+        // concatenated into the untrusted-peer warning below (which prints the same resolved set)
+        // without either copy drifting from the other.
+        public const string TrustedSourcesTemplate =
+            "Trusted forwarded-header sources: networks=[{TrustedNetworks}] "
+            + "proxies=[{TrustedProxies}] forwardLimit={ForwardLimit}";
+
+        // The arguments TrustedSourcesTemplate expects, in order.
+        public static object?[] TrustedSourceValues(ForwardedHeadersOptions options) =>
+        [
+            string.Join(", ", options.KnownIPNetworks),
+            string.Join(", ", options.KnownProxies),
+            options.ForwardLimit?.ToString() ?? "unlimited",
+        ];
+
+        // Logged once at startup, at Information. A mis-set trust boundary is otherwise entirely
+        // silent: the middleware's own diagnostic is Debug and this app's minimum level is
+        // Information, so a deployment whose peer address falls outside the trusted set behaves
+        // exactly like the unfixed app - one global token bucket - with nothing in the log to say
+        // so. This line makes the resolved set greppable in `docker compose logs` on day one, which
+        // is why appsettings.json pins CSGOSkinAPI.Security at Information: turning the rest of the
+        // app down must not take this with it.
+        public static void LogTrustedSources(ILogger logger, ForwardedHeadersOptions options)
+            => logger.LogInformation(TrustedSourcesTemplate, TrustedSourceValues(options));
 
         // Mirrors the framework's own CheckKnownAddress, including the IPv4-mapped unwrap that lets
         // an IPv4 trusted range match the "::ffff:10.0.0.5" a dual-stack Kestrel reports. Used only
@@ -172,11 +185,10 @@ namespace CSGOSkinAPI.Security
     // is the rate limiter silently collapsing back to a single global bucket.
     //
     // One instance per app (Program.cs holds it), so the "once" is per host rather than per
-    // process - which keeps it honest under tests, where many hosts share one process. Console
-    // rather than ILogger to match the rest of this codebase; an ILogger migration is its own job.
-    public sealed class ForwardedTrustDiagnostics(ForwardedHeadersOptions options, Action<string>? log = null)
+    // process - which keeps it honest under tests, where many hosts share one process.
+    public sealed class ForwardedTrustDiagnostics(ForwardedHeadersOptions options, ILogger? logger = null)
     {
-        private readonly Action<string> log = log ?? Console.WriteLine;
+        private readonly ILogger logger = logger ?? NullLogger.Instance;
         private int warned;
 
         // Call BEFORE the forwarded-headers middleware: it needs the peer's real address, which
@@ -203,10 +215,14 @@ namespace CSGOSkinAPI.Security
             {
                 return false;
             }
-            log($"Ignoring forwarded headers from untrusted peer {peer?.ToString() ?? "(no address)"} "
-                + "- if that is your reverse proxy, the rate limiter is keying on it instead of on "
-                + "real client IPs. Add it to ForwardedHeaders:KnownNetworks. "
-                + TransportSecurity.DescribeTrustedSources(options));
+            // The peer, and the resolved trust boundary it failed against, are both fields - the
+            // log line alone is enough to act on without also being a sentence to parse.
+            logger.LogWarning(
+                "Ignoring forwarded headers from untrusted peer {UntrustedPeer} - if that is your "
+                + "reverse proxy, the rate limiter is keying on it instead of on real client IPs. "
+                + "Add it to ForwardedHeaders:KnownNetworks. "
+                + TransportSecurity.TrustedSourcesTemplate,
+                [peer?.ToString() ?? "(no address)", .. TransportSecurity.TrustedSourceValues(options)]);
             return true;
         }
     }

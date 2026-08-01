@@ -105,7 +105,18 @@ builder.Services.AddRateLimiter(options =>
     options.OnRejected = async (context, cancellationToken) =>
     {
         context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
-        Console.WriteLine($"Rate limited {context.HttpContext.Connection.RemoteIpAddress} on {context.HttpContext.Request.Path}");
+        // This callback is configured before the container exists, so the logger comes off the
+        // request rather than being captured here. The category is fixed so the line can be turned
+        // down on its own (a scripted client can produce a lot of these) without touching the rest
+        // of the app. The path is a parameter, not spliced text - though unlike ?url= it cannot
+        // carry a CR/LF in the first place: Kestrel rejects a request target containing one long
+        // before this runs.
+        context.HttpContext.RequestServices
+            .GetRequiredService<ILoggerFactory>()
+            .CreateLogger("CSGOSkinAPI.RateLimiting")
+            .LogWarning("Rate limited {ClientIp} on {RequestPath}",
+                context.HttpContext.Connection.RemoteIpAddress,
+                context.HttpContext.Request.Path.Value);
         await context.HttpContext.Response.WriteAsJsonAsync(
             new { error = "Too many requests. Please slow down and try again shortly." }, cancellationToken);
     };
@@ -135,8 +146,11 @@ var forwardedHeaderOptions = TransportSecurity.BuildForwardedHeadersOptions(app.
 // default private ranges, a KnownNetworks value narrowed too far, an env var written in the scalar
 // form - otherwise produces a working-looking app whose limiter has quietly collapsed back to one
 // global bucket, with nothing in the log to explain it.
-Console.WriteLine(TransportSecurity.DescribeTrustedSources(forwardedHeaderOptions));
-var forwardedTrustDiagnostics = new ForwardedTrustDiagnostics(forwardedHeaderOptions);
+var transportLoggerFactory = app.Services.GetRequiredService<ILoggerFactory>();
+TransportSecurity.LogTrustedSources(
+    transportLoggerFactory.CreateLogger(typeof(TransportSecurity)), forwardedHeaderOptions);
+var forwardedTrustDiagnostics = new ForwardedTrustDiagnostics(
+    forwardedHeaderOptions, transportLoggerFactory.CreateLogger(typeof(ForwardedTrustDiagnostics)));
 app.Use(async (context, next) =>
 {
     // Ahead of UseForwardedHeaders, which is about to overwrite the peer address this reads.
@@ -182,8 +196,12 @@ app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
     var error = context.Features.Get<IExceptionHandlerFeature>()?.Error;
     if (error != null)
     {
-        Console.WriteLine($"Unhandled exception on {context.Request.Path}: {error.Message}");
-        Console.WriteLine(error.StackTrace);
+        // The exception goes in as the exception argument rather than as its .Message, so the
+        // stack trace travels with the record instead of on a second, unattached line.
+        context.RequestServices
+            .GetRequiredService<ILoggerFactory>()
+            .CreateLogger("CSGOSkinAPI.UnhandledException")
+            .LogError(error, "Unhandled exception on {RequestPath}", context.Request.Path.Value);
     }
     context.Response.StatusCode = StatusCodes.Status500InternalServerError;
     await context.Response.WriteAsJsonAsync(new { error = "Internal server error" });
@@ -261,7 +279,7 @@ _ = Task.Run(async () =>
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"Initial Steam connection failed: {ex.Message}");
+        app.Logger.LogError(ex, "Initial Steam connection failed");
     }
 });
 
@@ -277,7 +295,7 @@ var constDataService = app.Services.GetRequiredService<ConstDataService>();
 var lifetime = app.Services.GetRequiredService<IHostApplicationLifetime>();
 lifetime.ApplicationStopping.Register(() =>
 {
-    Console.WriteLine("Application stopping, disconnecting from Steam...");
+    app.Logger.LogInformation("Application stopping, disconnecting from Steam...");
     steamService.Disconnect();
 });
 
