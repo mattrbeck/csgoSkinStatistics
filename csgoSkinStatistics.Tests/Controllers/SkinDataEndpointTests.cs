@@ -172,6 +172,29 @@ public class SkinDataEndpointTests(ApiFactory factory) : IClassFixture<ApiFactor
         Assert.Equal(before, _factory.Steam.Calls);
     }
 
+    [Theory]
+    // A value the ulong parameters cannot bind: model binding fails before the action runs.
+    [InlineData("/api?a=abc", "a")]
+    [InlineData("/api?s=notanumber&a=1", "s")]
+    // Numerically valid, but wider than ulong - the same binding failure.
+    [InlineData("/api?a=99999999999999999999999999", "a")]
+    public async Task UnbindableParameter_Is400InTheSameErrorShapeAsEveryOtherFailure(string path, string parameter)
+    {
+        // [ApiController] answers invalid model state with an RFC-9110 ProblemDetails by default,
+        // which would make `?a=abc` a different body shape (and content type) from `?a=0` on the
+        // same endpoint. The controller's InvalidModelStateAsError filter runs first and returns
+        // the API's one error shape instead.
+        var response = await _factory.CreateClient().GetAsync(path);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("application/json", response.Content.Headers.ContentType?.MediaType);
+        var json = await ReadJson(response);
+        Assert.Equal($"Invalid value for parameter '{parameter}'", json.GetProperty("error").GetString());
+        Assert.False(json.TryGetProperty("errors", out _));
+        // The rejected value itself is never echoed back into the response body.
+        Assert.DoesNotContain("abc", json.GetProperty("error").GetString());
+    }
+
     [Fact]
     public async Task MarketListingLink_ReachesTheGameCoordinatorWithNoOwner()
     {

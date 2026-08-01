@@ -1,8 +1,11 @@
+using Microsoft.AspNetCore.Mvc.Filters;
+
 namespace CSGOSkinAPI.Controllers
 {
     [ApiController]
     [Route("api")]
     [EnableRateLimiting("api")]
+    [InvalidModelStateAsError]
     public partial class SkinController(SteamService steamService, DatabaseService dbService, ConstDataService constDataService, IHttpClientFactory httpClientFactory, InventoryWarmService warmService, IMemoryCache cache, PriceService priceService) : ControllerBase
     {
         // SteamID64 of the first individual account; anything below is not a profile id.
@@ -103,15 +106,21 @@ namespace CSGOSkinAPI.Controllers
             return Ok(CreateResponse(itemInfo, constDataService, priceService, s, a, d, m));
         }
 
+        // `steamid` is deliberately nullable. A non-nullable string parameter on an [ApiController]
+        // is implicitly [Required], so MVC would reject a missing/blank value with an RFC-9110
+        // ProblemDetails body *before* this action runs - the one error on this endpoint with no
+        // `error` field, and one the guard below could never reach. Nullable hands the decision back
+        // here; IsNullOrWhiteSpace (not IsNullOrEmpty) keeps rejecting the all-whitespace value that
+        // the implicit RequiredAttribute used to catch, so "   " never reaches a Steam lookup.
         [HttpGet("inventory")]
-        public async Task<IActionResult> GetInventoryData([FromQuery] string steamid)
+        public async Task<IActionResult> GetInventoryData([FromQuery] string? steamid)
         {
             SemaphoreSlim? gate = null;
             string? gateKey = null;
             var acquired = false;
             try
             {
-                if (string.IsNullOrEmpty(steamid))
+                if (string.IsNullOrWhiteSpace(steamid))
                 {
                     return BadRequest(new { error = "Steam ID is required" });
                 }
@@ -416,10 +425,11 @@ namespace CSGOSkinAPI.Controllers
             return StatusCode(statusCode, new { error });
         }
 
+        // Nullable, and whitespace-rejecting, for the same reason as GetInventoryData above.
         [HttpGet("profile")]
-        public async Task<IActionResult> GetProfile([FromQuery] string steamid)
+        public async Task<IActionResult> GetProfile([FromQuery] string? steamid)
         {
-            if (string.IsNullOrEmpty(steamid))
+            if (string.IsNullOrWhiteSpace(steamid))
             {
                 return BadRequest(new { error = "Steam ID is required" });
             }
@@ -839,6 +849,47 @@ namespace CSGOSkinAPI.Controllers
                 slab = wrapped != 0,
                 wrapped_sticker = wrapped,
             };
+        }
+    }
+
+    // Every error this API returns is a status code plus a JSON `{ "error": "..." }` body - except
+    // the ones model binding produces, which never reach an action at all. [ApiController] installs
+    // its own filter (order -2000) that turns invalid model state into an RFC-9110 ProblemDetails:
+    // a different content type and a body with no `error` field, on the very same endpoints. That
+    // is what made `/api?a=abc` answer in one shape while `/api?a=0` answered in another.
+    //
+    // This filter runs ahead of that one and short-circuits with the house shape, so a caller has
+    // exactly one error body to parse. The remaining way to trip it on this controller is an
+    // unparseable numeric parameter on /api (`s`, `a`, `d`, `m`) - `steamid` and `url` are nullable,
+    // so a missing value binds to null and the action's own guard answers.
+    internal sealed class InvalidModelStateAsErrorAttribute : ActionFilterAttribute
+    {
+        // [ApiController]'s ModelStateInvalidFilter sits at -2000; a lower order runs first, and
+        // setting a Result there short-circuits the rest of the pipeline.
+        private const int BeforeApiControllerModelStateFilter = -2100;
+
+        public InvalidModelStateAsErrorAttribute() => Order = BeforeApiControllerModelStateFilter;
+
+        public override void OnActionExecuting(ActionExecutingContext context)
+        {
+            if (context.ModelState.IsValid)
+            {
+                return;
+            }
+
+            // Name the parameter so the caller can fix the request. The key comes from our own
+            // action signature, but it is checked rather than trusted: nothing that isn't a plain
+            // identifier is echoed back into a response body.
+            var key = context.ModelState.FirstOrDefault(entry => entry.Value?.Errors.Count > 0).Key;
+            var namesAParameter = !string.IsNullOrEmpty(key) && key.Length <= 64
+                && key.All(c => char.IsAsciiLetterOrDigit(c) || c == '_');
+
+            context.Result = new BadRequestObjectResult(new
+            {
+                error = namesAParameter
+                    ? $"Invalid value for parameter '{key}'"
+                    : "Invalid request parameters",
+            });
         }
     }
 }
