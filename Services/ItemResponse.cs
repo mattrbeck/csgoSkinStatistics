@@ -81,11 +81,13 @@ namespace CSGOSkinAPI.Services
             var kit = constData.ResolveSticker(s.sticker_id);
             return new
             {
+                s.slot,
                 s.sticker_id,
                 s.wear,
                 rotation = s.Rotation(),
                 offset_x = s.OffsetX(),
                 offset_y = s.OffsetY(),
+                pattern = s.Pattern(),
                 name = kit?.Name ?? "",
                 image = kit?.Image ?? "",
             };
@@ -101,8 +103,10 @@ namespace CSGOSkinAPI.Services
             var kit = wrapped != 0 ? constData.ResolveSticker(wrapped) : constData.ResolveKeychain(k.sticker_id);
             return new
             {
+                k.slot,
                 k.sticker_id,
                 k.wear,
+                rotation = k.Rotation(),
                 offset_x = k.OffsetX(),
                 offset_y = k.OffsetY(),
                 pattern = k.Pattern(),

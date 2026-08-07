@@ -40,21 +40,24 @@ public class ItemResponseTests(ConstDataFixture fixture) : IClassFixture<ConstDa
     {
         var sticker = new CEconItemPreviewDataBlock.Sticker
         {
-            slot = 0,
+            slot = 2,
             sticker_id = StickerAndKeychainId,
             wear = 0.25f,
             rotation = -14.5f,
             offset_x = 0.125f,
             offset_y = -0.5f,
+            pattern = 88,
         };
 
         var json = ToJson(ItemResponse.MakeStickerDto(sticker, _constData));
 
+        Assert.Equal(2u, json.GetProperty("slot").GetUInt32());
         Assert.Equal(StickerAndKeychainId, json.GetProperty("sticker_id").GetUInt32());
         Assert.Equal(0.25f, json.GetProperty("wear").GetSingle());
         Assert.Equal(-14.5f, json.GetProperty("rotation").GetSingle());
         Assert.Equal(0.125f, json.GetProperty("offset_x").GetSingle());
         Assert.Equal(-0.5f, json.GetProperty("offset_y").GetSingle());
+        Assert.Equal(88u, json.GetProperty("pattern").GetUInt32());
     }
 
     [Fact]
@@ -74,6 +77,7 @@ public class ItemResponseTests(ConstDataFixture fixture) : IClassFixture<ConstDa
         Assert.Equal(JsonValueKind.Null, json.GetProperty("rotation").ValueKind);
         Assert.Equal(JsonValueKind.Null, json.GetProperty("offset_x").ValueKind);
         Assert.Equal(JsonValueKind.Null, json.GetProperty("offset_y").ValueKind);
+        Assert.Equal(JsonValueKind.Null, json.GetProperty("pattern").ValueKind);
     }
 
     [Fact]
@@ -87,6 +91,7 @@ public class ItemResponseTests(ConstDataFixture fixture) : IClassFixture<ConstDa
             rotation = 0f,
             offset_x = 0f,
             offset_y = 0f,
+            pattern = 0,
         };
 
         var json = ToJson(ItemResponse.MakeStickerDto(sticker, _constData));
@@ -94,6 +99,7 @@ public class ItemResponseTests(ConstDataFixture fixture) : IClassFixture<ConstDa
         Assert.Equal(0f, json.GetProperty("rotation").GetSingle());
         Assert.Equal(0f, json.GetProperty("offset_x").GetSingle());
         Assert.Equal(0f, json.GetProperty("offset_y").GetSingle());
+        Assert.Equal(0u, json.GetProperty("pattern").GetUInt32());
     }
 
     [Fact]
@@ -129,9 +135,10 @@ public class ItemResponseTests(ConstDataFixture fixture) : IClassFixture<ConstDa
     {
         var charm = new CEconItemPreviewDataBlock.Sticker
         {
-            slot = 0,
+            slot = 3,
             sticker_id = StickerAndKeychainId,
             wear = 0f,
+            rotation = 42f,
             offset_x = 1.5f,
             offset_y = -2.5f,
             pattern = 88,
@@ -144,6 +151,8 @@ public class ItemResponseTests(ConstDataFixture fixture) : IClassFixture<ConstDa
         Assert.Equal(expected.Name, json.GetProperty("name").GetString());
         Assert.False(json.GetProperty("slab").GetBoolean());
         Assert.Equal(0u, json.GetProperty("wrapped_sticker").GetUInt32());
+        Assert.Equal(3u, json.GetProperty("slot").GetUInt32());
+        Assert.Equal(42f, json.GetProperty("rotation").GetSingle());
         Assert.Equal(1.5f, json.GetProperty("offset_x").GetSingle());
         Assert.Equal(-2.5f, json.GetProperty("offset_y").GetSingle());
         Assert.Equal(88u, json.GetProperty("pattern").GetUInt32());
@@ -181,6 +190,7 @@ public class ItemResponseTests(ConstDataFixture fixture) : IClassFixture<ConstDa
 
         var json = ToJson(ItemResponse.MakeKeychainDto(charm, _constData));
 
+        Assert.Equal(JsonValueKind.Null, json.GetProperty("rotation").ValueKind);
         Assert.Equal(JsonValueKind.Null, json.GetProperty("offset_x").ValueKind);
         Assert.Equal(JsonValueKind.Null, json.GetProperty("offset_y").ValueKind);
         Assert.Equal(JsonValueKind.Null, json.GetProperty("pattern").ValueKind);
