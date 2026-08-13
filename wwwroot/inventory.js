@@ -184,6 +184,30 @@ function formatPriceCents(cents) {
   return '$' + (cents / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+// Explain where a price came from, for the hover title on a card's price tag. The number itself
+// is only as good as its basis: a median of real sales is a measurement, a listing is an asking
+// price nobody has paid, and a neighbouring wear is a different item. Read by inventory-item.js.
+function describePriceBasis(price) {
+  if (!price) return '';
+  const n = price.sale_volume;
+  const sales = n === 1 ? '1 sale' : `${n} sales`;
+  const window = { '24h': '24 hours', '7d': '7 days', '30d': '30 days', '90d': '90 days' }[price.window];
+  switch (price.basis) {
+    case 'sale':
+      return `Median of ${sales} on Skinport${window ? ` in the last ${window}` : ''}`;
+    case 'stale-sale':
+      return `Median of ${sales}, the last time this sold on Skinport (over 90 days ago)`;
+    case 'listing':
+      return 'Skinport asking price — no recorded sales, so this is what sellers want, not what it fetched';
+    case 'nearest-wear-sale':
+      return `Median of ${sales} of the nearest wear of this skin — not this exact item`;
+    case 'nearest-wear-listing':
+      return 'Skinport asking price for the nearest wear of this skin — not this exact item';
+    default:
+      return '';
+  }
+}
+
 // Whether the "Show prices" filter is on; mirrored onto each card as the show-price attribute so
 // the (shadow-DOM) price line's visibility is pure CSS. Off by default to keep cards compact.
 let showPricesEnabled = false;
@@ -304,10 +328,12 @@ function renderHighlights(processedItems) {
   if (stattrak) chips.push(`${stattrak} StatTrak`);
   if (special) chips.push({ text: `${special} Rare Patterns`, cls: 'special' });
 
-  // Total Skinport value, summed over the items we have a suggested price for (some items
-  // aren't priced, so it's a floor). Shown first as the headline number for the inventory.
+  // Total Skinport value, summed over the items we have a price for (some items aren't priced, so
+  // it's a floor). Uses each item's sale-based value where we have one rather than its asking
+  // price, which otherwise overstates the total by roughly a quarter. Shown first as the headline
+  // number for the inventory.
   const totalCents = inventoryItems.reduce(
-    (sum, it) => sum + ((it.steamData && it.steamData.price && it.steamData.price.suggested) || 0), 0);
+    (sum, it) => sum + ((it.steamData && it.steamData.price && it.steamData.price.value) || 0), 0);
   if (totalCents > 0) {
     chips.unshift({ text: formatPriceCents(totalCents), cls: 'value', title: 'Total Skinport value of priced items' });
   }
@@ -401,8 +427,8 @@ function sortItems(items, field, order) {
         }
         break;
       case 'price':
-        valueA = a.steamData && a.steamData.price ? a.steamData.price.suggested : null;
-        valueB = b.steamData && b.steamData.price ? b.steamData.price.suggested : null;
+        valueA = a.steamData && a.steamData.price ? a.steamData.price.value : null;
+        valueB = b.steamData && b.steamData.price ? b.steamData.price.value : null;
         // Unpriced items sink to the end in both directions (same as float above).
         if (valueA == null || valueB == null) {
           if (valueA == valueB) return 0;

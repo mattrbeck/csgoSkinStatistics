@@ -170,6 +170,30 @@ namespace CSGOSkinAPI.Services
             using var pricesCommand = new SqliteCommand(createPricesTableCommand, connection);
             await pricesCommand.ExecuteNonQueryAsync();
 
+            // What items actually SOLD for, from Skinport's sales-history feed, as opposed to the
+            // `prices` table's live-listing asks. This is a running index rather than a mirror of
+            // the feed: an item only appears in the feed's windows while it keeps selling, so a
+            // rarely-traded item would blink out of a plain snapshot. Rows here are never deleted,
+            // so the last sale we ever observed stays available (and ages, via updated_at, into an
+            // approximate value) long after the item stops trading. That matters because those are
+            // exactly the items with no live listing to fall back on.
+            //
+            // sale_window records which window the median came from ("24h"/"7d"/"30d"/"90d") and
+            // volume how many sales backed it, so a thinly-traded median can be flagged. pooled is
+            // 1 when several feed rows shared this market_hash_name (Doppler phases, gem tiers) and
+            // were combined, since we can't tell those apart from a Steam name alone.
+            var createSalePricesTableCommand = @"
+                CREATE TABLE IF NOT EXISTS sale_prices (
+                    market_hash_name TEXT PRIMARY KEY NOT NULL,
+                    median_cents INTEGER NOT NULL,
+                    volume INTEGER NOT NULL,
+                    sale_window TEXT NOT NULL,
+                    pooled INTEGER NOT NULL,
+                    updated_at TEXT NOT NULL
+                )";
+            using var salePricesCommand = new SqliteCommand(createSalePricesTableCommand, connection);
+            await salePricesCommand.ExecuteNonQueryAsync();
+
             // Lifecycle: once per process start. The path is the field an operator most often wants
             // when the cache appears empty - it is relative by default, so which working directory
             // the app was launched from decides which file it actually opened.
@@ -232,6 +256,57 @@ namespace CSGOSkinAPI.Services
             // the app.
             _logger.LogDebug(
                 "Persisted {PriceRowCount} price rows stamped {PricesUpdatedAt:u}.", prices.Count, updatedAt);
+        }
+
+        // Load the whole persisted sale-price index, each row carrying its own last-seen time.
+        // Empty when never populated.
+        public async Task<Dictionary<string, (int MedianCents, int Volume, string Window, bool Pooled, DateTime UpdatedAt)>> LoadSalePricesAsync()
+        {
+            using var connection = await OpenConnectionAsync();
+
+            using var command = new SqliteCommand(
+                "SELECT market_hash_name, median_cents, volume, sale_window, pooled, updated_at FROM sale_prices",
+                connection);
+            using var reader = await command.ExecuteReaderAsync();
+
+            var sales = new Dictionary<string, (int, int, string, bool, DateTime)>(StringComparer.Ordinal);
+            while (await reader.ReadAsync())
+            {
+                var name = reader.GetString(0);
+                var updatedAt = DateTime.Parse(reader.GetString(5), null, DateTimeStyles.RoundtripKind);
+                sales[name] = (reader.GetInt32(1), reader.GetInt32(2), reader.GetString(3), reader.GetInt32(4) != 0, updatedAt);
+            }
+            return sales;
+        }
+
+        // Upsert the sales observed in the current feed. Names absent from this batch are left
+        // untouched rather than deleted, which is what makes the table a running index: an item
+        // that has stopped selling keeps the last median we ever saw for it, with its original
+        // timestamp, so PriceService can age it into an approximate value instead of losing it.
+        public async Task SaveSalePricesAsync(
+            IReadOnlyDictionary<string, (int MedianCents, int Volume, string Window, bool Pooled)> sales,
+            DateTime updatedAt)
+        {
+            using var connection = await OpenConnectionAsync();
+            using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync();
+
+            const string upsert = @"INSERT OR REPLACE INTO sale_prices
+                (market_hash_name, median_cents, volume, sale_window, pooled, updated_at)
+                VALUES (@name, @median, @volume, @window, @pooled, @updated_at)";
+            var stamp = updatedAt.ToString("o");
+            foreach (var (name, sale) in sales)
+            {
+                using var command = new SqliteCommand(upsert, connection, transaction);
+                command.Parameters.AddWithValue("@name", name);
+                command.Parameters.AddWithValue("@median", sale.MedianCents);
+                command.Parameters.AddWithValue("@volume", sale.Volume);
+                command.Parameters.AddWithValue("@window", sale.Window);
+                command.Parameters.AddWithValue("@pooled", sale.Pooled ? 1 : 0);
+                command.Parameters.AddWithValue("@updated_at", stamp);
+                await command.ExecuteNonQueryAsync();
+            }
+
+            await transaction.CommitAsync();
         }
 
         public async Task<List<CEconItemPreviewDataBlock.Sticker>> GetStickersAsync(ulong itemId, bool stickersTable)

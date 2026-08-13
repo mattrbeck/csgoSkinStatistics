@@ -56,18 +56,35 @@ namespace CSGOSkinAPI.Services
             };
         }
 
-        // Skinport base price for a market_hash_name, or null when we have nothing to show. May be
-        // approximate (a value that aged out of the feed, or the nearest wear of the same skin) -
-        // the client prefixes a "~" then. Cents keep the value exact; the client formats it.
+        // Skinport base price for a market_hash_name, or null when we have nothing to show.
+        //
+        // `value` is the headline: our best estimate of what the item sells for, which is a median
+        // of recent completed sales wherever we have one and a listing price only as a fallback.
+        // `basis` names which, so the client can say so rather than presenting a guess and a
+        // measured sale price identically. May be approximate (an ask, a stale sale, a pooled
+        // Doppler phase, or an adjacent wear) - the client prefixes a "~" then. `min` and
+        // `suggested` carry the live-listing detail when the item is listed at all. Cents keep the
+        // value exact; the client formats it.
         internal static object? BuildPrice(PriceService priceService, string marketHashName)
         {
             var price = priceService.Resolve(marketHashName);
-            if (price == null || price.SuggestedCents == null)
+            if (price == null || price.ValueCents == null)
             {
                 return null;
             }
             return new
             {
+                value = price.ValueCents,
+                basis = price.Basis switch
+                {
+                    PriceBasis.Sale => "sale",
+                    PriceBasis.Listing => "listing",
+                    PriceBasis.StaleSale => "stale-sale",
+                    PriceBasis.NearestWearSale => "nearest-wear-sale",
+                    _ => "nearest-wear-listing",
+                },
+                sale_volume = price.SaleVolume,
+                window = price.SaleWindow,
                 min = price.MinCents,
                 suggested = price.SuggestedCents,
                 currency = PriceService.Currency,

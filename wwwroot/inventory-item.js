@@ -632,19 +632,22 @@ class InventoryItem extends HTMLElement {
       rarityElement.style.color = rarityColorOf(rarity);
     }
 
-    // Skinport suggested price, top-right (the CSS gates visibility on the show-price host
-    // attribute; .has-price keeps it hidden for items we have no price for).
+    // Skinport value, top-right (the CSS gates visibility on the show-price host attribute;
+    // .has-price keeps it hidden for items we have no price for).
     const priceTag = this.shadowRoot.querySelector('[data-field="price"]');
     if (priceTag) {
       const price = this.itemData.price;
-      const cents = price && price.suggested;
+      const cents = price && price.value;
       if (cents != null) {
-        // A leading "~" marks an approximate value (a price that aged out of Skinport's feed, or
-        // the nearest wear of the same skin when the exact variant was never listed).
+        // A leading "~" marks an approximate value. The basis is worth spelling out on hover but
+        // not on the card - a median of real sales and a borrowed asking price are very different
+        // claims, and only the tooltip has room to say which this is.
         priceTag.textContent = (price.approximate ? '~' : '') + formatPriceCents(cents);
+        priceTag.title = describePriceBasis(price);
         priceTag.classList.add('has-price');
       } else {
         priceTag.textContent = '';
+        priceTag.removeAttribute('title');
         priceTag.classList.remove('has-price');
       }
     }

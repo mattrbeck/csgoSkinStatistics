@@ -87,6 +87,17 @@ public class PriceServiceTests : IDisposable
             $"\"min_price\":{(i.Min is double m ? m.ToString(System.Globalization.CultureInfo.InvariantCulture) : "null")}," +
             $"\"suggested_price\":{(i.Suggested is double s ? s.ToString(System.Globalization.CultureInfo.InvariantCulture) : "null")}}}")) + "]";
 
+    // One row per item in /v1/sales/history's shape. Only the 30-day window is filled, which is
+    // enough for ChooseSale to select it whenever volume clears the confidence bar; the window
+    // selection rules themselves are pinned against the real payload in SkinportSalesFeedTests.
+    private static string SalesFeed(params (string Name, double Median, int Volume)[] items)
+        => "[" + string.Join(",", items.Select(i =>
+            $"{{\"market_hash_name\":\"{i.Name}\",\"version\":null," +
+            "\"last_24_hours\":{\"median\":null,\"volume\":0}," +
+            "\"last_7_days\":{\"median\":null,\"volume\":0}," +
+            $"\"last_30_days\":{{\"median\":{i.Median.ToString(System.Globalization.CultureInfo.InvariantCulture)},\"volume\":{i.Volume}}}," +
+            $"\"last_90_days\":{{\"median\":{i.Median.ToString(System.Globalization.CultureInfo.InvariantCulture)},\"volume\":{i.Volume}}}}}")) + "]";
+
     private async Task<DatabaseService> NewDbAsync()
     {
         var db = new DatabaseService(_dbPath);
@@ -94,11 +105,23 @@ public class PriceServiceTests : IDisposable
         return db;
     }
 
+    private static bool IsSalesRequest(HttpRequestMessage request) =>
+        request.RequestUri!.AbsolutePath.Contains("/sales/history", StringComparison.Ordinal);
+
     private (PriceService Service, StubHandler Handler, StubClientFactory Factory) NewService(
         DatabaseService db, Func<HttpRequestMessage, HttpResponseMessage> responder,
-        ILogger<PriceService>? logger = null)
+        ILogger<PriceService>? logger = null,
+        Func<HttpRequestMessage, HttpResponseMessage>? salesResponder = null)
     {
-        var handler = new StubHandler(responder);
+        // A refresh pulls two feeds now. The tests below are overwhelmingly about listings, so
+        // their responders only describe /v1/items; serve the sales feed an empty array on their
+        // behalf rather than making every one of them say so. PriceService reads that as "nothing
+        // sold, keep whatever is indexed", which leaves the listing paths exactly as they were.
+        // A test that wants sale data passes salesResponder and this default never fires.
+        var handler = new StubHandler(request =>
+            IsSalesRequest(request)
+                ? (salesResponder ?? (_ => Json("[]")))(request)
+                : responder(request));
         var factory = new StubClientFactory(handler);
         var service = new PriceService(factory, db, logger ?? new CapturingLogger<PriceService>());
         _disposables.Add(handler);
@@ -112,6 +135,15 @@ public class PriceServiceTests : IDisposable
     {
         var db = await NewDbAsync();
         var (service, _, _) = NewService(db, _ => Json(Feed(items)));
+        await service.RefreshAsync(CancellationToken.None);
+        return service;
+    }
+
+    // As above but with both feeds, for the tests that care how listings and sales interact.
+    private async Task<PriceService> ServiceWithFeedsAsync(string itemsFeed, string salesFeed)
+    {
+        var db = await NewDbAsync();
+        var (service, _, _) = NewService(db, _ => Json(itemsFeed), salesResponder: _ => Json(salesFeed));
         await service.RefreshAsync(CancellationToken.None);
         return service;
     }
@@ -302,6 +334,136 @@ public class PriceServiceTests : IDisposable
         Assert.Equal(2000, result.MinCents);
         Assert.Equal(2200, result.SuggestedCents);
         Assert.True(result.Approximate);
+    }
+
+    // ---- Sales history: the headline value, and how it interacts with the wear borrow ----
+    //
+    // These drive both feeds through the real fetch/merge path, so they cover the wiring the pure
+    // ChooseSale/ResolveExact tests in PriceServiceSaleTests cannot see.
+
+    [Fact]
+    public async Task Resolve_ExactSale_OutranksTheExactListing()
+    {
+        // The whole point: an item listed at $22 that actually sells for $15 is worth $15.
+        var service = await ServiceWithFeedsAsync(
+            Feed(("AK-47 | Redline (Field-Tested)", 20.00, 22.00)),
+            SalesFeed(("AK-47 | Redline (Field-Tested)", 15.00, 40)));
+
+        var result = service.Resolve("AK-47 | Redline (Field-Tested)");
+
+        Assert.NotNull(result);
+        Assert.Equal(1500, result.ValueCents);
+        Assert.Equal(PriceBasis.Sale, result.Basis);
+        Assert.False(result.Approximate);
+        // The listing detail is still carried, just not used as the headline.
+        Assert.Equal(2200, result.SuggestedCents);
+    }
+
+    [Fact]
+    public async Task Resolve_UnlistedItem_PrefersANeighboursSalesOverItsAsk()
+    {
+        // Field-Tested is unlisted and unsold, so we borrow - and what we borrow is the neighbour's
+        // sale median, not its asking price.
+        var service = await ServiceWithFeedsAsync(
+            Feed(("AK-47 | Redline (Minimal Wear)", 20.00, 22.00)),
+            SalesFeed(("AK-47 | Redline (Minimal Wear)", 18.00, 25)));
+
+        var result = service.Resolve("AK-47 | Redline (Field-Tested)");
+
+        Assert.NotNull(result);
+        Assert.Equal(1800, result.ValueCents);
+        Assert.Equal(PriceBasis.NearestWearSale, result.Basis);
+        Assert.True(result.Approximate);
+    }
+
+    [Fact]
+    public async Task Resolve_BothNeighboursSold_AveragesTheirSaleMedians()
+    {
+        // The one-tier cap and the averaging rule both still apply; only the number being averaged
+        // changes from an ask to a sale.
+        var service = await ServiceWithFeedsAsync(
+            Feed(("AK-47 | Redline (Minimal Wear)", 30.00, 33.00), ("AK-47 | Redline (Well-Worn)", 8.00, 9.00)),
+            SalesFeed(("AK-47 | Redline (Minimal Wear)", 24.00, 12), ("AK-47 | Redline (Well-Worn)", 6.00, 12)));
+
+        var result = service.Resolve("AK-47 | Redline (Field-Tested)");
+
+        Assert.NotNull(result);
+        Assert.Equal(1500, result.ValueCents); // mean of $24 and $6
+        Assert.Equal(PriceBasis.NearestWearSale, result.Basis);
+        Assert.True(result.Approximate);
+    }
+
+    [Fact]
+    public async Task Resolve_NeighbourTwoTiersOutHasSales_IsStillNotBorrowedFrom()
+    {
+        // Sales data must not become a way round the one-tier cap: a Battle-Scarred sale is no
+        // guide to a Factory New, however real the sale was.
+        var service = await ServiceWithFeedsAsync(
+            Feed(), SalesFeed(("AK-47 | Redline (Battle-Scarred)", 5.00, 50)));
+
+        Assert.Null(service.Resolve("AK-47 | Redline (Factory New)"));
+    }
+
+    [Fact]
+    public async Task RefreshAsync_ItemThatStopsSelling_KeepsItsLastObservedMedian()
+    {
+        // The running-index rule: Skinport's windows only reach back 90 days, so a rarely-traded
+        // item leaves the sales feed entirely. Dropping it would leave exactly the items with no
+        // listing unpriced, which is the case the sale index exists to serve.
+        var db = await NewDbAsync();
+        var sales = new Queue<string>([
+            SalesFeed(("AWP | Dragon Lore (Field-Tested)", 2500.00, 3), ("AK-47 | Redline (Field-Tested)", 15.00, 90)),
+            SalesFeed(("AK-47 | Redline (Field-Tested)", 16.00, 88)),
+        ]);
+        var (service, _, _) = NewService(
+            db, _ => Json(Feed()), salesResponder: _ => Json(sales.Dequeue()));
+
+        await service.RefreshAsync(CancellationToken.None);
+        await service.RefreshAsync(CancellationToken.None);
+
+        var goneQuiet = service.Resolve("AWP | Dragon Lore (Field-Tested)");
+        Assert.NotNull(goneQuiet);
+        Assert.Equal(250000, goneQuiet.ValueCents);
+        Assert.Equal(PriceBasis.Sale, goneQuiet.Basis);
+        Assert.Equal(1600, service.Resolve("AK-47 | Redline (Field-Tested)")!.ValueCents);
+    }
+
+    [Fact]
+    public async Task Resolve_SaleIndexSurvivesARestart()
+    {
+        // Sale medians cannot be rebuilt from one fetch the way listings can, so the persisted
+        // index is the only thing standing between a redeploy and a pile of unpriced rare items.
+        var db = await NewDbAsync();
+        var (first, _, _) = NewService(
+            db, _ => Json(Feed()),
+            salesResponder: _ => Json(SalesFeed(("AWP | Dragon Lore (Field-Tested)", 2500.00, 3))));
+        await first.RefreshAsync(CancellationToken.None);
+
+        // A second service over the same database is what a restart looks like.
+        var (restarted, handler, _) = NewService(db, _ => Json(Feed()));
+        await restarted.LoadPersistedSalePricesAsync();
+
+        var result = restarted.Resolve("AWP | Dragon Lore (Field-Tested)");
+        Assert.NotNull(result);
+        Assert.Equal(250000, result.ValueCents);
+        Assert.Empty(handler.Requests); // served from the database, not the network
+    }
+
+    [Fact]
+    public async Task RefreshAsync_SalesFeedFailing_LeavesListingsWorking()
+    {
+        // The two feeds are independent; a sales outage must not cost us the listing prices.
+        var db = await NewDbAsync();
+        var (service, _, _) = NewService(
+            db, _ => Json(Feed(("AK-47 | Redline (Field-Tested)", 12.00, 15.00))),
+            salesResponder: _ => Json("nonsense", HttpStatusCode.InternalServerError));
+
+        await service.RefreshAsync(CancellationToken.None);
+
+        var result = service.Resolve("AK-47 | Redline (Field-Tested)");
+        Assert.NotNull(result);
+        Assert.Equal(1500, result.ValueCents);
+        Assert.Equal(PriceBasis.Listing, result.Basis);
     }
 
     [Fact]
@@ -499,15 +661,18 @@ public class PriceServiceTests : IDisposable
     [Fact]
     public async Task RefreshAsync_UsesTheSkinportNamedClient()
     {
-        // The named client is what carries AutomaticDecompression; the feed is Brotli-only and a
-        // plain client 406s, so the name is load-bearing.
+        // The named client is what carries AutomaticDecompression; both feeds are Brotli-only and a
+        // plain client 406s, so the name is load-bearing for each of them - including the sales
+        // history fetch, which is the easy one to forget.
         var db = await NewDbAsync();
         var (service, handler, factory) = NewService(db, _ => Json(Feed(("AK-47 | Redline (Field-Tested)", 1.00, 2.00))));
 
         await service.RefreshAsync(CancellationToken.None);
 
-        Assert.Equal("skinport", Assert.Single(factory.NamesRequested));
-        Assert.Contains("api.skinport.com", Assert.Single(handler.Requests));
+        Assert.Equal(["skinport", "skinport"], factory.NamesRequested);
+        Assert.All(handler.Requests, url => Assert.Contains("api.skinport.com", url));
+        Assert.Contains(handler.Requests, url => url.Contains("/v1/items"));
+        Assert.Contains(handler.Requests, url => url.Contains("/v1/sales/history"));
     }
 
     [Fact]
@@ -753,7 +918,8 @@ public class PriceServiceTests : IDisposable
         await WaitForAsync(() => service.UpdatedAtUtc != null, "the background loop's first refresh");
         await service.StopAsync(CancellationToken.None);
 
-        Assert.Single(handler.Requests);
+        // Both feeds: listings and sales history.
+        Assert.Equal(2, handler.Requests.Count);
         Assert.Equal(1500, service.Resolve("AK-47 | Redline (Field-Tested)")!.SuggestedCents);
     }
 
@@ -786,7 +952,7 @@ public class PriceServiceTests : IDisposable
         var (service, handler, _) = NewService(db, _ => Json(Feed(("AK-47 | Redline (Field-Tested)", 20.00, 25.00))));
 
         await service.StartAsync(CancellationToken.None);
-        await WaitForAsync(() => handler.Requests.Count == 1, "the startup refresh of a stale snapshot");
+        await WaitForAsync(() => handler.Requests.Count == 2, "the startup refresh of a stale snapshot");
         await WaitForAsync(() => service.Resolve("AK-47 | Redline (Field-Tested)")!.SuggestedCents == 2500,
             "the feed to replace the stale snapshot");
         await service.StopAsync(CancellationToken.None);
