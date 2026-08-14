@@ -1,0 +1,238 @@
+:root {
+    --gray: #1F2D3A;
+    --dark: #0F1D2A;
+    --light: #2F3D4A;
+    --pop: #2ECC71;
+    --text: #ECF0F1;
+}
+
+.pop {
+    color: var(--pop);
+}
+
+body {
+    overflow-x: hidden;
+    position: relative;
+}
+
+::selection {
+    background: var(--text);
+}
+
+html {
+    height: 100%;
+    font-size: 16px;
+    color: var(--text);
+    background: var(--gray);
+    font-family: 'Lato', sans-serif;
+    border: none;
+    border-radius: 4px;
+    outline: none;
+}
+
+#ping {
+    color: var(--pop);
+    position: absolute;
+    top: 0;
+    left: 0;
+    margin: 4px;
+    font-size: 14px;
+}
+
+.github-corner svg {
+    fill: var(--dark);
+    color: var(--gray);
+    position: absolute;
+    top: 0;
+    border: 0;
+    right: 0;
+}
+
+body {
+    min-height: 100%;
+    margin: 0;
+}
+
+#info_container_outer {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+#info_container {
+    max-width: 660px;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+.info_item {
+    text-align: center;
+    width: 300px;
+    margin: 4px;
+}
+
+.item_title {
+    margin: 0 auto;
+    padding: 4px;
+}
+
+.item_desc {
+    background-color: var(--dark);
+    border-radius: 4px;
+    position: relative;
+}
+
+.item_desc > p {
+    margin: 0 auto;
+    padding: 4px;
+}
+
+.item_desc:hover {
+    animation: text-pop .5s forwards;
+}
+
+.item_desc:not(:hover) {
+    animation: pop-text .5s forwards;
+}
+
+#stattrak-indicator {
+    position: absolute;
+    top: 0;
+    left: -12px;
+    max-height: 0;
+    transition: all .5s;
+}
+
+#stattrak-indicator.yes {
+    max-height: 28px;
+    top: -14px;
+}
+
+.knife::before {
+    content: "\2605  ";
+    color: var(--pop);
+}
+
+#container {
+    width: 100%;
+    padding-top: 100px;
+    margin: 0 auto;
+}
+
+#status_outer {
+    margin-bottom: 30px;
+}
+
+#status {
+    text-align: center;
+    padding: 4px;
+}
+
+h1 {
+    text-align: center;
+    font-size: 32px;
+}
+
+form {
+    display: table;
+    margin: 0 auto;
+}
+
+a, a:visited, a:hover, a:focus, a:active {
+    text-decoration: none;
+    color: var(--text);
+}
+
+input {
+    border: none;
+    border-radius: 4px;
+    color: var(--text);
+    font-family: Lato, sans-serif;
+}
+
+input[type=button] {
+    -webkit-appearance: none;
+    background: var(--gray);
+}
+
+#button {
+    display:inline-block;
+    width: 608px;
+    text-align: center;
+    padding: 4px;
+    font-size: 16px;
+}
+
+#button:hover {
+    animation: gray-light .5s forwards;
+}
+
+#button:not(:hover) {
+    animation: light-gray .5s forwards;
+}
+
+form * {
+  box-sizing: border-box;
+}
+
+input[type=text] {
+    width: 608px;
+    background: var(--dark);
+    text-align: center;
+    padding: 4px;
+    font-size: 16px;
+    border: none;
+}
+
+input[type=text]:focus, input[type="radio"]:checked + label {
+    background: var(--light);
+}
+input[type="text"]:hover {
+    animation: dark-light .5s forwards;
+}
+
+input[type="text"]:not(:hover):not(:focus) {
+    animation: light-dark .5s forwards;
+}
+
+@media (max-width: 608px) {
+    input[type=text] {
+        width: 100vw;
+        font-size: 12px;
+    }
+
+    #button {
+        width: 100vw;
+    }
+}
+
+@keyframes light-dark {
+    from {background-color: var(--light);}
+    to {background-color: var(--dark);}
+}
+
+@keyframes dark-light {
+    from {background-color: var(--dark);}
+    to {background-color: var(--light);}
+}
+
+@keyframes gray-light {
+    from {background-color: var(--gray);}
+    to {background-color: var(--light);}
+}
+
+@keyframes light-gray {
+    from {background-color: var(--light);}
+    to {background-color: var(--gray);}
+}
+
+@keyframes text-pop {
+    from {color: var(--text);}
+    to {color: var(--pop);}
+}
+
+@keyframes pop-text {
+    from {color: var(--pop);}
+    to {color: var(--text);}
+}
