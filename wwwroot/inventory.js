@@ -186,7 +186,8 @@ function formatPriceCents(cents) {
 
 // Explain where a price came from, for the hover title on a card's price tag. The number itself
 // is only as good as its basis: a median of real sales is a measurement, a listing is an asking
-// price nobody has paid, and a neighbouring wear is a different item. Read by inventory-item.js.
+// price nobody has paid, and a neighbouring wear is a different item.
+// eslint-disable-next-line no-unused-vars -- read by inventory-item.js (a separate <script>)
 function describePriceBasis(price) {
   if (!price) return '';
   const n = price.sale_volume;

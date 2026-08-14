@@ -41,6 +41,11 @@ global.isKnifeOrGlove = inventory.isKnifeOrGlove;
 // this test about what inventory-item.js contributes (the "~" prefix, the .has-price gate)
 // without duplicating - and silently drifting from - inventory.js's formatting.
 global.formatPriceCents = jest.fn(cents => `FMT:${cents}`);
+// describePriceBasis also lives in inventory.js and is also unexported. Same sentinel treatment:
+// the wording of the hover text is inventory.js's business, and duplicating it here would only
+// give it somewhere else to drift. What this file owns is that the card asks for the text and
+// hangs it on the tag.
+global.describePriceBasis = jest.fn(price => `BASIS:${price.basis}`);
 global.WEAR_ABBREVIATIONS = {
   'Factory New': 'FN',
   'Minimal Wear': 'MW',
@@ -277,31 +282,59 @@ describe('wear pill', () => {
   });
 });
 
+// The card renders `value` - the server's best estimate of what the item SELLS for, which is a
+// median of completed sales where we have one and only falls back to an asking price. `suggested`
+// is still in the payload as listing detail, but it is deliberately not what the card shows: it
+// runs about 25% above the sale median, so displaying it overstated every inventory.
 describe('price tag', () => {
-  test('formats the suggested price and reveals the tag', () => {
-    const el = makeCard({ name: 'X', price: { suggested: 4288 } });
+  test('formats the value and reveals the tag', () => {
+    const el = makeCard({ name: 'X', price: { value: 4288, basis: 'sale' } });
     const tag = field(el, 'price');
     expect(global.formatPriceCents).toHaveBeenCalledWith(4288);
     expect(tag.textContent).toBe('FMT:4288');
     expect(tag.classList.contains('has-price')).toBe(true);
   });
 
+  test('the value wins over the listing detail alongside it', () => {
+    // Both fields are present on every priced item, so which one the card reaches for is the
+    // whole point rather than an implementation detail.
+    const tag = field(makeCard({ name: 'X', price: { value: 4288, suggested: 5360, basis: 'sale' } }), 'price');
+    expect(tag.textContent).toBe('FMT:4288');
+    expect(global.formatPriceCents).not.toHaveBeenCalledWith(5360);
+  });
+
   test('an approximate price is prefixed with ~', () => {
-    const tag = field(makeCard({ name: 'X', price: { suggested: 4288, approximate: true } }), 'price');
+    const tag = field(makeCard({ name: 'X', price: { value: 4288, approximate: true } }), 'price');
     expect(tag.textContent).toBe('~FMT:4288');
     expect(tag.classList.contains('has-price')).toBe(true);
   });
 
   test('an exact price carries no ~', () => {
-    const tag = field(makeCard({ name: 'X', price: { suggested: 4288, approximate: false } }), 'price');
+    const tag = field(makeCard({ name: 'X', price: { value: 4288, approximate: false } }), 'price');
     expect(tag.textContent).toBe('FMT:4288');
     expect(tag.textContent.startsWith('~')).toBe(false);
   });
 
   test('a free item still shows a price - 0 cents is a price, not a missing one', () => {
-    const tag = field(makeCard({ name: 'X', price: { suggested: 0 } }), 'price');
+    const tag = field(makeCard({ name: 'X', price: { value: 0 } }), 'price');
     expect(tag.textContent).toBe('FMT:0');
     expect(tag.classList.contains('has-price')).toBe(true);
+  });
+
+  test('the basis is explained on hover, not on the card', () => {
+    // A measured sale and a borrowed asking price are very different claims for the same number,
+    // and the card has no room to say which - so the distinction lives in the title.
+    const price = { value: 4288, basis: 'nearest-wear-listing', approximate: true };
+    const tag = field(makeCard({ name: 'X', price }), 'price');
+    expect(global.describePriceBasis).toHaveBeenCalledWith(price);
+    expect(tag.title).toBe('BASIS:nearest-wear-listing');
+    expect(tag.textContent).toBe('~FMT:4288'); // and the card itself still says only the number
+  });
+
+  test('clearing a price drops its hover text too', () => {
+    const el = makeCard({ name: 'X', price: { value: 4288, basis: 'sale' } });
+    el.setItemData({ name: 'X' }, 0);
+    expect(field(el, 'price').hasAttribute('title')).toBe(false);
   });
 
   test('no price leaves the tag empty and hidden', () => {
@@ -312,7 +345,7 @@ describe('price tag', () => {
   });
 
   test('re-setting an item without a price clears a previously shown one', () => {
-    const el = makeCard({ name: 'X', price: { suggested: 4288 } });
+    const el = makeCard({ name: 'X', price: { value: 4288 } });
     el.setItemData({ name: 'X' }, 0);
     const tag = field(el, 'price');
     expect(tag.textContent).toBe('');
