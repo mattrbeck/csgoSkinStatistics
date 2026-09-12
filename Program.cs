@@ -45,7 +45,25 @@ builder.Services.AddHttpClient("steam")
     // XML and vanity-resolve calls are ~2 KB and share this client, so they tighten it to 1 MB on
     // their own copy - see SkinController.CreateProfileFeedClient, which is free to do that because
     // CreateClient returns a fresh HttpClient per call.
-    .ConfigureHttpClient(client => client.MaxResponseContentBufferSize = 32 * 1024 * 1024)
+    .ConfigureHttpClient(client =>
+    {
+        client.MaxResponseContentBufferSize = 32 * 1024 * 1024;
+        // Identify ourselves. HttpClient sends no User-Agent unless told to, and as of 2026-09-12
+        // steamcommunity.com/inventory answers a User-Agent-less request with a 429 and a `null`
+        // body - before it has even looked at the inventory (a private one gets the same 429
+        // instead of its 403). That is a header check, not a rate limit, and it took the whole site
+        // down with "Steam is rate limiting inventory requests" for every Steam ID at once.
+        //
+        // A plain product token is deliberate. A browser-shaped agent (anything starting
+        // "Mozilla/5.0") is held to a browser's whole header set: on its own, or with only one of
+        // Accept / Accept-Language / Accept-Encoding beside it, it gets the same 429; it passes only
+        // with all three sent browser-style (the marketplace's "steam" client does exactly that, and
+        // passes). curl-, python-requests- and product-style agents pass with nothing else at all.
+        // Verified from two different IPs on the same day. So do not "fix" this by pretending to be
+        // Chrome unless you also carry the rest of the disguise. The profile XML and vanity resolve
+        // calls share this client and accept the header without complaint.
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("skinstats.app/1.0 (+https://skinstats.app)");
+    })
     .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
     {
         PooledConnectionIdleTimeout = TimeSpan.FromMinutes(10),

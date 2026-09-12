@@ -14,6 +14,10 @@ public sealed class StubHttpMessageHandler : HttpMessageHandler
     private readonly object _sync = new();
     private readonly List<(string UrlContains, Func<HttpResponseMessage> Respond)> _rules = [];
     private readonly List<string> _requests = [];
+    // The User-Agent each request carried, in request order, keyed by URL. Recorded because the
+    // header is load-bearing on steamcommunity.com (see the "steam" client in Program.cs) and a
+    // refactor of that registration must not be able to drop it without a test noticing.
+    private readonly List<(string Url, string? UserAgent)> _userAgents = [];
 
     // Awaited after a request has been recorded but before its response is produced. The
     // single-flight test uses it to hold the one in-flight fetch open while the other viewers pile
@@ -124,6 +128,17 @@ public sealed class StubHttpMessageHandler : HttpMessageHandler
     public int RequestsMatching(string urlContains)
         => Requests.Count(url => url.Contains(urlContains, StringComparison.Ordinal));
 
+    // The User-Agent header of the most recent request whose URL contains `urlContains`, or null
+    // when that request sent none (HttpClient's default). Throws if no such request was made, so a
+    // test cannot pass by asserting on a fetch that never happened.
+    public string? UserAgentFor(string urlContains)
+    {
+        lock (_sync)
+        {
+            return _userAgents.Last(r => r.Url.Contains(urlContains, StringComparison.Ordinal)).UserAgent;
+        }
+    }
+
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         var url = request.RequestUri!.ToString();
@@ -131,6 +146,7 @@ public sealed class StubHttpMessageHandler : HttpMessageHandler
         lock (_sync)
         {
             _requests.Add(url);
+            _userAgents.Add((url, request.Headers.UserAgent.Count == 0 ? null : request.Headers.UserAgent.ToString()));
             for (var i = _rules.Count - 1; i >= 0; i--)
             {
                 if (url.Contains(_rules[i].UrlContains, StringComparison.Ordinal))

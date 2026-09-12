@@ -360,6 +360,25 @@ public class InventoryEndpointTests(ApiFactory factory) : IClassFixture<ApiFacto
     }
 
     [Fact]
+    public async Task InventoryFetch_IdentifiesItselfWithAProductUserAgent()
+    {
+        // HttpClient sends no User-Agent by default, and since 2026-09-12 steamcommunity.com answers
+        // a User-Agent-less inventory request with a 429 and a `null` body - before looking at the
+        // inventory at all. A browser-shaped agent without the rest of a browser's headers gets the
+        // same 429. So the "steam" client has to carry a plain product token, and this pins it: the
+        // assertion is on the exact value rather than "not empty" so that swapping in a bare
+        // Mozilla/5.0 string, which Steam rejects just the same, also fails here.
+        var steamId = NextSteamId();
+        _factory.Http.Respond(InventoryUrl(steamId), HttpStatusCode.OK, Serialize(FixtureInventory(totalInventoryCount: 9)));
+        var client = _factory.CreateClient();
+
+        var response = await client.GetAsync($"/api/inventory?steamid={steamId}");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("skinstats.app/1.0 (+https://skinstats.app)", _factory.Http.UserAgentFor(InventoryUrl(steamId)));
+    }
+
+    [Fact]
     public async Task SteamRateLimit_IsSurfacedAs429AndCached()
     {
         // A 429 means Steam is throttling this server's egress IP, so the one thing we must not do
