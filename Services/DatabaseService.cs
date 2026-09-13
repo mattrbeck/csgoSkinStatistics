@@ -1,3 +1,4 @@
+using System.IO.Compression;
 namespace CSGOSkinAPI.Services
 {
     public class DatabaseService
@@ -155,6 +156,22 @@ namespace CSGOSkinAPI.Services
                 )";
             using var warmsCommand = new SqliteCommand(createWarmsTableCommand, connection);
             await warmsCommand.ExecuteNonQueryAsync();
+
+            // The last good /api/inventory payload per owner, gzip-compressed, so a Steam throttle
+            // or outage can be answered with a marked-stale copy instead of an error. Bounded by
+            // age and row count on every write (see SaveInventorySnapshotAsync); the fetched_at
+            // index is what makes both prunes cheap.
+            var createSnapshotsTableCommand = @"
+                CREATE TABLE IF NOT EXISTS inventory_snapshots (
+                    steamid INTEGER PRIMARY KEY NOT NULL,
+                    fetched_at TEXT NOT NULL,
+                    payload BLOB NOT NULL
+                )";
+            using var snapshotsCommand = new SqliteCommand(createSnapshotsTableCommand, connection);
+            await snapshotsCommand.ExecuteNonQueryAsync();
+            using var snapshotsIndexCommand = new SqliteCommand(
+                "CREATE INDEX IF NOT EXISTS inventory_snapshots_fetched_at ON inventory_snapshots (fetched_at)", connection);
+            await snapshotsIndexCommand.ExecuteNonQueryAsync();
 
             // Skinport base prices, keyed by market_hash_name (the same key the item's decoded name
             // and Steam's inventory descriptions use). Persisted so a restart serves last-known
@@ -661,6 +678,82 @@ namespace CSGOSkinAPI.Services
             await deleteCommand.ExecuteNonQueryAsync();
 
             return null;
+        }
+
+        // Stores the exact bytes /api/inventory just returned for this owner, replacing any older
+        // copy, then prunes: rows older than retentionDays, and the oldest rows beyond maxRows. The
+        // prunes run here rather than on a timer so the table can never grow between sweeps - a
+        // bounded table on a small disk matters more than the few milliseconds per write.
+        public async Task SaveInventorySnapshotAsync(ulong steamid, byte[] payload, int retentionDays, int maxRows)
+        {
+            byte[] compressed;
+            using (var buffer = new MemoryStream())
+            {
+                using (var gzip = new GZipStream(buffer, CompressionLevel.Fastest, leaveOpen: true))
+                {
+                    gzip.Write(payload);
+                }
+                compressed = buffer.ToArray();
+            }
+
+            using var connection = await OpenConnectionAsync();
+            using (var upsert = new SqliteCommand(@"INSERT OR REPLACE INTO inventory_snapshots
+                (steamid, fetched_at, payload) VALUES (@steamid, @fetched_at, @payload)", connection))
+            {
+                upsert.Parameters.AddWithValue("@steamid", (long)steamid);
+                upsert.Parameters.AddWithValue("@fetched_at", DateTime.UtcNow.ToString("o"));
+                upsert.Parameters.AddWithValue("@payload", compressed);
+                await upsert.ExecuteNonQueryAsync();
+            }
+            using (var pruneOld = new SqliteCommand(
+                "DELETE FROM inventory_snapshots WHERE fetched_at < @cutoff", connection))
+            {
+                pruneOld.Parameters.AddWithValue("@cutoff", DateTime.UtcNow.AddDays(-retentionDays).ToString("o"));
+                await pruneOld.ExecuteNonQueryAsync();
+            }
+            using (var pruneExcess = new SqliteCommand(@"DELETE FROM inventory_snapshots WHERE steamid NOT IN
+                (SELECT steamid FROM inventory_snapshots ORDER BY fetched_at DESC LIMIT @max)", connection))
+            {
+                pruneExcess.Parameters.AddWithValue("@max", maxRows);
+                await pruneExcess.ExecuteNonQueryAsync();
+            }
+        }
+
+        // The stored payload, decompressed, with when it was fetched; null when this owner has no
+        // snapshot. A row whose payload will not decompress is treated as absent and removed, for
+        // the same reason GetLastWarmAsync deletes an unreadable row: a bad row must not be re-read
+        // on every throttle.
+        public async Task<(byte[] Payload, DateTime FetchedAt)?> GetInventorySnapshotAsync(ulong steamid)
+        {
+            using var connection = await OpenConnectionAsync();
+            using var command = new SqliteCommand(
+                "SELECT fetched_at, payload FROM inventory_snapshots WHERE steamid = @steamid", connection);
+            command.Parameters.AddWithValue("@steamid", (long)steamid);
+            using var reader = await command.ExecuteReaderAsync();
+            if (!await reader.ReadAsync())
+            {
+                return null;
+            }
+
+            try
+            {
+                var fetchedAt = DateTime.Parse(reader.GetString(0), null, DateTimeStyles.RoundtripKind);
+                var compressed = (byte[])reader.GetValue(1);
+                using var gzip = new GZipStream(new MemoryStream(compressed), CompressionMode.Decompress);
+                using var output = new MemoryStream();
+                gzip.CopyTo(output);
+                return (output.ToArray(), fetchedAt);
+            }
+            catch (Exception ex) when (ex is FormatException or InvalidDataException or InvalidCastException)
+            {
+                _logger.LogWarning(ex, "inventory_snapshots row for {SteamId} is unreadable; deleting it", steamid);
+                reader.Close();
+                using var delete = new SqliteCommand(
+                    "DELETE FROM inventory_snapshots WHERE steamid = @steamid", connection);
+                delete.Parameters.AddWithValue("@steamid", (long)steamid);
+                await delete.ExecuteNonQueryAsync();
+                return null;
+            }
         }
 
         public async Task RecordWarmAsync(ulong steamid, int itemsCached)

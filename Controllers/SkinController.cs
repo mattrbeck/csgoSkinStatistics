@@ -6,7 +6,7 @@ namespace CSGOSkinAPI.Controllers
     [Route("api")]
     [EnableRateLimiting("api")]
     [InvalidModelStateAsError]
-    public class SkinController(SteamService steamService, DatabaseService dbService, ConstDataService constDataService, IHttpClientFactory httpClientFactory, InventoryWarmService warmService, IMemoryCache cache, PriceService priceService, ILoggerFactory loggerFactory) : ControllerBase
+    public class SkinController(SteamService steamService, DatabaseService dbService, ConstDataService constDataService, IHttpClientFactory httpClientFactory, InventoryWarmService warmService, IMemoryCache cache, PriceService priceService, ILoggerFactory loggerFactory, SteamEgressGate egress, Microsoft.Extensions.Options.IOptions<InventorySnapshotOptions> snapshotOptions) : ControllerBase
     {
         // Everything this controller reports about its own work.
         private readonly ILogger _logger = loggerFactory.CreateLogger<SkinController>();
@@ -34,6 +34,16 @@ namespace CSGOSkinAPI.Controllers
         // profile) doesn't re-hit steamcommunity.com on every request and extend the IP ban.
         private static readonly TimeSpan NegativeInventoryCacheTtl = TimeSpan.FromSeconds(30);
         private static readonly TimeSpan RateLimitedInventoryCacheTtl = TimeSpan.FromSeconds(60);
+
+        // A stale copy (the last good payload, served because Steam refused a fresh one) is cached
+        // only briefly: long enough to absorb a reload storm, short enough that the next viewer
+        // after Steam recovers gets a real fetch.
+        private static readonly TimeSpan StaleInventoryCacheTtl = TimeSpan.FromSeconds(30);
+
+        private const string RateLimitedMessage =
+            "Steam is rate limiting inventory requests right now. Please try again in a minute.";
+        private const string BusyMessage =
+            "Steam lookups are busy right now. Please try again in a few seconds.";
 
         // Single-flight per resolved SteamId64: the first viewer of an uncached inventory does the
         // fetch while any concurrent viewers wait on this gate and then read the freshly-cached
@@ -127,6 +137,10 @@ namespace CSGOSkinAPI.Controllers
             SemaphoreSlim? gate = null;
             string? gateKey = null;
             var acquired = false;
+            // The resolved id, kept outside the try so the transport-failure catches below can
+            // look for a stale copy. Zero until resolution succeeds; gateKey doubles as the cache
+            // key for the same reason (it is assigned the moment the fetch path is entered).
+            ulong resolvedId = 0;
             try
             {
                 if (string.IsNullOrWhiteSpace(steamid))
@@ -141,6 +155,7 @@ namespace CSGOSkinAPI.Controllers
                 }
 
                 var steamId = resolvedSteamId.Value;
+                resolvedId = steamId;
                 steamid = steamId.ToString(); // Use resolved SteamId64 for inventory URL
 
                 // Serve a recent copy (or a recent failure) without touching Steam. Keyed by resolved
@@ -169,32 +184,65 @@ namespace CSGOSkinAPI.Controllers
                 _logger.LogDebug("Fetching inventory for {SteamId} from {InventoryUrl}",
                     steamId, SteamInventoryDocument.BuildUrl(steamid));
 
+                // Steam has told this server to stop (a recent 429). Don't queue and don't fetch -
+                // every request made while banned extends the ban. Answer from the last good copy
+                // if there is one, otherwise with the same message a fresh 429 would have produced.
+                if (egress.PausedUntil != null)
+                {
+                    return await StaleOrFailureAsync(steamId, cacheKey,
+                        StatusCodes.Status429TooManyRequests, RateLimitedMessage, RateLimitedInventoryCacheTtl);
+                }
+
+                // The process-wide gate: one inventory fetch at a time, spaced apart, with a bounded
+                // queue. A null lease means the queue is full or the wait ran out; that is not
+                // negative-cached, because the next viewer may well find the queue drained.
+                var lease = await egress.TryAcquireAsync(EgressPriority.Interactive);
+                if (lease == null)
+                {
+                    return await StaleOrFailureAsync(steamId, cacheKey,
+                        StatusCodes.Status503ServiceUnavailable, BusyMessage, null);
+                }
+
                 // Owned by this caller (see SteamInventoryDocument.FetchAsync): the body is already
                 // buffered, and nothing below reads the response past ReadAsStringAsync, so the
                 // `using` frees the buffered content at the end of this block without shortening a
-                // lifetime anything still needs.
-                using var response = await SteamInventoryDocument.FetchAsync(httpClientFactory, steamid);
+                // lifetime anything still needs. The lease is released the moment the bytes are in
+                // hand - parsing and pricing them needs no gate.
+                HttpResponseMessage response;
+                try
+                {
+                    response = await SteamInventoryDocument.FetchAsync(httpClientFactory, steamid);
+                }
+                finally
+                {
+                    lease.Dispose();
+                }
+                using var _ = response;
+                egress.ReportFetch((int)response.StatusCode, response.Headers.RetryAfter?.Delta);
                 if (!response.IsSuccessStatusCode)
                 {
                     if (response.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
                     {
                         // Steam is throttling this server's IP for the inventory endpoint. Surface it
-                        // loudly in the logs (with Retry-After when present) so the throttle is visible.
+                        // loudly in the logs so the throttle is visible, with the two details that
+                        // tell a header rejection (body `null`, no Retry-After, first request) from a
+                        // volume ban (Retry-After present, after a burst).
                         var retryAfter = response.Headers.RetryAfter?.Delta;
+                        var bodyBytes = response.Content.Headers.ContentLength;
                         if (retryAfter is TimeSpan retryDelay)
                         {
                             _logger.LogWarning(
-                                "Steam inventory rate limited (429) for {SteamId}; Retry-After {RetryAfterSeconds:0}s",
-                                steamId, retryDelay.TotalSeconds);
+                                "Steam inventory rate limited (429) for {SteamId}; Retry-After {RetryAfterSeconds:0}s; body {BodyBytes} bytes",
+                                steamId, retryDelay.TotalSeconds, bodyBytes);
                         }
                         else
                         {
                             _logger.LogWarning(
-                                "Steam inventory rate limited (429) for {SteamId}", steamId);
+                                "Steam inventory rate limited (429) for {SteamId}; no Retry-After; body {BodyBytes} bytes",
+                                steamId, bodyBytes);
                         }
-                        return CacheInventoryFailure(cacheKey, StatusCodes.Status429TooManyRequests,
-                            "Steam is rate limiting inventory requests right now. Please try again in a minute.",
-                            RateLimitedInventoryCacheTtl);
+                        return await StaleOrFailureAsync(steamId, cacheKey,
+                            StatusCodes.Status429TooManyRequests, RateLimitedMessage, RateLimitedInventoryCacheTtl);
                     }
                     if (response.StatusCode == System.Net.HttpStatusCode.Forbidden)
                     {
@@ -204,7 +252,9 @@ namespace CSGOSkinAPI.Controllers
                     _logger.LogWarning(
                         "Steam inventory fetch for {SteamId} failed: {StatusCode} {StatusName}",
                         steamId, (int)response.StatusCode, response.StatusCode);
-                    return CacheInventoryFailure(cacheKey, StatusCodes.Status400BadRequest,
+                    // A 5xx or anything else unexpected from Steam is its problem, not this
+                    // inventory's, so the last good copy is a better answer than the error.
+                    return await StaleOrFailureAsync(steamId, cacheKey, StatusCodes.Status400BadRequest,
                         $"Failed to fetch inventory: {response.StatusCode}", NegativeInventoryCacheTtl);
                 }
 
@@ -263,15 +313,37 @@ namespace CSGOSkinAPI.Controllers
                     Size = payload.Length,
                     AbsoluteExpirationRelativeToNow = InventoryCacheTtl,
                 });
+
+                // Keep this as the last good copy for when Steam next refuses. Best-effort: a
+                // snapshot that fails to write must not fail the response it is a copy of.
+                try
+                {
+                    var snapshots = snapshotOptions.Value;
+                    await dbService.SaveInventorySnapshotAsync(steamId, payload, snapshots.RetentionDays, snapshots.MaxRows);
+                }
+                catch (SqliteException ex)
+                {
+                    _logger.LogWarning(ex, "Could not store the inventory snapshot for {SteamId}", steamId);
+                }
                 return File(payload, "application/json");
             }
             catch (TaskCanceledException)
             {
+                egress.ReportFetch(null);
+                if (gateKey != null && await TryServeStaleAsync(resolvedId, gateKey) is IActionResult staleAfterTimeout)
+                {
+                    return staleAfterTimeout;
+                }
                 return BadRequest(new { error = "Request timed out while fetching inventory" });
             }
             catch (HttpRequestException ex)
             {
                 _logger.LogWarning(ex, "HTTP error fetching inventory");
+                egress.ReportFetch(null);
+                if (gateKey != null && await TryServeStaleAsync(resolvedId, gateKey) is IActionResult staleAfterError)
+                {
+                    return staleAfterError;
+                }
                 return BadRequest(new { error = "Failed to connect to Steam API" });
             }
             catch (JsonException ex)
@@ -320,6 +392,49 @@ namespace CSGOSkinAPI.Controllers
                 AbsoluteExpirationRelativeToNow = ttl,
             });
             return StatusCode(statusCode, new { error });
+        }
+
+        // The last good copy of this inventory if one is stored, otherwise the failure - cached
+        // for `ttl` when one is given, returned uncached when null (the "busy" case, which the
+        // next viewer may not hit at all).
+        private async Task<IActionResult> StaleOrFailureAsync(ulong steamId, string cacheKey,
+            int statusCode, string error, TimeSpan? ttl)
+        {
+            var stale = await TryServeStaleAsync(steamId, cacheKey);
+            if (stale != null)
+            {
+                return stale;
+            }
+            return ttl is TimeSpan cacheFor
+                ? CacheInventoryFailure(cacheKey, statusCode, error, cacheFor)
+                : StatusCode(statusCode, new { error });
+        }
+
+        // Serves the stored snapshot with `stale: true` and `fetched_at` added, so the page can say
+        // how old it is, and caches those bytes briefly under the same key as a fresh copy would
+        // use. Null when there is no snapshot. The stored bytes are the exact response of an
+        // earlier success, so the shape is guaranteed to be the one the page already handles.
+        private async Task<IActionResult?> TryServeStaleAsync(ulong steamId, string cacheKey)
+        {
+            var snapshot = await dbService.GetInventorySnapshotAsync(steamId);
+            if (snapshot == null)
+            {
+                return null;
+            }
+
+            var (payload, fetchedAt) = snapshot.Value;
+            var node = System.Text.Json.Nodes.JsonNode.Parse(payload)!.AsObject();
+            node["stale"] = true;
+            node["fetched_at"] = fetchedAt.ToString("o");
+            var bytes = JsonSerializer.SerializeToUtf8Bytes(node);
+            cache.Set(cacheKey, bytes, new MemoryCacheEntryOptions
+            {
+                Size = bytes.Length,
+                AbsoluteExpirationRelativeToNow = StaleInventoryCacheTtl,
+            });
+            _logger.LogInformation(
+                "Serving the stale inventory copy for {SteamId} fetched at {FetchedAt}", steamId, fetchedAt);
+            return File(bytes, "application/json");
         }
 
         // Nullable, and whitespace-rejecting, for the same reason as GetInventoryData above.

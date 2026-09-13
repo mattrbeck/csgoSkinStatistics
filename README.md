@@ -6,6 +6,12 @@ A very simple site designed to hit CS2's game coordinator and return information
 
 After cloning this repository, set the `STEAM_USERNAME` and `STEAM_PASSWORD` environment variables or create a `steam-accounts.json` file following the example in `steam-accounts.json.example` if you need multiple accounts. Run with dotnet. The page will be on localhost:5000.
 
+### Operations
+
+`GET /health` answers 200 while Steam is accepting inventory fetches and at least one bot account is logged in, and 503 with the reason otherwise. Point an external monitor at it.
+
+The knobs an operator is most likely to need are in `appsettings.json` (or an `appsettings.Production.json` next to the published app): `Steam:UserAgent`, the `SteamEgress` pacing, and the `InventorySnapshots` retention.
+
 ### API
 
 Endpoint: https://skinstats.app/api

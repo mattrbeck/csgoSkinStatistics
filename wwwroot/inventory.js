@@ -177,6 +177,20 @@ function isKnifeOrGlove(defindex) {
   return (defindex >= 500 && defindex < 600) || defindex >= 5000;
 }
 
+// "3 hours ago" / "2 days ago" for the stale-copy note; falls back to the raw stamp when it
+// does not parse, so a bad value is visible rather than silently blank.
+// eslint-disable-next-line no-unused-vars -- called from the inventory load path below
+function formatFetchedAt(iso) {
+  const then = Date.parse(iso);
+  if (Number.isNaN(then)) return iso || 'an unknown time';
+  const minutes = Math.max(1, Math.round((Date.now() - then) / 60000));
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+  const days = Math.round(hours / 24);
+  return `${days} day${days === 1 ? '' : 's'} ago`;
+}
+
 // Format integer cents as a price, e.g. 4288 -> "$42.88" (thousands separated). Prices come from
 // Skinport's USD feed, so the symbol is fixed for now. Read by inventory-item.js and post.js too.
 function formatPriceCents(cents) {
@@ -773,8 +787,9 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
       }
 
       // Only cache genuine successes: reaching here means a 2xx that carried no `error`, i.e. a
-      // real inventory payload worth replaying on the next reload.
-      writeInventoryCache(userInput, inventoryData);
+      // real inventory payload worth replaying on the next reload. A stale copy (served because
+      // Steam was throttling) is not one: a reload should ask again, not replay the old copy.
+      if (!inventoryData.stale) writeInventoryCache(userInput, inventoryData);
     }
 
     // Check if cancelled after fetching inventory
@@ -881,7 +896,13 @@ async function analyzeInventory(userInput, resolvedSteamId = null) {
     const truncationNote = inventoryData.truncated
       ? ` Steam only returns part of large inventories, so some of this account's ${inventoryData.total} items aren't shown.`
       : '';
-    if (truncationNote) elements.status.textContent = truncationNote.trim();
+    // The server answers a Steam throttle or outage with its last good copy, marked `stale` and
+    // stamped with when it was fetched. Say so: the items and prices are as of then, not now.
+    const staleNote = inventoryData.stale
+      ? `Steam isn't answering right now, so this is the inventory as of ${formatFetchedAt(inventoryData.fetched_at)}.`
+      : '';
+    const notes = [staleNote, truncationNote.trim()].filter(Boolean).join(' ');
+    if (notes) elements.status.textContent = notes;
 
     if (itemsNeedingAnalysis.length === 0) {
       // Every item came fully resolved from the inventory response - nothing left to do.

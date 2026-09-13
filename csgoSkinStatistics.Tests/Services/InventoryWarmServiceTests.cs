@@ -11,6 +11,8 @@ using System.Threading.Tasks;
 using CSGOSkinAPI.Models;
 using CSGOSkinAPI.Services;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using ProtoBuf;
 using SteamKit2.GC.CSGO.Internal;
 using Xunit;
@@ -209,6 +211,57 @@ public class InventoryWarmServiceTests : IDisposable
         service.Enqueue(SteamA);
         await WaitForAsync(() => handler.Requested(SteamA), "the expired cooldown to allow a refetch");
         await service.StopAsync(CancellationToken.None);
+    }
+
+    private static SteamEgressGate NewGate() => new(
+        Options.Create(new SteamEgressOptions { MinIntervalSeconds = 0 }),
+        NullLogger<SteamEgressGate>.Instance);
+
+    [Fact]
+    public async Task WhileTheEgressGateIsPaused_TheWarmIsSkippedAndStaysWarmable()
+    {
+        // Steam has 429'd someone in this process. The warmer must not be the request that
+        // extends the ban - and because it never fetched, it must not arm the 24h cooldown
+        // either, or a busy minute would silence this owner for a day.
+        var db = await NewDbAsync();
+        var handler = new StubHandler(_ => Ok(EmptyInventory));
+        var factory = new StubClientFactory(handler);
+        var gate = NewGate();
+        gate.ReportFetch(429, TimeSpan.FromMinutes(5));
+        var service = new InventoryWarmService(factory, db, new CapturingLogger<InventoryWarmService>(), gate);
+        _disposables.Add(handler);
+        _disposables.Add(service);
+
+        await service.StartAsync(CancellationToken.None);
+        service.Enqueue(SteamA);
+        await Task.Delay(300);
+        await service.StopAsync(CancellationToken.None);
+
+        Assert.Empty(handler.Requests);
+        Assert.Null(await db.GetLastWarmAsync(SteamA));
+    }
+
+    [Fact]
+    public async Task WithTheGateOpen_TheWarmGoesThroughIt_AndReportsWhatSteamSaid()
+    {
+        var db = await NewDbAsync();
+        var handler = new StubHandler(_ => Status(HttpStatusCode.Forbidden));
+        var factory = new StubClientFactory(handler);
+        var gate = NewGate();
+        var service = new InventoryWarmService(factory, db, new CapturingLogger<InventoryWarmService>(), gate);
+        _disposables.Add(handler);
+        _disposables.Add(service);
+
+        await service.StartAsync(CancellationToken.None);
+        service.Enqueue(SteamA);
+        await WaitForAsync(() => handler.Requested(SteamA), "the warm to fetch through the open gate");
+        await service.StopAsync(CancellationToken.None);
+
+        Assert.Equal(403, gate.Status.LastFetchStatus);
+        Assert.Null(gate.PausedUntil);
+        // The lease was released after the fetch: the gate is free for the next caller.
+        using var lease = await gate.TryAcquireAsync(EgressPriority.Interactive);
+        Assert.NotNull(lease);
     }
 
     // RecordWarmAsync always stamps UtcNow, so an aged record has to be written directly.

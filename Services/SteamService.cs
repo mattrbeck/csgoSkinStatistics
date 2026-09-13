@@ -8,6 +8,11 @@ namespace CSGOSkinAPI.Services
         // Written on the HTTP thread (ConnectAsync/Disconnect), read on the per-account callback
         // loop threads, so it must be volatile for those loops to observe a shutdown promptly.
         private volatile bool _isRunning = false;
+
+        // For /health: how many bot accounts are configured and how many currently hold a logged-in
+        // session. Virtual so the test double can answer without accounts.
+        public virtual (int Total, int Online) AccountStatus =>
+            (_accountManagers.Count, _accountManagers.Count(am => am.IsConnected && am.IsLoggedIn));
         private readonly ConcurrentDictionary<ulong, List<TaskCompletionSource<CEconItemPreviewDataBlock?>>> _pendingRequests = new();
         private int _currentAccountIndex = 0;
         private readonly object _accountSelectionLock = new();

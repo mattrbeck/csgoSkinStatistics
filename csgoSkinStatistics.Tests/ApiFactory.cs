@@ -87,6 +87,12 @@ public sealed class ApiFactory : WebApplicationFactory<Program>
         // faster hardware (less wall clock, so less replenishment). The limiter is infrastructure
         // these tests aren't exercising; take it out of the picture rather than budget around it.
         builder.UseSetting("RateLimiting:TokenLimit", "1000000");
+        // Likewise the Steam egress gate: no spacing between fetches (every test would otherwise
+        // pay the production interval), and no pause after a stubbed 429 (a class shares one host,
+        // so a pause armed by one test would fail every fetch in the tests after it). A class that
+        // exercises the gate itself overrides these through Settings.
+        builder.UseSetting("SteamEgress:MinIntervalSeconds", "0");
+        builder.UseSetting("SteamEgress:MaxPauseSeconds", "0");
         foreach (var (key, value) in Settings)
         {
             builder.UseSetting(key, value);

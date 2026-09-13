@@ -5,8 +5,13 @@ namespace CSGOSkinAPI.Services
     // inventory (trade threads, showcases). This fetches that inventory once, decodes each
     // item's embedded certificate locally (see docs/inventory-endpoint-cert.md), and
     // persists the results, so follow-up lookups become DB hits with zero GC traffic.
+    //
+    // Every fetch goes through the process-wide SteamEgressGate at Background priority: the warmer
+    // takes the gate only when it is free and no viewer is waiting on it, and skips the warm
+    // entirely while Steam has us paused. The gate is optional only so the direct-construction
+    // tests that predate it keep their shape; production always passes one.
     public class InventoryWarmService(IHttpClientFactory httpClientFactory, DatabaseService dbService,
-        ILogger<InventoryWarmService> logger) : BackgroundService
+        ILogger<InventoryWarmService> logger, SteamEgressGate? egress = null) : BackgroundService
     {
         // One warm per owner per cooldown: a burst of misses for the same inventory should
         // cost a single fetch, and a stale link whose item left the inventory will never
@@ -47,15 +52,45 @@ namespace CSGOSkinAPI.Services
                 return;
             }
 
+            // Take the gate BEFORE arming the cooldown: a warm that never fetched must stay
+            // warmable, or a busy minute would silence this owner for 24 hours.
+            SteamEgressGate.Lease? lease = null;
+            if (egress != null)
+            {
+                lease = await egress.TryAcquireAsync(EgressPriority.Background, cancellationToken);
+                if (lease == null)
+                {
+                    logger.LogDebug(
+                        "Inventory warm for {SteamId} skipped: Steam egress is busy or paused", steamid);
+                    return;
+                }
+            }
+
             // Log the attempt before fetching so failures (private inventory, rate limit)
             // are throttled too instead of being retried on every subsequent miss.
             await dbService.RecordWarmAsync(steamid, 0);
 
             // Owned by this caller (see SteamInventoryDocument.FetchAsync). Everything read off it -
             // status, Retry-After, the body - happens below within this scope, so disposing at the
-            // end of the method releases the buffered page as soon as it is parsed.
-            using var response = await SteamInventoryDocument.FetchAsync(
-                httpClientFactory, steamid.ToString(), cancellationToken);
+            // end of the method releases the buffered page as soon as it is parsed. The lease is
+            // released as soon as the bytes are in hand; parsing them needs no gate.
+            HttpResponseMessage response;
+            try
+            {
+                response = await SteamInventoryDocument.FetchAsync(
+                    httpClientFactory, steamid.ToString(), cancellationToken);
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+            {
+                egress?.ReportFetch(null);
+                throw;
+            }
+            finally
+            {
+                lease?.Dispose();
+            }
+            using var _ = response;
+            egress?.ReportFetch((int)response.StatusCode, response.Headers.RetryAfter?.Delta);
             if (!response.IsSuccessStatusCode)
             {
                 if (response.StatusCode == System.Net.HttpStatusCode.TooManyRequests)

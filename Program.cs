@@ -23,6 +23,9 @@ builder.Services.AddHttpClient();
 // fresh TLS handshake (~100ms) on each cold request. PooledConnectionLifetime still rotates
 // connections periodically for DNS hygiene, and an infinite handler lifetime stops IHttpClientFactory
 // from recycling the handler (which would otherwise drop the warm connection pool every 2 minutes).
+// Read once here so the "steam" client below can carry it; the default is the value that Steam
+// was verified to accept on 2026-09-12 (see appsettings.json "Steam:UserAgent").
+var steamUserAgent = builder.Configuration.GetValue("Steam:UserAgent", "skinstats.app/1.0 (+https://skinstats.app)")!;
 builder.Services.AddHttpClient("steam")
     // Cap how much of an upstream response we will buffer into memory. Every call on this client
     // (inventory fetch, profile XML, vanity resolve) uses the default HttpCompletionOption
@@ -61,11 +64,17 @@ builder.Services.AddHttpClient("steam")
         // passes). curl-, python-requests- and product-style agents pass with nothing else at all.
         // Verified from two different IPs on the same day. So do not "fix" this by pretending to be
         // Chrome unless you also carry the rest of the disguise. The profile XML and vanity resolve
-        // calls share this client and accept the header without complaint.
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("skinstats.app/1.0 (+https://skinstats.app)");
+        // calls share this client and accept the header without complaint. The value lives in
+        // configuration (Steam:UserAgent) so the next such change is an edit on the box.
+        client.DefaultRequestHeaders.UserAgent.ParseAdd(steamUserAgent);
     })
     .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
     {
+        // Advertise gzip/br and decompress transparently. Not needed for the User-Agent check
+        // above, but Steam's WAF has been seen refusing requests that carry no Accept-Encoding,
+        // and the header costs nothing. MaxResponseContentBufferSize applies to the decompressed
+        // body, so the cap above still means what it says.
+        AutomaticDecompression = System.Net.DecompressionMethods.All,
         PooledConnectionIdleTimeout = TimeSpan.FromMinutes(10),
         PooledConnectionLifetime = TimeSpan.FromMinutes(30),
     })
@@ -152,6 +161,11 @@ builder.Services.AddRateLimiter(options =>
 builder.Services.AddSingleton<SteamService>();
 builder.Services.AddSingleton<DatabaseService>();
 builder.Services.AddSingleton<ConstDataService>();
+// The one gate on outbound inventory fetches (see SteamEgressGate), and the retention knobs for the
+// last-good snapshots the inventory endpoint serves while that gate is paused.
+builder.Services.Configure<SteamEgressOptions>(builder.Configuration.GetSection(SteamEgressOptions.SectionName));
+builder.Services.Configure<InventorySnapshotOptions>(builder.Configuration.GetSection(InventorySnapshotOptions.SectionName));
+builder.Services.AddSingleton<SteamEgressGate>();
 // Registered once and exposed both as itself (controllers enqueue into it) and as the
 // hosted service that drains the queue.
 builder.Services.AddSingleton<InventoryWarmService>();
@@ -289,6 +303,39 @@ app.Use(async (context, next) =>
 app.UseRouting();
 app.UseRateLimiter();
 app.MapControllers();
+
+// For an external monitor. 200 while Steam is answering inventory fetches and at least one bot
+// account is logged in; 503 with the reason otherwise, so a plain "is it 200" check catches the
+// two ways this site silently degrades. Outside the "api" rate-limit policy on purpose (a monitor
+// polling every minute must never be the thing that gets throttled), and it discloses nothing a
+// viewer could not already infer from the inventory page.
+app.MapGet("/health", (SteamEgressGate egress, SteamService steam) =>
+{
+    var inventory = egress.Status;
+    var (accounts, online) = steam.AccountStatus;
+    var now = DateTimeOffset.UtcNow;
+    // 403 is Steam's answer for a private inventory, i.e. Steam working normally. Anything else
+    // non-2xx in the last ten minutes - a 429, a 5xx, a transport failure (null) - is degraded.
+    var recentFailure = inventory.LastFetchAt is DateTimeOffset at
+        && at > now.AddMinutes(-10)
+        && inventory.LastFetchStatus is not (>= 200 and < 300) and not 403;
+    var steamOk = inventory.PausedUntil == null && !recentFailure;
+    var gcOk = accounts == 0 || online > 0;
+    var ok = steamOk && gcOk;
+    return Results.Json(new
+    {
+        status = ok ? "ok" : "degraded",
+        steam_inventory = new
+        {
+            ok = steamOk,
+            paused_until = inventory.PausedUntil,
+            last_fetch_at = inventory.LastFetchAt,
+            last_fetch_status = inventory.LastFetchStatus,
+            waiting = inventory.Waiting,
+        },
+        game_coordinator = new { ok = gcOk, accounts, online },
+    }, statusCode: ok ? StatusCodes.Status200OK : StatusCodes.Status503ServiceUnavailable);
+});
 
 // The boot and shutdown lines below. A fixed category rather than app.Logger, whose category is
 // the application name: everything this app logs is then under CSGOSkinAPI.*, which is what makes
