@@ -178,6 +178,32 @@ public class SteamEgressQueueTests : IClassFixture<ApiFactory>, IDisposable
     }
 
     [Fact]
+    public async Task Health_ReportsTheCommitTheBuildWasMadeFrom()
+    {
+        // Built inside the repo, so the SDK stamped the commit; a deploy from an export passes it
+        // in explicitly. Either way /health is how anyone tells what is live.
+        var body = await EgressFixtures.ReadJson(await _factory.CreateClient().GetAsync("/health"));
+        Assert.Matches("^[0-9a-f]{40}$", body.GetProperty("revision").GetString());
+    }
+
+    [Fact]
+    public async Task Health_ReportsTheProcessMemory()
+    {
+        // The figures that tell live data from heap the GC is merely holding on to. Values depend
+        // on the test host, so only their presence and sanity are pinned here.
+        var body = await EgressFixtures.ReadJson(await _factory.CreateClient().GetAsync("/health"));
+        var memory = body.GetProperty("memory");
+        Assert.True(memory.GetProperty("working_set_mb").GetDouble() > 0);
+        Assert.True(memory.GetProperty("gc_committed_mb").GetDouble() > 0);
+        Assert.True(memory.GetProperty("gc_limit_mb").GetDouble() > 0);
+        foreach (var field in new[] { "gc_heap_mb", "gc_fragmented_mb" })
+        {
+            Assert.True(memory.GetProperty(field).GetDouble() >= 0, field);
+        }
+        Assert.Contains(memory.GetProperty("gc_server").ValueKind, new[] { JsonValueKind.True, JsonValueKind.False });
+    }
+
+    [Fact]
     public async Task QueueFull_Answers503Busy_WithoutFetching_AndTheQueuedOnesStillComplete()
     {
         var inFlightId = EgressFixtures.NextSteamId();

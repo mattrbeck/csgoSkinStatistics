@@ -14,6 +14,26 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
 
+  <!-- GC tuned for a small single-core host, where memory is the scarce thing and throughput is
+       set by Steam, not by us. Each of these can be overridden per host with the matching
+       DOTNET_gcServer / DOTNET_gcConcurrent / DOTNET_GCConserveMemory environment variable.
+       - Workstation GC. The Web SDK defaults to Server GC, which the runtime already ignores on a
+         single CPU; saying so here keeps that true if the host grows a core, and makes a dev machine
+         behave like production.
+       - No background (concurrent) GC. On one core it only competes with the requests it is meant
+         to keep responsive, and it costs a dedicated thread and extra memory to do so.
+       - ConserveMemory 5 lets the GC compact the large object heap once it is fragmented. The
+         Skinport refresh and big inventory pages are exactly the large, short-lived allocations
+         that leave it fragmented, and without compaction the process keeps that memory for good.
+       /health reports what the running process actually ended up with. -->
+  <PropertyGroup>
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+  </PropertyGroup>
+  <ItemGroup>
+    <RuntimeHostConfigurationOption Include="System.GC.ConserveMemory" Value="5" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.9" />
     <PackageReference Include="protobuf-net" Version="3.2.56" />

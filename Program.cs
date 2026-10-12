@@ -307,10 +307,25 @@ app.MapControllers();
 // For an external monitor. 200 while Steam is answering inventory fetches and at least one bot
 // account is logged in; 503 with the reason otherwise, so a plain "is it 200" check catches the
 // two ways this site silently degrades. Outside the "api" rate-limit policy on purpose (a monitor
-// polling every minute must never be the thing that gets throttled), and it discloses nothing a
-// viewer could not already infer from the inventory page.
+// polling every minute must never be the thing that gets throttled), and apart from the memory
+// block it discloses nothing a viewer could not already infer from the inventory page.
+//
+// The memory block is informational only - it never moves the status - and is here because this
+// runs on a small host, where how much the process holds, and how much of that is the GC keeping a
+// past high-water mark rather than live data, is the question that matters and otherwise needs a
+// shell on the server to answer. The gc_* heap figures are as of the last collection; gc_limit_mb
+// is what the GC believes it may use (the lower cgroup memory limit when one is set, else RAM).
+//
+// `revision` is the commit the running build was made from, so "what is live?" is a curl rather
+// than a guess. The SDK stamps it into the informational version ("1.0.0+<sha>") from the repo it
+// builds in, or from -p:SourceRevisionId when the deploy builds from an export with no .git.
+var buildRevision = typeof(Program).Assembly.GetCustomAttributes(inherit: false)
+    .OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion
+    .Split('+') is [_, var sha] ? sha : null;
 app.MapGet("/health", (SteamEgressGate egress, SteamService steam) =>
 {
+    static double Mb(long bytes) => Math.Round(bytes / 1048576.0, 1);
+    var gc = GC.GetGCMemoryInfo();
     var inventory = egress.Status;
     var (accounts, online) = steam.AccountStatus;
     var now = DateTimeOffset.UtcNow;
@@ -325,6 +340,7 @@ app.MapGet("/health", (SteamEgressGate egress, SteamService steam) =>
     return Results.Json(new
     {
         status = ok ? "ok" : "degraded",
+        revision = buildRevision,
         steam_inventory = new
         {
             ok = steamOk,
@@ -334,6 +350,17 @@ app.MapGet("/health", (SteamEgressGate egress, SteamService steam) =>
             waiting = inventory.Waiting,
         },
         game_coordinator = new { ok = gcOk, accounts, online },
+        memory = new
+        {
+            working_set_mb = Mb(Environment.WorkingSet),
+            gc_heap_mb = Mb(gc.HeapSizeBytes),
+            gc_fragmented_mb = Mb(gc.FragmentedBytes),
+            gc_committed_mb = Mb(gc.TotalCommittedBytes),
+            gc_limit_mb = Mb(gc.TotalAvailableMemoryBytes),
+            gc_server = System.Runtime.GCSettings.IsServerGC,
+            gc_latency_mode = System.Runtime.GCSettings.LatencyMode.ToString(),
+            gc_conserve_memory = AppContext.GetData("System.GC.ConserveMemory")?.ToString(),
+        },
     }, statusCode: ok ? StatusCodes.Status200OK : StatusCodes.Status503ServiceUnavailable);
 });
 
