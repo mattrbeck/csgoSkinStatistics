@@ -94,6 +94,10 @@ builder.Services.AddHttpClient("skinport")
     // seven times its current size - before a legitimate response were refused. Losing this feed
     // is not fatal either way (RefreshAsync keeps serving the last-known prices), but it is the
     // response most likely to be strangled by a careless limit, so the headroom is deliberate.
+    //
+    // PriceService streams both feeds rather than buffering them, and HttpClient only enforces this
+    // property on a buffered read - so PriceService.ReadFeedAsync reads the number back off the
+    // client and enforces it on the stream itself. It is still the one place the cap is set.
     .ConfigureHttpClient(client => client.MaxResponseContentBufferSize = 64 * 1024 * 1024)
     .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
     {

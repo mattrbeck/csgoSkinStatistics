@@ -255,14 +255,19 @@ namespace CSGOSkinAPI.Services
 
             const string upsert = @"INSERT OR REPLACE INTO prices (market_hash_name, min_cents, suggested_cents, updated_at)
                 VALUES (@name, @min, @suggested, @updated_at)";
-            var stamp = updatedAt.ToString("o");
+            // One command for the whole batch, its parameters rebound per row: a fresh command per
+            // row re-prepares the statement every time, which across a ~21k-row feed was most of
+            // this method's CPU and allocation.
+            using var command = new SqliteCommand(upsert, connection, transaction);
+            var nameParameter = command.Parameters.Add("@name", SqliteType.Text);
+            var minParameter = command.Parameters.Add("@min", SqliteType.Integer);
+            var suggestedParameter = command.Parameters.Add("@suggested", SqliteType.Integer);
+            command.Parameters.AddWithValue("@updated_at", updatedAt.ToString("o"));
             foreach (var (name, price) in prices)
             {
-                using var command = new SqliteCommand(upsert, connection, transaction);
-                command.Parameters.AddWithValue("@name", name);
-                command.Parameters.AddWithValue("@min", (object?)price.MinCents ?? DBNull.Value);
-                command.Parameters.AddWithValue("@suggested", (object?)price.SuggestedCents ?? DBNull.Value);
-                command.Parameters.AddWithValue("@updated_at", stamp);
+                nameParameter.Value = name;
+                minParameter.Value = (object?)price.MinCents ?? DBNull.Value;
+                suggestedParameter.Value = (object?)price.SuggestedCents ?? DBNull.Value;
                 await command.ExecuteNonQueryAsync();
             }
 
@@ -310,16 +315,21 @@ namespace CSGOSkinAPI.Services
             const string upsert = @"INSERT OR REPLACE INTO sale_prices
                 (market_hash_name, median_cents, volume, sale_window, pooled, updated_at)
                 VALUES (@name, @median, @volume, @window, @pooled, @updated_at)";
-            var stamp = updatedAt.ToString("o");
+            // One command, parameters rebound per row - see SavePricesAsync.
+            using var command = new SqliteCommand(upsert, connection, transaction);
+            var nameParameter = command.Parameters.Add("@name", SqliteType.Text);
+            var medianParameter = command.Parameters.Add("@median", SqliteType.Integer);
+            var volumeParameter = command.Parameters.Add("@volume", SqliteType.Integer);
+            var windowParameter = command.Parameters.Add("@window", SqliteType.Text);
+            var pooledParameter = command.Parameters.Add("@pooled", SqliteType.Integer);
+            command.Parameters.AddWithValue("@updated_at", updatedAt.ToString("o"));
             foreach (var (name, sale) in sales)
             {
-                using var command = new SqliteCommand(upsert, connection, transaction);
-                command.Parameters.AddWithValue("@name", name);
-                command.Parameters.AddWithValue("@median", sale.MedianCents);
-                command.Parameters.AddWithValue("@volume", sale.Volume);
-                command.Parameters.AddWithValue("@window", sale.Window);
-                command.Parameters.AddWithValue("@pooled", sale.Pooled ? 1 : 0);
-                command.Parameters.AddWithValue("@updated_at", stamp);
+                nameParameter.Value = name;
+                medianParameter.Value = sale.MedianCents;
+                volumeParameter.Value = sale.Volume;
+                windowParameter.Value = sale.Window;
+                pooledParameter.Value = sale.Pooled ? 1 : 0;
                 await command.ExecuteNonQueryAsync();
             }
 

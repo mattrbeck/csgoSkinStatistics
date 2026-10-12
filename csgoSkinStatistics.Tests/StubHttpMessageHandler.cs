@@ -85,6 +85,76 @@ public sealed class StubHttpMessageHandler : HttpMessageHandler
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = content };
         });
 
+    // As above, but the endless body is a well-formed JSON array: `row` repeated until at least
+    // `bytes` have gone out, then closed. For a caller that parses as it reads (PriceService streams
+    // the Skinport feeds), filler would fail the parse on its first byte and pass a cap test without
+    // the cap ever being reached; this one only fails on size. Finite, so a missing cap shows up as
+    // a successful parse rather than a hang.
+    public StubHttpMessageHandler RespondOversizedJsonArrayWithoutLength(string urlContains, long bytes, string row)
+        => Respond(urlContains, () =>
+        {
+            var content = new StreamContent(new RepeatedJsonArrayStream(Encoding.UTF8.GetBytes(row), bytes));
+            content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+            content.Headers.ContentLength = null;
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = content };
+        });
+
+    // "[" row "," row "," ... row "]", at least minBytes long, produced as it is read.
+    private sealed class RepeatedJsonArrayStream : Stream
+    {
+        private readonly IEnumerator<byte[]> _chunks;
+        private byte[] _chunk = [];
+        private int _position;
+
+        public RepeatedJsonArrayStream(byte[] row, long minBytes) => _chunks = Chunks(row, minBytes).GetEnumerator();
+
+        private static IEnumerable<byte[]> Chunks(byte[] row, long minBytes)
+        {
+            byte[] rowAndComma = [.. row, (byte)','];
+            yield return "["u8.ToArray();
+            for (long produced = 1; produced < minBytes; produced += rowAndComma.Length)
+            {
+                yield return rowAndComma;
+            }
+            yield return [.. row, (byte)']'];
+        }
+
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public override void Flush() { }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            var written = 0;
+            while (written < count)
+            {
+                if (_position == _chunk.Length)
+                {
+                    if (!_chunks.MoveNext()) break;
+                    _chunk = _chunks.Current;
+                    _position = 0;
+                }
+                var take = Math.Min(count - written, _chunk.Length - _position);
+                Array.Copy(_chunk, _position, buffer, offset + written, take);
+                _position += take;
+                written += take;
+            }
+            return written;
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
     // Yields `length` bytes of filler and then ends. Non-seekable so StreamContent cannot compute a
     // length from it, which is the whole point.
     private sealed class EndlessStream(long length) : Stream

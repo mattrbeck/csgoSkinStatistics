@@ -281,31 +281,53 @@ namespace CSGOSkinAPI.Services
         public static (int MedianCents, int Volume, string Window, bool Pooled)? ChooseSale(
             IReadOnlyList<SkinportSalesItem> rows)
         {
-            (int MedianCents, int Volume, string Window, bool Pooled)? fallback = null;
-
-            foreach (var (label, select) in SaleWindows)
+            var pool = new SalePool();
+            foreach (var row in rows)
             {
-                double weighted = 0;
-                var volume = 0;
-                var contributors = 0;
-                foreach (var row in rows)
-                {
-                    var window = select(row);
-                    if (window == null || window.volume <= 0 || window.median is not > 0) continue;
-                    weighted += window.median.Value * window.volume;
-                    volume += window.volume;
-                    contributors++;
-                }
-                if (volume == 0) continue;
+                pool.Add(row);
+            }
+            return pool.Choose();
+        }
 
-                var candidate = ((int)Math.Round(weighted / volume * 100), volume, label, contributors > 1);
-                if (volume >= MinConfidentVolume) return candidate;
-                // Too thin to trust on its own; remember it and try the next (wider) window, which
-                // contains it and can only be better sampled.
-                fallback = candidate;
+        // ChooseSale's running totals for one market_hash_name, so the refresh can fold each feed
+        // row in as it streams past instead of holding all ~37k rows to group them afterwards. Rows
+        // are summed in feed order, so the result is bit-for-bit what summing a grouped list gives.
+        private sealed class SalePool
+        {
+            private readonly (double Weighted, int Volume, int Contributors)[] _windows =
+                new (double, int, int)[SaleWindows.Length];
+
+            public void Add(SkinportSalesItem row)
+            {
+                for (var i = 0; i < SaleWindows.Length; i++)
+                {
+                    var window = SaleWindows[i].Select(row);
+                    if (window == null || window.volume <= 0 || window.median is not > 0) continue;
+                    ref var totals = ref _windows[i];
+                    totals.Weighted += window.median.Value * window.volume;
+                    totals.Volume += window.volume;
+                    totals.Contributors++;
+                }
             }
 
-            return fallback;
+            public (int MedianCents, int Volume, string Window, bool Pooled)? Choose()
+            {
+                (int MedianCents, int Volume, string Window, bool Pooled)? fallback = null;
+
+                for (var i = 0; i < SaleWindows.Length; i++)
+                {
+                    var (weighted, volume, contributors) = _windows[i];
+                    if (volume == 0) continue;
+
+                    var candidate = ((int)Math.Round(weighted / volume * 100), volume, SaleWindows[i].Label, contributors > 1);
+                    if (volume >= MinConfidentVolume) return candidate;
+                    // Too thin to trust on its own; remember it and try the next (wider) window, which
+                    // contains it and can only be better sampled.
+                    fallback = candidate;
+                }
+
+                return fallback;
+            }
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -429,7 +451,7 @@ namespace CSGOSkinAPI.Services
             try
             {
                 var client = httpClientFactory.CreateClient("skinport");
-                using var response = await client.GetAsync(ItemsUrl, cancellationToken);
+                using var response = await client.GetAsync(ItemsUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
                 if ((int)response.StatusCode == 429)
                 {
                     // Two templates rather than one with a spliced-in fragment: Retry-After is
@@ -450,28 +472,33 @@ namespace CSGOSkinAPI.Services
                 }
                 response.EnsureSuccessStatusCode();
 
-                var items = await response.Content.ReadFromJsonAsync<List<SkinportItem>>(cancellationToken);
-                if (items == null || items.Count == 0)
+                static int? Cents(double? price) => price is double p ? (int)Math.Round(p * 100) : null;
+
+                // Rows are folded in as they arrive rather than read into a list first: see
+                // ReadFeedAsync. Nothing is published until the whole feed has parsed, so a body
+                // that breaks off halfway leaves the current prices exactly as they were.
+                var rows = 0;
+                var fed = new Dictionary<string, (int?, int?)>(StringComparer.Ordinal);
+                await foreach (var item in ReadFeedAsync<SkinportItem>(client, response, cancellationToken))
+                {
+                    rows++;
+                    if (item == null || string.IsNullOrEmpty(item.market_hash_name)) continue;
+                    fed[item.market_hash_name] = (Cents(item.min_price), Cents(item.suggested_price));
+                }
+                if (rows == 0)
                 {
                     logger.LogWarning("Skinport returned no items; keeping current prices.");
                     return RefreshOutcome.Failed;
                 }
-
-                static int? Cents(double? price) => price is double p ? (int)Math.Round(p * 100) : null;
 
                 var now = DateTime.UtcNow;
                 // Merge over the existing map rather than replacing it: feed items are refreshed to
                 // `now`, and items no longer in the feed keep their last value + older timestamp so
                 // they can still be shown (approximate once over a week old).
                 var merged = new Dictionary<string, SkinPrice>(_prices, StringComparer.Ordinal);
-                var fed = new Dictionary<string, (int?, int?)>(items.Count, StringComparer.Ordinal);
-                foreach (var item in items)
+                foreach (var (name, (min, suggested)) in fed)
                 {
-                    if (string.IsNullOrEmpty(item.market_hash_name)) continue;
-                    var min = Cents(item.min_price);
-                    var suggested = Cents(item.suggested_price);
-                    merged[item.market_hash_name] = new SkinPrice(min, suggested, now);
-                    fed[item.market_hash_name] = (min, suggested);
+                    merged[name] = new SkinPrice(min, suggested, now);
                 }
 
                 _prices = merged;
@@ -500,7 +527,7 @@ namespace CSGOSkinAPI.Services
             try
             {
                 var client = httpClientFactory.CreateClient("skinport");
-                using var response = await client.GetAsync(SalesUrl, cancellationToken);
+                using var response = await client.GetAsync(SalesUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
                 if ((int)response.StatusCode == 429)
                 {
                     logger.LogWarning(
@@ -509,35 +536,36 @@ namespace CSGOSkinAPI.Services
                 }
                 response.EnsureSuccessStatusCode();
 
-                var rows = await response.Content.ReadFromJsonAsync<List<SkinportSalesItem>>(cancellationToken);
-                if (rows == null || rows.Count == 0)
+                // Pool as we go: a market_hash_name can span several rows (Doppler phases, gem
+                // tiers), and ChooseSale's running totals take them one at a time, so no row has to
+                // outlive its own parse.
+                var rows = 0;
+                var pools = new Dictionary<string, SalePool>(StringComparer.Ordinal);
+                await foreach (var row in ReadFeedAsync<SkinportSalesItem>(client, response, cancellationToken))
+                {
+                    rows++;
+                    if (row == null || string.IsNullOrEmpty(row.market_hash_name)) continue;
+                    if (!pools.TryGetValue(row.market_hash_name, out var pool))
+                    {
+                        pools[row.market_hash_name] = pool = new SalePool();
+                    }
+                    pool.Add(row);
+                }
+                if (rows == 0)
                 {
                     logger.LogWarning("Skinport sales history returned no items; keeping current sale medians.");
                     return;
                 }
 
-                // Group first: a market_hash_name can span several rows (Doppler phases, gem
-                // tiers), and ChooseSale pools them.
-                var grouped = new Dictionary<string, List<SkinportSalesItem>>(StringComparer.Ordinal);
-                foreach (var row in rows)
-                {
-                    if (string.IsNullOrEmpty(row.market_hash_name)) continue;
-                    if (!grouped.TryGetValue(row.market_hash_name, out var list))
-                    {
-                        grouped[row.market_hash_name] = list = [];
-                    }
-                    list.Add(row);
-                }
-
                 var now = DateTime.UtcNow;
                 var merged = new Dictionary<string, SaleStat>(_sales, StringComparer.Ordinal);
                 var observed = new Dictionary<string, (int, int, string, bool)>(StringComparer.Ordinal);
-                foreach (var (name, group) in grouped)
+                foreach (var (name, pool) in pools)
                 {
                     // No sales in any window: leave whatever we already had for this name in place.
                     // That is the whole point of the index - the rarely-traded items are exactly the
                     // ones the feed stops reporting.
-                    if (ChooseSale(group) is not { } chosen) continue;
+                    if (pool.Choose() is not { } chosen) continue;
                     merged[name] = new SaleStat(chosen.MedianCents, chosen.Volume, chosen.Window, chosen.Pooled, now);
                     observed[name] = (chosen.MedianCents, chosen.Volume, chosen.Window, chosen.Pooled);
                 }
@@ -552,6 +580,81 @@ namespace CSGOSkinAPI.Services
             catch (Exception ex)
             {
                 logger.LogError(ex, "Failed to refresh Skinport sales history");
+            }
+        }
+
+        // What ReadFromJsonAsync would have used, so streaming changes nothing about how a row parses.
+        private static readonly JsonSerializerOptions FeedJsonOptions = new(JsonSerializerDefaults.Web);
+
+        // Yields a feed's top-level array one row at a time as the body arrives. The feeds are ~9 MB
+        // (items) and ~20 MB (sales) decompressed; buffering one, then materializing every row,
+        // allocated ~54 MB per refresh on a small host, and the heap kept that high-water mark long
+        // after the refresh was done. Streamed, the only thing that grows is the per-name result.
+        //
+        // The price of streaming is that HttpClient's MaxResponseContentBufferSize - set on the
+        // "skinport" client in Program.cs - only ever applied to a buffered read, so it is enforced
+        // here instead, against the same number read off the client: a declared Content-Length over
+        // it is refused before a byte is read, and a body without one is cut off once it passes it.
+        private static async IAsyncEnumerable<T?> ReadFeedAsync<T>(HttpClient client, HttpResponseMessage response,
+            [EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            var cap = client.MaxResponseContentBufferSize;
+            if (response.Content.Headers.ContentLength > cap)
+            {
+                throw new HttpRequestException(
+                    $"Response declares {response.Content.Headers.ContentLength} bytes, over the {cap}-byte cap.");
+            }
+
+            await using var body = new CappedReadStream(await response.Content.ReadAsStreamAsync(cancellationToken), cap);
+            await foreach (var row in JsonSerializer.DeserializeAsyncEnumerable<T>(body, FeedJsonOptions, cancellationToken))
+            {
+                yield return row;
+            }
+        }
+
+        // A read-only pass-through that throws once more than maxBytes have come through it.
+        private sealed class CappedReadStream(Stream inner, long maxBytes) : Stream
+        {
+            private long _read;
+
+            public override bool CanRead => true;
+            public override bool CanSeek => false;
+            public override bool CanWrite => false;
+            public override long Length => throw new NotSupportedException();
+            public override long Position
+            {
+                get => throw new NotSupportedException();
+                set => throw new NotSupportedException();
+            }
+
+            public override int Read(byte[] buffer, int offset, int count) =>
+                Count(inner.Read(buffer, offset, count));
+
+            public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
+                Count(await inner.ReadAsync(buffer, cancellationToken));
+
+            public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+                ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+
+            private int Count(int read)
+            {
+                _read += read;
+                if (_read > maxBytes)
+                {
+                    throw new HttpRequestException($"Response passed the {maxBytes}-byte cap.");
+                }
+                return read;
+            }
+
+            public override void Flush() { }
+            public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+            public override void SetLength(long value) => throw new NotSupportedException();
+            public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+            protected override void Dispose(bool disposing)
+            {
+                if (disposing) inner.Dispose();
+                base.Dispose(disposing);
             }
         }
     }

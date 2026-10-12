@@ -9,12 +9,13 @@ using Xunit;
 
 namespace csgoSkinStatistics.Tests.Services;
 
-// Every outbound call this app makes is buffered whole into memory before the caller sees it
-// (HttpCompletionOption.ResponseContentRead, the default), so an upstream that answers with an
-// unbounded body could exhaust the host. Program.cs caps that per named client:
-// MaxResponseContentBufferSize of 32 MB on "steam" and 64 MB on "skinport". These tests pin both
-// numbers *and* what happens when one is hit - which has to be an ordinary upstream failure on
-// every path, never a 500 and never a stopped background loop.
+// Every outbound call this app makes either buffers the whole body (HttpCompletionOption
+// .ResponseContentRead, the default) or, for the Skinport feeds, parses it as it streams in - so an
+// upstream that answers with an unbounded body could exhaust the host. Program.cs caps that per
+// named client: MaxResponseContentBufferSize of 32 MB on "steam" and 64 MB on "skinport" (which
+// PriceService enforces on its stream, since HttpClient only applies it to buffered reads). These
+// tests pin both numbers *and* what happens when one is hit - which has to be an ordinary upstream
+// failure on every path, never a 500 and never a stopped background loop.
 //
 // Everything here runs through the real host, so the caps under test are the production ones rather
 // than something the test configured for itself. Remove either ConfigureHttpClient line in
@@ -199,6 +200,27 @@ public class ResponseSizeLimitTests(ApiFactory factory) : IClassFixture<ApiFacto
         Assert.NotNull(resolved);
         Assert.Equal(125050, resolved.SuggestedCents);
         // Untouched: a refused feed is not a refresh, so the "last updated" stamp must not move.
+        Assert.Equal(before, prices.UpdatedAtUtc);
+    }
+
+    [Fact]
+    public async Task OversizeSkinportFeedWithNoContentLength_IsStillStoppedMidStream()
+    {
+        // The Skinport feeds are streamed, not buffered, so HttpClient's own cap never sees them;
+        // PriceService.ReadFeedAsync enforces it on the stream. The body is a valid feed of one
+        // repeated row - a real price, deliberately different from the seeded one - so with the
+        // cap gone it would parse, publish, and move both the price and the timestamp.
+        var prices = _factory.Services.GetRequiredService<PriceService>();
+        var before = prices.UpdatedAtUtc;
+        Assert.NotNull(before);
+
+        _factory.Http.RespondOversizedJsonArrayWithoutLength("api.skinport.com", OverSkinportCap,
+            """{"market_hash_name":"AK-47 | Fire Serpent (Field-Tested)","min_price":1.00,"suggested_price":1.00}""");
+        await prices.RefreshAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(60));
+
+        var resolved = prices.Resolve("AK-47 | Fire Serpent (Field-Tested)");
+        Assert.NotNull(resolved);
+        Assert.Equal(125050, resolved.SuggestedCents);
         Assert.Equal(before, prices.UpdatedAtUtc);
     }
 
