@@ -204,7 +204,7 @@ namespace CSGOSkinAPI.Controllers
                 }
 
                 // Owned by this caller (see SteamInventoryDocument.FetchAsync): the body is already
-                // buffered, and nothing below reads the response past ReadAsStringAsync, so the
+                // buffered, and nothing below reads the response past SteamInventoryDocument.TryParse, so the
                 // `using` frees the buffered content at the end of this block without shortening a
                 // lifetime anything still needs. The lease is released the moment the bytes are in
                 // hand - parsing and pricing them needs no gate.
@@ -258,8 +258,10 @@ namespace CSGOSkinAPI.Controllers
                         $"Failed to fetch inventory: {response.StatusCode}", NegativeInventoryCacheTtl);
                 }
 
-                var jsonContent = await response.Content.ReadAsStringAsync();
-                if (string.IsNullOrEmpty(jsonContent))
+                // FetchAsync buffered the whole body, so this is a read-only view over that buffer -
+                // no copy - and seekable, which is what makes Length safe to ask.
+                using var jsonContent = await response.Content.ReadAsStreamAsync();
+                if (jsonContent.Length == 0)
                 {
                     return CacheInventoryFailure(cacheKey, StatusCodes.Status400BadRequest,
                         "Empty response from Steam API", NegativeInventoryCacheTtl);

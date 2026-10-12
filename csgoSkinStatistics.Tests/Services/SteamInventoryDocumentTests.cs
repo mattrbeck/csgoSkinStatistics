@@ -53,11 +53,14 @@ public class SteamInventoryDocumentTests(ITestOutputHelper output)
     private static SteamAssetProperties CertProperty(string assetid, string hex) =>
         new() { assetid = assetid, asset_properties = [new SteamAssetProperty { propertyid = 6, string_value = hex }] };
 
+    // TryParse reads UTF-8 bytes, which is what production hands it straight off the response.
+    private static MemoryStream Utf8(string json) => new(Encoding.UTF8.GetBytes(json));
+
     private static SteamInventoryDocument Parse(SteamInventoryResponse inventory)
     {
         // Round-tripped through JSON rather than handed the object graph, so these tests exercise
         // the same entry point production does.
-        var document = SteamInventoryDocument.TryParse(JsonSerializer.Serialize(inventory));
+        var document = SteamInventoryDocument.TryParse(Utf8(JsonSerializer.Serialize(inventory)));
         Assert.NotNull(document);
         return document;
     }
@@ -89,7 +92,7 @@ public class SteamInventoryDocumentTests(ITestOutputHelper output)
     [MemberData(nameof(UnusableBodies))]
     public void TryParse_BodyWithoutBothArrays_IsNotAnInventory(string body)
     {
-        Assert.Null(SteamInventoryDocument.TryParse(body));
+        Assert.Null(SteamInventoryDocument.TryParse(Utf8(body)));
     }
 
     [Fact]
@@ -99,7 +102,7 @@ public class SteamInventoryDocumentTests(ITestOutputHelper output)
         // different event from "Steam sent an inventory we cannot use", and they handle it
         // differently (the endpoint answers 400 from its JsonException catch, the warmer lets its
         // drain loop log it). Swallowing it here would silently merge the two.
-        Assert.Throws<JsonException>(() => SteamInventoryDocument.TryParse("<html>502 Bad Gateway</html>"));
+        Assert.Throws<JsonException>(() => SteamInventoryDocument.TryParse(Utf8("<html>502 Bad Gateway</html>")));
     }
 
     [Fact]
@@ -440,8 +443,8 @@ public class SteamInventoryDocumentTests(ITestOutputHelper output)
     {
         const int small = 1000;
         const int large = 4000;
-        var smallDocument = SteamInventoryDocument.TryParse(ScalingInventory(small));
-        var largeDocument = SteamInventoryDocument.TryParse(ScalingInventory(large));
+        var smallDocument = SteamInventoryDocument.TryParse(Utf8(ScalingInventory(small)));
+        var largeDocument = SteamInventoryDocument.TryParse(Utf8(ScalingInventory(large)));
         Assert.NotNull(smallDocument);
         Assert.NotNull(largeDocument);
 

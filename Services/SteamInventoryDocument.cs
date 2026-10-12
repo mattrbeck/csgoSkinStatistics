@@ -111,9 +111,13 @@ namespace CSGOSkinAPI.Services
         // missing either array has nothing to stitch. Malformed JSON throws JsonException, which
         // each caller already handles its own way (the endpoint turns it into a 400, the warmer
         // lets its drain loop log it), so it is deliberately not swallowed here.
-        internal static SteamInventoryDocument? TryParse(string json)
+        //
+        // Takes the body as UTF-8 bytes, not a string. A page can run to ~6 MB, and reading it with
+        // ReadAsStringAsync built a second, UTF-16 copy twice that size on the large object heap -
+        // only for the serializer to transcode it straight back to UTF-8.
+        internal static SteamInventoryDocument? TryParse(Stream utf8Json)
         {
-            var response = JsonSerializer.Deserialize<SteamInventoryResponse>(json);
+            var response = JsonSerializer.Deserialize<SteamInventoryResponse>(utf8Json);
             if (response?.assets == null || response.descriptions == null)
             {
                 return null;

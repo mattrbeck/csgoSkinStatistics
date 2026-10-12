@@ -123,8 +123,8 @@ namespace CSGOSkinAPI.Services
             // deserialize, the two per-asset indexes and the walk over inspectable assets are the
             // same work for both, and the description lookup inside it is a dictionary hit rather
             // than the per-asset scan of the descriptions array this method used to do.
-            var document = SteamInventoryDocument.TryParse(
-                await response.Content.ReadAsStringAsync(cancellationToken));
+            using var body = await response.Content.ReadAsStreamAsync(cancellationToken);
+            var document = SteamInventoryDocument.TryParse(body);
             if (document == null)
             {
                 logger.LogDebug("Inventory warm for {SteamId}: empty or invalid inventory", steamid);
